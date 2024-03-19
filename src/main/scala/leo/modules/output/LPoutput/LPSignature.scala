@@ -14,7 +14,7 @@ object LPSignature {
   val HOLtop: String = "⊤"
   val HOLbot: String = "⊥"
   val Prop: String = "Prop"
-  val lnot: String = "¬"
+  val lnot: String = "¬"                      //
   val equ: String = "eq"
   val inEqu: String = "inEq"
   val oType: String = "o"
