@@ -6,6 +6,7 @@ import leo.datastructures._
 import leo.modules.HOLSignature.{LitTrue, o}
 import leo.modules.output.{SZS_CounterTheorem, SZS_EquiSatisfiable, SZS_Theorem}
 
+import scala.:+
 import scala.annotation.tailrec
 
 ////////////////////////////////////////////////////////////////
@@ -150,6 +151,20 @@ object BoolExt extends CalculusRule {
       transformed = transformed.map(_ ++ nu._1) union transformed.map(_ ++ nu._2)
     }
     transformed.map(c => Clause.apply(c, cl.implicitlyBound, cl.typeVars)) //TODO CHECK THIS
+  }
+
+  final def apply_withLP(cl: Clause, extLits: ExtLits, otherLits: OtherLits): (Set[Clause], Set[Seq[(Literal, ExtLits)]]) = {
+    var transformed = Set(otherLits)
+    // track what literals were transformed in what way
+    var additionalInfo: Set[Seq[(Literal, ExtLits)]] = Set.empty
+    val extIt = extLits.iterator
+    while (extIt.hasNext) {
+      val extLit = extIt.next()
+      val nu = apply(extLit)
+      transformed = transformed.map(_ ++ nu._1) union transformed.map(_ ++ nu._2)
+      additionalInfo = additionalInfo.map(_ :+ (extLit, nu._1)) union additionalInfo.map(_ :+ (extLit, nu._2))
+    }
+    (transformed.map(c => Clause.apply(c, cl.implicitlyBound, cl.typeVars)), additionalInfo) //TODO CHECK THIS
   }
 
   final def apply(l: Literal): (ExtLits, ExtLits) = {
@@ -523,6 +538,31 @@ object OrderedEqFac extends CalculusRule {
 
     val newlitsSimp = Simp.shallowSimp(lits_without_maxLit)(sig):+ unification_task1 :+ unification_task2
     Clause(newlitsSimp)
+  }
+
+  final def apply_LPenc (cl: Clause, maxLitIndex: Int, maxLitSide: Side,
+                  withLitIndex: Int, withLitSide: Side)(implicit sig: Signature): (Clause, Literal, Literal, Boolean) = {
+    // the only difference to the original is that I here return the unification constratings as well as the bool ture if they were simplified
+    assert(cl.lits.isDefinedAt(maxLitIndex))
+    assert(cl.lits.isDefinedAt(withLitIndex))
+    assert(maxLitIndex != withLitIndex)
+
+    val maxLit = cl.lits(maxLitIndex)
+    val withLit = cl.lits(withLitIndex)
+    assert(maxLit.polarity == withLit.polarity)
+
+    val (maxLitSide1, maxLitSide2) = Literal.getSidesOrdered(maxLit, maxLitSide)
+    val (withLitSide1, withLitSide2) = Literal.getSidesOrdered(withLit, withLitSide)
+
+    /* We cannot delete an element from the list, thats way we replace it by a trivially false literal,
+    * that is later eliminated using Simp. */
+    val lits_without_maxLit = cl.lits.updated(maxLitIndex, Literal.mkLit(LitTrue(), false))
+    val unification_task1: Literal = Literal.mkNegOrdered(maxLitSide1, withLitSide1)(sig)
+    val unification_task2: Literal = Literal.mkNegOrdered(maxLitSide2, withLitSide2)(sig)
+
+    val newlitsSimp = Simp.shallowSimp(lits_without_maxLit)(sig) :+ unification_task1 :+ unification_task2
+    val wasSimplified = (newlitsSimp == lits_without_maxLit)
+    (Clause(newlitsSimp),unification_task1,unification_task2,wasSimplified)
   }
 
 

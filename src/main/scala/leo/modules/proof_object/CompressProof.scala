@@ -56,6 +56,6 @@ object CompressProof {
   }
 
   def compressAnnotation(cl : AnnotatedClause)(compress : AnnotatedClause => ClauseAnnotation) : AnnotatedClause = {
-    new AnnotatedClause(cl.id, cl.cl, cl.role, compress(cl),cl.properties)
+    new AnnotatedClause(cl.id, cl.cl, cl.role, compress(cl),cl.properties, new FurtherInfo())
   }
 }

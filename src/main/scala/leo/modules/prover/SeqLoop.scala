@@ -7,6 +7,7 @@ import leo.modules.{SZSOutput, SZSResult, myAssert}
 import leo.modules.control.Control
 import leo.modules.input.ProblemStatistics
 import leo.modules.output._
+import leo.modules.output.LPoutput.LPoutput._
 
 /**
   * Sequential proof procedure.
@@ -370,6 +371,10 @@ object SeqLoop {
   }
 
   final def printResult(state: LocalState, startTime: Long, startTimeWOParsing: Long): Unit = {
+
+    // copy state so I can use it for experiments ¡remove!
+
+
     implicit val sig: Signature = state.signature
     /////////////////////////////////////////
     // All finished, print result
@@ -474,6 +479,9 @@ object SeqLoop {
           Out.warn(e.toString)
       }
     }
+
+    dosomething(state)
+
   }
 
   @inline final def prematureCancel(counter: Long): Boolean = {

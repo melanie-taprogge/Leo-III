@@ -90,7 +90,7 @@ object Normalization {
         val (ca2, bELits, otherLits2) = BoolExt.canApply(funcCl)
         val boolExtCls = if (ca2) {
           changed = true
-          BoolExt(funcCl, bELits, otherLits2)
+          BoolExt(funcCl, bELits, otherLits2) //todo: apply encoding of bool ext
         } else Set(funcCl)
 
 //        println(s"  After boolExt\n    ${boolExtCls.map(c => c.pretty(sig)).mkString("\n    ")}")
