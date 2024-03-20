@@ -36,13 +36,6 @@ object LPSignature {
   val npp_ax: String = s"symbol $npp_name : $Pi x: $Els($uparrow $oType), $Prf ($lnot ($lnot x)) $rightarrow $Prf x;"
   val propExt_name: String = "propExt"
 
-  val tptpDefinedTypeMap: Map[String, String] = Map(
-    "$o" -> oType,
-    "$i" -> iType)
-
-  val tptpDefinedSymbolMap: Map[String, String] = Map(
-    "$false" -> HOLbot,
-    "$true" -> HOLtop)
 
 
 }

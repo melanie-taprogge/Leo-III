@@ -10,12 +10,24 @@ object lpDatastructures {
     def pretty: String
   }
 
-  case class lpDeclaration(name: lpConstantTerm, typing: lpMlType) extends lpStatement{
-    override def pretty: String = s"symbol ${name.pretty}: ${typing.pretty};\n"
+  case class lpDeclaration(name: lpConstantTerm, variables: Seq[lpTypedVar], typing: lpType) extends lpStatement{
+    override def pretty: String = {
+      if (variables.isEmpty){
+        s"symbol ${name.pretty}: ${typing.pretty};\n"
+      } else {
+        s"symbol ${name.pretty} ${variables.map(var0 => s"(${var0.name.pretty} : ${var0.ty.lift2Meta.pretty})").mkString(" ")}: ${typing.pretty};\n"
+      }
+    }
   }
 
-  case class lpDefinition(name: lpConstantTerm, typing: lpMlType, lambdaTerm: lpTerm) extends lpStatement {
-    override def pretty: String = s"symbol ${name.pretty}: ${typing.pretty} ≔\n${lambdaTerm.pretty};"
+  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTypedVar], typing: lpMlType, lambdaTerm: lpTerm) extends lpStatement {
+    override def pretty: String = {
+      if (variables.isEmpty){
+        s"symbol ${name.pretty} ${variables.map(var0 => s"(${var0.name.pretty} : ${var0.ty.lift2Meta.pretty})").mkString(" ")}: ${typing.pretty} ≔\n${lambdaTerm.pretty};"
+      }else{
+      s"symbol ${name.pretty}: ${typing.pretty} ≔\n${lambdaTerm.pretty};"
+    }
+    }
   }
 
   case class lpRule(symbol: lpTerm, variableIdentifier: Seq[lpRuleVariable], lambdaTerm: lpTerm) extends lpStatement {
@@ -47,28 +59,39 @@ object lpDatastructures {
 
   ////////////////////////// META LOGIC TYPES
 
-  abstract class lpMlType extends lpTerm {
+  abstract class lpType extends lpTerm{
+    def lift2Meta: lpMlType
+  }
+  abstract class lpMlType extends lpType {
     def pretty: String
   }
 
   case object lpMetaType extends lpMlType {
     override def pretty: String = "TYPE"
+
+    //change nothing when lifting to meta type
+    override def lift2Meta: lpMlType = lpMetaType
   }
 
   case class lpMlDependType(vars: Seq[lpTypedVar], body: lpMlType) extends lpMlType {
     override def pretty: String = {
       s"(${lpPi.pretty} ${vars.map(name_ty => s"(${name_ty.pretty} : ${name_ty.ty.pretty})").mkString(s", ${lpPi.pretty}")}, ${body.pretty})"
     }
+    //change nothing when lifting to meta type
+    override def lift2Meta: lpMlType = lpMlDependType(vars, body)
   }
 
   case class lpMlFunctionType(objects :Seq[lpMlType]) extends lpMlType {
     override def pretty: String = {
       objects.map(ty => ty.pretty).mkString(s" ${lpArrow.pretty} ")
     }
+
+    //change nothing when lifting to meta type
+    override def lift2Meta: lpMlType = lpMlFunctionType(objects)
   }
 
   ////////////////////////// META LOGIC TERMS
-  case class lpTypedVar(name: lpConstantTerm, ty: lpMlType) extends lpTerm {
+  case class lpTypedVar(name: lpConstantTerm, ty: lpType) extends lpTerm {
     override def pretty: String = name.pretty
   }
 
@@ -90,25 +113,44 @@ object lpDatastructures {
   ////////////////////////// OBJECT LOGIC TYPES
 
   ///////////// CONSTANTS
-  abstract class lpOlTypeConstants extends lpConstants
-  case object lpOlTypeConstructor extends lpOlTypeConstants {override def pretty: String = "⤳"}
-  case object lpSet extends lpOlTypeConstants {override def pretty: String = "Set"}
-  case object lpScheme extends lpOlTypeConstants {override def pretty: String = "Scheme"}
-  case object lpPrf extends lpOlTypeConstants {override def pretty: String = "Prf"}
-  case object lpSet2Schme extends lpOlTypeConstants {override def pretty: String = "↑"}
-  case object lpEl extends lpMlType {override def pretty: String = "El"}
-  case object lpEls extends lpMlType {override def pretty: String = "Els"}
+  abstract class lpOlTypeConstants extends lpType
+  case object lpOlTypeConstructor extends lpOlTypeConstants {
+    override def pretty: String = "⤳"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpOlTypeConstructor.pretty} to meta level")
+  }
+  case object lpSet extends lpOlTypeConstants {
+    override def pretty: String = "Set"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpSet.pretty} to meta level")
+  }
+  case object lpScheme extends lpOlTypeConstants {
+    override def pretty: String = "Scheme"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpScheme.pretty} to meta level")
+  }
+  case object lpPrf extends lpOlTypeConstants {
+    override def pretty: String = "Prf"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpPrf.pretty} to meta level")
+  }
+  case object lpSet2Schme extends lpOlTypeConstants {
+    override def pretty: String = "↑"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpScheme.pretty} to meta level")
+  }
+  case object lpEl extends lpMlType {
+    override def pretty: String = "El"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpEl.pretty} to meta level")
+  }
+  case object lpEls extends lpMlType {
+    override def pretty: String = "Els"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpEls.pretty} to meta level")
+  }
 
 
   ///////////// TYPES
   //todo: Polymorphy
-  abstract class lpOlType extends lpTerm {
-    def lift2Meta: lpMlType
-  }
-  abstract class lpOlPolyType extends lpOlType
-  abstract class lpOlMonoType extends lpOlType {
+  abstract class lpOlType extends lpType {
     def lift2Poly: lpOlPolyType
   }
+  abstract class lpOlPolyType extends lpOlType
+  abstract class lpOlMonoType extends lpOlType
 
   case class lpliftedObjectType(ty: lpOlType) extends lpMlType {
     def pretty: String = {
@@ -118,6 +160,8 @@ object lpDatastructures {
         case _ => throw new Exception(s"failed to print lpliftedObjectType, $ty has wrong format")
       }
     }
+    // change nothing when encoding as meta type
+    override def lift2Meta: lpMlType = lpliftedObjectType(ty)
   }
   case class lpliftedMonoType(ty: lpOlMonoType) extends lpOlPolyType {
     def pretty: String = {
@@ -125,6 +169,10 @@ object lpDatastructures {
     }
     override def lift2Meta: lpMlType = {
       lpliftedObjectType(lpliftedMonoType(ty))
+    }
+    override def lift2Poly: lpOlPolyType = {
+      // changes nothing
+      lpliftedMonoType(ty)
     }
   }
 
@@ -144,17 +192,31 @@ object lpDatastructures {
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType("ι"))
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpItype)
   }
-  case class lpOlFunctionType(args: Seq[lpOlMonoType]) extends lpOlMonoType {
+  val tptpDefinedTypeMap: Map[String, lpOlMonoType] = Map(
+    "$o" -> lpOtype,
+    "$i" -> lpItype)
+
+  case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlMonoType {
     def pretty: String = s"(${args.map(t => t.pretty).mkString(s" ${lpOlTypeConstructor.pretty} ")})"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlFunctionType(args))
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOlFunctionType(args))
+  }
+
+  case class lpOlMonoComposedType(name: lpConstantTerm, args: Seq[lpType]) extends lpOlMonoType { //todo ?
+    def pretty: String = s"(${name.pretty} ${args.map(arg => arg.pretty).mkString(" ")})"
+    override def lift2Meta: lpMlType = lpliftedObjectType(lpOlMonoComposedType(name, args))
+
+    override def lift2Poly: lpOlPolyType = {
+      // changes nothing
+      lpliftedMonoType(lpOlMonoComposedType(name, args))
+    }
   }
 
 
   ////////////////////////// OBJECT LOGIC TERMS
 
   ///////////// CONNECTIVES
-  abstract class lpOlConnective {
+  abstract class lpOlConnective extends lpTerm {
     def pretty: String
   }
 
@@ -169,7 +231,7 @@ object lpDatastructures {
   final case object lpInEq extends lpOlBinaryConnective {override def pretty: String = "inEq"}
 
   abstract class lpOlQuantifier extends lpOlConnective
-  final case object lpExists extends lpOlQuantifier {override def pretty: String = "∃"}
+  final case object lpOlExists extends lpOlQuantifier {override def pretty: String = "∃"}
   final case object lpOlForAll extends lpOlQuantifier {override def pretty: String = "∀"}
 
   abstract class lpOlTerm extends lpTerm{
@@ -178,20 +240,32 @@ object lpDatastructures {
 
   case class liftedProp(t: lpOlTerm) extends lpMlType {
     override def pretty: String = s"(${lpPrf.pretty} ${t.pretty})"
+
+    // change nothing when encoding as meta type
+    override def lift2Meta: lpMlType = liftedProp(t)
   }
   case object lpOlTop extends lpOlTerm {
     override def pretty: String = "⊤"
-
     override def prf: liftedProp = liftedProp(lpOlTop)
   }
   case object lpOlBot extends lpOlTerm {
     override def pretty: String = "⊥"
     override def prf: liftedProp = liftedProp(lpOlBot)
   }
+  case object lpOlNothing extends lpOlTerm {
+    override def pretty: String = ""
+
+    override def prf: liftedProp = liftedProp(lpOlNothing)
+  }
+  val tptpDefinedSymbolMap: Map[String, lpOlTerm] = Map(
+    "$false" -> lpOlBot,
+    "$true" -> lpOlTop)
+
   case class lpOlConstantTerm(a : String) extends lpOlTerm{
     override def pretty: String = a
     override def prf: liftedProp = liftedProp(lpOlConstantTerm(a))
   }
+
 
   case class lpRuleVariable(v: lpOlConstantTerm) extends lpOlTerm {
     override def pretty: String = s"($$$v)"
@@ -202,11 +276,17 @@ object lpDatastructures {
     def lift2Meta: lpTypedVar = lpTypedVar(lpConstantTerm(name.pretty),ty.lift2Meta)
     override def prf: liftedProp = liftedProp(lpOlTypedVar(name,ty))
   }
-  case class lpOlFunctionTerm(f: lpOlConstantTerm, args: Seq[lpOlTerm]) extends lpOlTerm{
+  case class lpOlLambdaTerm(vars: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
+    override def pretty: String = {
+      s"(${lpLambda.pretty} ${vars.map(name_ty => s"(${name_ty.pretty} : ${name_ty.ty.pretty})").mkString(" ")}, ${body.pretty})"
+    }
+    override def prf: liftedProp = liftedProp(lpOlLambdaTerm(vars, body))
+  }
+  case class lpOlFunctionApp(f: lpOlTerm, args: Seq[lpTerm]) extends lpOlTerm{
     override def pretty: String = {
       if (args.isEmpty) f.pretty else s"($f ${args.map(_.pretty).mkString(" ")})"
     }
-    override def prf: liftedProp = liftedProp(lpOlFunctionTerm(f, args))
+    override def prf: liftedProp = liftedProp(lpOlFunctionApp(f, args))
   }
   abstract class lpOlConnectiveTerm extends lpOlTerm
   case class lpOlUnaryConnectiveTerm(connective: lpOlUnaryConnective, body: lpOlTerm) extends lpOlConnectiveTerm{
@@ -242,7 +322,7 @@ object lpDatastructures {
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   def main(args: Array[String]):Unit = {
-    print(s"${lpOlFunctionTerm(lpOlConstantTerm("test"), Seq.empty).pretty}\n")
+    print(s"${lpOlFunctionApp(lpOlConstantTerm("test"), Seq.empty).pretty}\n")
     print(s"${lpOlFunctionType(Seq(lpOtype,lpItype,lpOlUserDefinedType("h"))).pretty}\n")
     print(s"${lpOlMonoQuantifiedTerm(lpOlForAll, Seq(lpOlTypedVar(lpOlConstantTerm("a"), lpOtype), lpOlTypedVar(lpOlConstantTerm("b"), lpItype)), lpOlBot).pretty}\n")
     print(s"${lpLambdaTerm(Seq(lpTypedVar(lpConstantTerm("a"),lpliftedObjectType(lpOtype)),lpTypedVar(lpConstantTerm("b"),lpliftedObjectType(lpItype))),lpOlBot).pretty}\n")
