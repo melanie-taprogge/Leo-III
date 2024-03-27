@@ -138,6 +138,22 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
     case _ => mkRoot(hd, args.δ_expand_upTo(symbs)(sig))
   }
 
+  override def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term, Seq[Signature.Key]) = hd match {
+    case Atom(key, _) if !symbs.contains(key) => {
+      var expandedSymbols: Seq[Signature.Key] = Seq.empty
+      val meta = sig(key)
+      if (meta.hasDefn) {
+        val (expandedDef, expandedSymbolsDef) = meta._defn.δ_expand_andTrack_upTo(symbs)(sig)
+        val (expandedArgs, expandedSymbolsArgs) = args.δ_expand_andTrack_upTo(symbs)(sig)
+        (mkRedex(expandedDef, expandedArgs),expandedSymbolsDef ++ expandedSymbolsArgs :+ key)
+      } else {
+        val (expandedArgs, expandedSymbolsArgs) = args.δ_expand_andTrack_upTo(symbs)(sig)
+        (mkRoot(hd, expandedArgs),expandedSymbolsArgs)
+      }
+    }
+    case _ => (mkRoot(hd, args.δ_expand_upTo(symbs)(sig)),Seq.empty)
+  }
+
   // Queries on terms
   override def ty: Type = ty0(hd.ty, args)
   @tailrec private[this] def ty0(funty: Type, s: Spine): Type = s match {
@@ -328,6 +344,12 @@ protected[impl] case class Redex(body: Term, args: Spine) extends TermImpl {
   final def δ_expand(implicit sig: Signature) = mkRedex(body.δ_expand(sig), args.δ_expand(sig))
   final def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = mkRedex(body.δ_expand_upTo(symbs)(sig), args.δ_expand_upTo(symbs)(sig))
 
+  final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term, Seq[Signature.Key]) = {
+    val (expBody, expSymolsBody) = body.δ_expand_andTrack_upTo(symbs)(sig)
+    val (expArgs, expSymolsArgs) = args.δ_expand_andTrack_upTo(symbs)(sig)
+    (mkRedex(expBody, expArgs),expSymolsBody ++ expSymolsArgs)
+  }
+
   // Queries on terms
   lazy val ty = ty0(body.ty, args)
   private def ty0(funty: Type, s: Spine): Type = s match {
@@ -425,6 +447,12 @@ protected[impl] case class TermAbstr(typ: Type, body: Term) extends TermImpl {
   final def δ_expand(rep: Int)(implicit sig: Signature) = mkTermAbstr(typ, body.δ_expand(rep)(sig))
   final def δ_expand(implicit sig: Signature) = mkTermAbstr(typ, body.δ_expand(sig))
   final def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = mkTermAbstr(typ, body.δ_expand_upTo(symbs)(sig))
+
+  final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term,Seq[Signature.Key]) = {
+    val (expBody, expSymolsBody) = body.δ_expand_andTrack_upTo(symbs)(sig)
+    (mkTermAbstr(typ, expBody),expSymolsBody)
+  }
+
 
   // Queries on terms
   lazy val ty = typ ->: body.ty
@@ -538,6 +566,11 @@ protected[impl] case class TypeAbstr(body: Term) extends TermImpl {
   final def δ_expand(implicit sig: Signature) = mkTypeAbstr(body.δ_expand(sig))
   final def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = mkTypeAbstr(body.δ_expand_upTo(symbs)(sig))
 
+  final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term,Seq[Signature.Key]) = {
+    val (expBody, expSymolsBody) = body.δ_expand_andTrack_upTo(symbs)(sig)
+    (mkTypeAbstr(expBody), expSymolsBody)
+  }
+
   // Queries on terms
   lazy val ty = ∀(body.ty)
   lazy val fv: Set[(Int, Type)] = body.fv
@@ -597,6 +630,9 @@ protected[impl] case class TermClos(term: Term, σ: (Subst, Subst)) extends Term
   def δ_expand(rep: Int)(implicit sig: Signature) = ???
   def δ_expand(implicit sig: Signature) = ???
   def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = ???
+
+  def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term,Seq[Signature.Key]) = ???
+
 
   // Queries on terms
   final def ty = term.ty
@@ -808,6 +844,8 @@ protected[impl] sealed abstract class Spine extends Pretty with Prettier {
   def δ_expand(sig: Signature): Spine
   def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature): Spine
 
+  def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(sig: Signature): (Spine, Seq[Signature.Key])
+
   // Queries
   def length: Int
   def fv: Set[(Int, Type)]
@@ -860,6 +898,8 @@ protected[impl] case object SNil extends Spine {
   @inline final def δ_expand(rep: Int)(sig: Signature) = SNil
   @inline final def δ_expand(sig: Signature) = SNil
   @inline final def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature) = SNil
+
+  @inline final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(sig: Signature) = (SNil, Seq.empty)
 
   // Queries
   final val fv: Set[(Int, Type)] = Set.empty
@@ -924,6 +964,12 @@ protected[impl] case class App(hd: Term, tail: Spine) extends Spine {
   @inline final def δ_expand(rep: Int)(sig: Signature) = cons(Left(hd.δ_expand(rep)(sig)), tail.δ_expand(rep)(sig))
   @inline final def δ_expand(sig: Signature) = cons(Left(hd.δ_expand(sig)), tail.δ_expand(sig))
   @inline final def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature) = cons(Left(hd.δ_expand_upTo(symbs)(sig)), tail.δ_expand_upTo(symbs)(sig))
+
+  @inline final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(sig: Signature): (Spine, Seq[Signature.Key]) = {
+    val (expHd, expSymolsHd) = hd.δ_expand_andTrack_upTo(symbs)(sig)
+    val (expTail, expSymbolsTail) = tail.δ_expand_andTrack_upTo(symbs)(sig)
+    (cons(Left(expHd), expTail), expSymolsHd ++ expSymbolsTail)
+  }
 
   // Queries
   lazy val fv: Set[(Int, Type)] = hd.fv union tail.fv
@@ -999,6 +1045,11 @@ protected[impl] case class TyApp(hd: Type, tail: Spine) extends Spine {
   @inline final def δ_expand(sig: Signature) = cons(Right(hd), tail.δ_expand(sig))
   @inline final def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature) = cons(Right(hd), tail.δ_expand_upTo(symbs)(sig))
 
+  @inline final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(sig: Signature): (Spine,Seq[Signature.Key]) = {
+    val (expTail, expSymbolsTail) = tail.δ_expand_andTrack_upTo(symbs)(sig)
+    (cons(Right(hd), expTail), expSymbolsTail)
+  }
+
   // Queries
   lazy val fv: Set[(Int, Type)] = tail.fv
   lazy val tyFV: Set[Int] = tail.tyFV union hd.typeVars.map(BoundType.unapply(_).get)
@@ -1064,6 +1115,9 @@ protected[impl] case class SpineClos(sp: Spine, s: (Subst, Subst)) extends Spine
   final def δ_expand(rep: Int)(sig: Signature) = ???
   final def δ_expand(sig: Signature) = ???
   final def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature) = ???
+
+  final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(sig: Signature) = ???
+
   // Queries
   lazy val fv: Set[(Int, Type)] = ???
   lazy val tyFV: Set[Int] = ???

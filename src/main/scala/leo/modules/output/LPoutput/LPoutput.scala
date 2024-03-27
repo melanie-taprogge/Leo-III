@@ -51,15 +51,27 @@ object LPoutput {
           }
 
           if (symbol.hasDefn) {
-            val (definition, updatedUsedSymbols,boundVars) = def2LP(symbol._defn, sig, usedSymbols)
+
+            val encAsRewriteRule = true
+
+            val (definition, updatedUsedSymbols,boundVars) = def2LP(symbol._defn, sig, usedSymbols, encAsRewriteRule)
             usedSymbols = updatedUsedSymbols
             //val variables: StringBuffer = new StringBuffer()
-            var variables: Seq[lpRuleVariable] = Seq.empty
-            boundVars foreach {v_t =>
+            var variables: Seq[lpVariable] = Seq.empty
+            boundVars foreach { v_t =>
               // todo: for poylmorphic types this might have to be extended
-              variables = variables :+ lpRuleVariable(lpOlConstantTerm(v_t._1))
+              if (encAsRewriteRule) variables = variables :+ lpRuleVariable(lpOlConstantTerm(v_t._1))
+              else variables = variables :+ lpUntypedVar(lpOlConstantTerm(v_t._1))
             }
-            val encodedDef = lpRule(lpOlConstantTerm(sName),variables,definition)
+            val encodedDef = {
+              if (encAsRewriteRule) {
+                lpRule(lpOlConstantTerm(sName),variables,definition)
+              } else {
+                val defTermType = type2LP(symbol._defn.ty,sig)._1
+                val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq,defTermType,lpOlFunctionApp(lpOlConstantTerm(sName),variables),definition)
+                lpDeclaration(lpConstantTerm(s"${sName}_def"),variables,defAsEq.prf)
+              }
+            }
             //val encodedDef = s"rule $Prf($sName$variables) $ruleArrow $Prf($definition);\n"
             encodedProblem.append(encodedDef.pretty)
           }
@@ -77,14 +89,17 @@ object LPoutput {
       }
 
       // encode the conjecture
+      /*
       var conjCounter = 0
       state.negConjecture foreach{conj =>
         val (encConj, usedSymbolsNew) = clause2LP(conj.cl, usedSymbols, sig)
         usedSymbols = usedSymbolsNew
         //encodedProblem.append(s"symbol negatedConjecture$conjCounter : $encConj;\n")
-        encodedProblem.append(lpDeclaration(lpConstantTerm(s"negatedConjecture$conjCounter"),Seq.empty,encConj).pretty)
+        val conjName = lpConstantTerm(s"negatedConjecture$conjCounter")
+        encodedProblem.append(lpDeclaration(conjName,Seq.empty,encConj).pretty)
         conjCounter = conjCounter + 1
       }
+       */
 
       //print(s"\n\nPROBLEM SO FAR:\n\n${encodedProblem.toString}\n\nNow we do the steps\n\n")
       // encode the clauses representing the steps
@@ -92,50 +107,84 @@ object LPoutput {
         //val compressedProof = compressedProofOf(CompressProof.stdImportantInferences)(state.derivationClause.get)
         val compressedProof = proof
         var idClauseMap: mutable.HashMap[Long,ClauseProxy] = mutable.HashMap.empty
-        val identicalSteps: mutable.HashMap[Long,Long] = mutable.HashMap.empty
+        val identicalSteps: mutable.HashMap[Long,lpConstantTerm] = mutable.HashMap.empty
+        var conjCounter = 0
 
         compressedProof foreach {step =>
+          print(s"\nstep number ${step.id}, role ${step.role}\n\n")
           val stepId = step.id
           idClauseMap = idClauseMap + (stepId -> step)
 
-          val (encStep,usedSymbolsNew) = clause2LP(step.cl,usedSymbols,sig)
-          usedSymbols = usedSymbolsNew
+          if (step.role == Role_NegConjecture){
+            val (encConj, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
+            usedSymbols = usedSymbolsNew
+            //encodedProblem.append(s"symbol negatedConjecture$conjCounter : $encConj;\n")
+            val conjName = lpConstantTerm(s"negatedConjecture$conjCounter")
+            encodedProblem.append(lpDeclaration(conjName, Seq.empty, encConj).pretty)
+            // let the corresponding step number point to "negated_conjecture"
+            identicalSteps += (stepId -> conjName)
+            //print(s"identical steps: $identicalSteps\n")
+            conjCounter = conjCounter + 1
+          } else {
 
-          var encodeStep = false
-          step.annotation.parents foreach {parent =>
-            if (!Seq().contains(parent.role)){//Role_NegConjecture Role_Conjecture
-              val encParent = clause2LP(parent.cl, usedSymbols, sig)._1
-              if (encParent == encStep) {
-                // update the dictionary keeping track of eqivalent steps
-                val existingValue = identicalSteps.getOrElseUpdate(stepId, parent.id)
-                if (existingValue != parent.id) {
-                  throw new Exception(s"step $stepId ($encStep) is equivalent to two parents: $existingValue, ${parent.id} ")
-                }
-              } else encodeStep = true
+            val (encStep, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
+            usedSymbols = usedSymbolsNew
+
+            var encodeStep = false
+            step.annotation.parents foreach { parent =>
+              if (!Seq().contains(parent.role)) { //Role_NegConjecture Role_Conjecture
+                val encParent = clause2LP(parent.cl, usedSymbols, sig)._1
+                //print(s"\nstep number ${parent.id} endoing ${encParent.pretty}, role ${parent.role}\n\n")
+                if (encParent == encStep) {
+                  // update the dictionary keeping track of eqivalent steps
+                  print(s"identical steps: $identicalSteps\n")
+                  val existingValue: lpConstantTerm = {
+                    if (identicalSteps.contains(stepId)) {
+                      if (identicalSteps(stepId) != nameStep(parent.id.toInt)) {
+                        throw new Exception(s"step $stepId ($encStep) is equivalent to two parents: ${step.id}, ${parent.id} ")
+                      }
+                    }
+                    if (identicalSteps.contains(parent.id)) {
+                      // in this case we already have the parent as a key and want to map the new child to the parents parent
+                      val exVal = identicalSteps(parent.id)
+                      identicalSteps.update(stepId, exVal)
+                      exVal
+                    } else {
+                      // in this case we just want to link the child to the parent
+                      val exVal = nameStep(parent.id.toInt)
+                      identicalSteps.update(stepId, exVal)
+                      exVal
+                    }
+                  }
+                  //val existingValue = identicalSteps.getOrElseUpdate(stepId, nameStep(parent.id.toInt))
+                  print(s"identical steps: $identicalSteps\n")
+                  print(s"existingValue: $existingValue\n")
+                } else encodeStep = true
+              }
             }
-          }
-          // embed the proof step
-          if (encodeStep == true){
+            // embed the proof step
+            if (encodeStep == true) {
 
-            // try to construct a proof
-            // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
-            val parentInLpEncID = step.annotation.parents.map(parent => identicalSteps.getOrElse(parent.id, parent.id))
-            val (proofTerm,updatedParameters,updatedUsedSymbols) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
+              // try to construct a proof
+              // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
+              val parentInLpEncID = step.annotation.parents.map(parent => identicalSteps.getOrElse(parent.id, nameStep(parent.id.toInt)))
+              val (proofTerm, updatedParameters, updatedUsedSymbols) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
 
-            // if the step is actually new, we want to add it to the output
-            if (proofTerm == lpOlNothing) {
-              // todo: encode these rules! :)
-              encodedProblem.append(s"\n// The rule ${step.annotation.fromRule} is not encoded yet\n")
-              encodedProblem.append(s"symbol step${step.id} : ${encStep.pretty};\n")
-            } else {
-              // otherwise we provide it as an axiom
-              //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
-              // and encode the proof based on its parent clauses
-              //encodedProblem.append(s"$proofTerm;\n")
-              encodedProblem.append(s"\n${lpDefinition(nameStep(step.id.toInt),Seq.empty,encStep,proofTerm).pretty}\n")
-              // and we will add the necessary symbols to the generated Signature
-              usedSymbols = updatedUsedSymbols
-              parameters = updatedParameters
+              // if the step is actually new, we want to add it to the output
+              if (proofTerm == lpOlNothing) {
+                // todo: encode these rules! :)
+                encodedProblem.append(s"\n// The rule ${step.annotation.fromRule} is not encoded yet\n")
+                encodedProblem.append(s"symbol step${step.id} : ${encStep.pretty};\n")
+              } else {
+                // otherwise we provide it as an axiom
+                //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
+                // and encode the proof based on its parent clauses
+                //encodedProblem.append(s"$proofTerm;\n")
+                encodedProblem.append(s"\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm).pretty}\n")
+                // and we will add the necessary symbols to the generated Signature
+                usedSymbols = updatedUsedSymbols
+                parameters = updatedParameters
+              }
             }
           }
 

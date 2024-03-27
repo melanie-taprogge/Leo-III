@@ -26,9 +26,11 @@ object DefExpSimp extends CalculusRule {
     Simp.normalize(t.δ_expand_upTo(symb).betaNormalize.etaExpand)
   }
 
-  final def apply_andTrack(t: Term)(implicit sig: Signature): (Term, Seq[(Seq[Int], String, Term, Term)]) = {
+  final def apply_andTrack(t: Term)(implicit sig: Signature): (Term, Seq[(Seq[Int], String, Term, Term)], Seq[Signature.Key]) = {
     val symb: Set[Signature.Key] = Set(sig("?").key, sig("&").key, sig("=>").key)
-    Simp.normalize_andTrack(t.δ_expand_upTo(symb).betaNormalize.etaExpand)
+    val (expandedTerm, expandedSymbols) = t.δ_expand_andTrack_upTo(symb)
+    val (simplifiedTerm, simpInfo) = Simp.normalize_andTrack(expandedTerm.betaNormalize.etaExpand)
+    (simplifiedTerm, simpInfo,expandedSymbols)
   }
 
   final def apply(cl: Clause)(implicit sig: Signature): Clause = {

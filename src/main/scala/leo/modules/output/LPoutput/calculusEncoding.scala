@@ -292,15 +292,13 @@ object calculusEncoding {
     }
   }
 
-  def encPolaritySwitchClause(child: ClauseProxy, parent: ClauseProxy, parentInLpEncID: Long, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
+  def encPolaritySwitchClause(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
     // like control.switchPolarity
 
     //throw new Exception("CHANGE encPolaritySwitchClause")
 
     var parameters = parameters0
     var usedSymbols: Set[lpStatement] = Set.empty
-
-    val parentNameLpEnc = s"step$parentInLpEncID"
 
     var transformations: Seq[lpTerm] = Seq.empty
 
@@ -327,7 +325,7 @@ object calculusEncoding {
     } else {
       val (encProofRule, newParameters) = ruleAppClause(parent.cl, child.cl, transformations, sig, parameters)
       //(s"$encProofRule $parentNameLpEnc", newParameters, usedSymbols)
-      (lpFunctionApp(encProofRule,Seq(lpConstantTerm(parentNameLpEnc))), newParameters, usedSymbols)
+      (lpFunctionApp(encProofRule,Seq(parentNameLpEnc)), newParameters, usedSymbols)
     }
   }
 
@@ -377,7 +375,7 @@ object calculusEncoding {
   }
 
 
-  def encFuncExtPosClause(child: ClauseProxy, parent: ClauseProxy, editedLiterals: Seq[(Literal,Literal)], parentInLpEncID: Long, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int)) = {
+  def encFuncExtPosClause(child: ClauseProxy, parent: ClauseProxy, editedLiterals: Seq[(Literal,Literal)], parentNameLpEnc: lpConstantTerm, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int)) = {
 
     //throw new Exception("CHANGE encFuncExtPosClause")
 
@@ -387,8 +385,6 @@ object calculusEncoding {
       val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
 
       var parameters = parameters0
-
-      val parentNameLpEnc = s"step$parentInLpEncID"
 
       // extract the information about the names of the freshly applied variables so they can be universally quantified over
       var allFreshVarsClause: Set[lpTypedVar] = Set.empty
@@ -438,7 +434,7 @@ object calculusEncoding {
       }
       else{
         // quantify over all variables in  allFreshVarsClause and clauseQuantification
-        val lambdaTerm = lpLambdaTerm((allFreshVarsClause ++ clauseQuantification).toSeq,lpFunctionApp(transformations.head,Seq(lpFunctionApp(lpConstantTerm(parentNameLpEnc),applySymbolsToParent))))
+        val lambdaTerm = lpLambdaTerm((allFreshVarsClause ++ clauseQuantification).toSeq,lpFunctionApp(transformations.head,Seq(lpFunctionApp(parentNameLpEnc,applySymbolsToParent))))
         //(s"${universalQuantification.toString} ${clauseQuantification.toString}, ${transformations.head} ($parentNameLpEnc ${applySymbolsToParent.mkString(" ")})",parameters)
         (lambdaTerm,parameters)
       }
@@ -519,13 +515,11 @@ object calculusEncoding {
 
   }
 
-  def encBoolExtClause(child: ClauseProxy, parent: ClauseProxy ,parentInLpEncID: Long, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int),Set[lpStatement]) = {
+  def encBoolExtClause(child: ClauseProxy, parent: ClauseProxy ,parentNameLpEnc: lpConstantTerm, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int),Set[lpStatement]) = {
 
     val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
 
     var transformations: Seq[lpTerm] = Seq.empty
-
-    val parentNameLpEnc = s"step$parentInLpEncID"
 
     var parameters = parameters0
 
@@ -586,7 +580,7 @@ object calculusEncoding {
       throw new Exception(s"encBoolExtClause not implemented for clauses longer than one literal") //todo : i think i do not even have to diff. cases once this is implemented, instead this can probably also handle the lower case
     }
     else {
-      val lambdaTerm = lpLambdaTerm(clauseQuantification.toSeq,lpFunctionApp(transformations.head,Seq(lpFunctionApp(lpConstantTerm(parentNameLpEnc),applySymbolsToParent))))
+      val lambdaTerm = lpLambdaTerm(clauseQuantification.toSeq,lpFunctionApp(transformations.head,Seq(lpFunctionApp(parentNameLpEnc,applySymbolsToParent))))
       (s"($LPlambda ${clauseQuantification.toString}, (${transformations.head}) ($parentNameLpEnc ${applySymbolsToParent.mkString(" ")}))", parameters, Set("em"))//todo: add em axiom
       (lambdaTerm, parameters, Set(lpEm))
     }
@@ -1107,12 +1101,10 @@ object calculusEncoding {
 
   }
 
-  def encEqFactClause(child: ClauseProxy, parent: ClauseProxy, additionalInfo: (Literal, Literal, Literal, Literal, Boolean, Boolean), parentInLpEncID: Long, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
+  def encEqFactClause(child: ClauseProxy, parent: ClauseProxy, additionalInfo: (Literal, Literal, Literal, Literal, Boolean, Boolean), parentNameLpEnc: lpConstantTerm, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
     //throw new Exception("CHANGE encEqFactClause")
     // todo: outsource the transformation to equality literals?
     val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
-
-    val parentNameLpEnc = s"step$parentInLpEncID"
 
     val transformations: Seq[(String, String, String)] = Seq.empty
 
@@ -1145,7 +1137,7 @@ object calculusEncoding {
       //print(s"\nencoding of complete eqFactoring Step: \ntype $encFactoring;\n")
 
       //val lambdaTerm_str = s"($LPlambda $clauseQuantification, ($encFactoring) ($parentNameLpEnc $applySymbolsToParent))"
-      val lambdaTerm = lpLambdaTerm(clauseQuantification,lpFunctionApp(encFactoring,Seq(lpFunctionApp(lpConstantTerm(parentNameLpEnc),applySymbolsToParent))))
+      val lambdaTerm = lpLambdaTerm(clauseQuantification,lpFunctionApp(encFactoring,Seq(lpFunctionApp(parentNameLpEnc,applySymbolsToParent))))
 
       (lambdaTerm, parametersNew, usedSymbolsNew)
     } else {
@@ -1163,90 +1155,95 @@ object calculusEncoding {
       case "Simp1" =>
         val argument = t1
         val ruleApplication = lpRefine(lpFunctionApp(SimplificationEncoding.Simp1.name,Seq(argument)))
-        lpHave(stepName,ty,Seq(ruleApplication),tab)
+        lpHave(stepName,ty,ruleApplication.toProofScrips,tab)
 
       case _ =>
         throw new Exception(s"Simplification Rule $simpRule not encoded yet")
     }
   }
 
-  def simplificationProofScript(child: ClauseProxy, parent: ClauseProxy, additionalInfo: Seq[(Seq[Int],String,Term,Term)], parentInLpEncID: Long, sig: Signature):(lpProofScript, Set[lpStatement])={
 
-    val bVars = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
+  def acessSubterm(t: Term, position: Seq[Int], sig: Signature, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))): (lpOlTerm, Term) = {
+    // generate a pattern for the application of rewriting
+    //todo: for longer clauses we need to loop through the literals and for literals we need to consider both sides
 
+    // if the length of position is 1, we arrived at the last step and want to provide a proof
+    if (position.length == 0) (patternVar, t)
+
+    else {
+
+      val currentPosition = position.head
+      t match {
+        case tl ||| tr =>
+          if (currentPosition == 1) {
+            val (intermediatePattern, intermediateTerm) = acessSubterm(tr, position.tail, sig, patternVar)
+            (lpOlUntypedBinaryConnectiveTerm(lpOr, intermediatePattern, lpOlWildcard), intermediateTerm)
+          }
+          else if (currentPosition == 2) {
+            val (intermediatePattern, intermediateTerm) = acessSubterm(tl, position.tail, sig, patternVar)
+            (lpOlUntypedBinaryConnectiveTerm(lpOr, lpOlWildcard, intermediatePattern), intermediateTerm)
+          }
+          else throw new Exception(s"invalid position $currentPosition vor connective ${lpOr.pretty}")
+        case Not(t2) =>
+          if (currentPosition == 1) {
+            val (intermediatePattern, intermediateTerm) = acessSubterm(t2, position.tail, sig, patternVar)
+            (lpOlUnaryConnectiveTerm(lpNot, intermediatePattern), intermediateTerm)
+          }
+          else throw new Exception(s"invalid position $currentPosition vor connective ${lpOr.pretty}")
+        case tl === tr =>
+          val ty = type2LP(tl.ty, sig, Set())._1
+          if (currentPosition == 1) {
+            val (intermediatePattern, intermediateTerm) = acessSubterm(tr, position.tail, sig, patternVar)
+            (lpOlTypedBinaryConnectiveTerm(lpEq, ty, intermediatePattern, lpOlWildcard), intermediateTerm)
+          }
+          else if (currentPosition == 2) {
+            val (intermediatePattern, intermediateTerm) = acessSubterm(tl, position.tail, sig, patternVar)
+            (lpOlTypedBinaryConnectiveTerm(lpEq, ty, lpOlWildcard, intermediatePattern), intermediateTerm)
+          }
+          else throw new Exception(s"invalid position $currentPosition vor connective ${lpOr.pretty}")
+
+        case _ => throw new Exception(s"connective not encoded?")
+      }
+    }
+  }
+
+
+  def simplificationProofScript(child: Clause, parent: Clause, additionalInfo: Seq[(Seq[Int],String,Term,Term)], symbolsToUnfold: Set[Signature.Key], parentNameLpEnc: lpConstantTerm, quantifiedVars: Seq[lpUntypedVar], bVars: Map[Int, String], sig: Signature):(lpProofScript, Set[lpStatement])={
+
+    // proof the equality between a parent and a child term given a set of rewrite rules and their positions
     var usedSymbols: Set[lpStatement] = Set.empty
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    def acessSubterm(t: Term, position: Seq[Int], patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))):(lpOlTerm,Term)={
-      // generate a pattern for the application of rewriting
-      //todo: for longer clauses we need to loop through the literals and for literals we need to consider both sides
-
-      // if the length of position is 1, we arrived at the last step and want to provide a proof
-      if (position.length == 0) (patternVar, t)
-
-      else {
-
-        val currentPosition = position.head
-        t match {
-          case tl ||| tr =>
-            if (currentPosition == 1) {
-              val (intermediatePattern, intermediateTerm) = acessSubterm(tr,position.tail,patternVar)
-              (lpOlUntypedBinaryConnectiveTerm(lpOr,intermediatePattern,lpOlWildcard),intermediateTerm)
-            }
-            else if (currentPosition == 2) {
-              val (intermediatePattern, intermediateTerm) = acessSubterm(tl,position.tail,patternVar)
-              (lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlWildcard,intermediatePattern), intermediateTerm)
-            }
-            else throw new Exception(s"invalid position $currentPosition vor connective ${lpOr.pretty}")
-          case Not(t2) =>
-            if (currentPosition == 1) {
-              val (intermediatePattern, intermediateTerm) = acessSubterm(t2, position.tail, patternVar)
-              (lpOlUnaryConnectiveTerm(lpNot, intermediatePattern), intermediateTerm)
-            }
-            else throw new Exception(s"invalid position $currentPosition vor connective ${lpOr.pretty}")
-          case tl === tr =>
-            val ty = type2LP(tl.ty,sig,Set())._1
-            if (currentPosition == 1) {
-              val (intermediatePattern, intermediateTerm) = acessSubterm(tr, position.tail, patternVar)
-              (lpOlTypedBinaryConnectiveTerm(lpEq, ty,intermediatePattern , lpOlWildcard), intermediateTerm)
-            }
-            else if (currentPosition == 2) {
-              val (intermediatePattern, intermediateTerm) = acessSubterm(tl, position.tail, patternVar)
-              (lpOlTypedBinaryConnectiveTerm(lpEq, ty, lpOlWildcard, intermediatePattern),intermediateTerm)
-            }
-            else throw new Exception(s"invalid position $currentPosition vor connective ${lpOr.pretty}")
-
-          case _ => throw new Exception(s"connective not encoded?")
-        }
+    val simplificationStepName: String = {
+      if (additionalInfo.nonEmpty) {
+        if (symbolsToUnfold.nonEmpty) "DefExpAndSimp" else "Simp"
+      } else {
+        if (symbolsToUnfold.nonEmpty) "DefExp" else throw new Exception(s"Nothing was expanded or simplified in simplification step")
       }
     }
 
-    ////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-    def lp_applySimplificationClauses(c: Clause, position: Seq[Int]):Unit={
-      c.lits foreach {lit =>
-        val position = c.lits.indexOf(lit) + 1
 
-      }
-    }
+    // the complete proof script consists of 3 steps:
+    // 1. If necessary, unfold definitions
+    // 2. Proof the equality between the parent and the child clause
+    // 3. By applying identity (λ x ,x) and the parent term encoding to the equality proven in 2, we can conclude the child
 
-    parent.cl.lits foreach { lit =>
-      val position = parent.cl.lits.indexOf(lit) + 1
-
-      // those tuples encoding the application of Inference Rules To the
-
-      //todo: Track the clause number and the literal side as positions, for now we just consider clauses with only one non eq. literal
-    }
-
-
-    print(s"parent: ${clause2LP(parent.cl,Set.empty,sig)._1.pretty}\nchild: ${clause2LP(child.cl,Set.empty,sig)._1.pretty}\n")
-
+    var allProofStep: Seq[lpProofScriptStep] = Seq.empty
     var rewriteSteps: Seq[lpProofScriptStep] = Seq.empty
 
+    //// 1. Unfold necessary definitions
+    if (symbolsToUnfold.nonEmpty) {
+      rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Unfold necessary definitions")
+      val unfoldVars = symbolsToUnfold.map(sym => lpConstantTerm(sig(sym).name))
+      rewriteSteps = rewriteSteps :+ lpSimplify(unfoldVars)
+      if (additionalInfo.nonEmpty) rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Application of simplification rules")
+    }
+
+    //// 2. Equality between parent and child
     additionalInfo foreach { tuple =>
       val (appliedSimpRule, needsTypeInst) = SimplificationEncoding.SimpRuleMap(tuple._2)
       usedSymbols = usedSymbols + appliedSimpRule
-      val (rewritePattern0, termAtRewriteVar) = acessSubterm(asTerm(parent.cl.lits(0)),tuple._1)
-      print(s"enc parent term: ${term2LP(tuple._3,bVars,sig,Set.empty)._1.pretty}\n")
+      val (rewritePattern0, termAtRewriteVar) = acessSubterm(Clause.asTerm(parent),tuple._1,sig)
+      //print(s"enc parent term: ${term2LP(tuple._3,bVars,sig,Set.empty)._1.pretty}\n")
       //the pattern we need to match can not only be determined based on the terms because we also need to account for the
       // equality between the child and parent clause we added!
       val rewritePattern = lpRwritePattern(lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,rewritePattern0,lpOlWildcard))
@@ -1261,43 +1258,23 @@ object calculusEncoding {
         lpRewrite(Option(rewritePattern),lpFunctionApp(appliedSimpRule.name,Seq(lpConstantTerm(s"[${ty.lift2Poly.pretty}]"))))
       }
       else lpRewrite(Option(rewritePattern),appliedSimpRule.name)
-      print(s"position: ${tuple._1}\n")
-      print(s"${rewriteStep.pretty}\n")
+      //print(s"position: ${tuple._1}\n")
+      //print(s"${rewriteStep.pretty}\n")
       rewriteSteps = rewriteSteps :+ rewriteStep
     }
-    val encParent = term2LP(Clause.asTerm(parent.cl),bVars,sig)._1
-    val encChild = term2LP(Clause.asTerm(child.cl),bVars,sig)._1
+    val encParent = term2LP(Clause.asTerm(parent),bVars,sig)._1
+    val encChild = term2LP(Clause.asTerm(child),bVars,sig)._1
     // at the end, only something like x=x should remain of the focussed goal. We add the tactic "reflexivity" to prove this.
     rewriteSteps = rewriteSteps :+ lpReflexivity()
 
-    // todo: add an abstraction over quant variables if applicable
-
-    val simplificationStepName: String = "Simp"
-
     // we proof that the term before the transformation = the term after the transformation
     val eqSimpTerm = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,encParent,encChild).prf
-    val haveStep = lpHave(simplificationStepName,eqSimpTerm,rewriteSteps)
+    val haveStep = lpHave(simplificationStepName,eqSimpTerm,lpProofScript(rewriteSteps))
 
-    // the complete proof script consists of 3 steps:
-    // 1. Abstract over the quantified variables
-    // 2. Proof the equality between the parent and the child clause
-    // 3. By applying identity (λ x ,x) and the parent clause encoding to the equality proven in 2, we can conclude the child
-
-    var allProofStep: Seq[lpProofScriptStep] = Seq.empty
-
-    //// 1. Abstraction step
-    val quantifiedVars = clauseRuleQuantification(parent.cl,bVars,sig)._2
-    if (quantifiedVars.length > 0){
-      throw new Exception(s"the encoding of simplifications with implicitly quantified vars is not tested yet, comment this and check carefully")
-      val assumeStep = lpAssume(quantifiedVars)
-      allProofStep = allProofStep :+ assumeStep
-    }
-
-    //// 2. Equality between parent and child
     allProofStep = allProofStep :+ haveStep
 
+
     //// 3. Refine step
-    val parentNameLpEnc = nameStep(parentInLpEncID.toInt)
     val application = lpFunctionApp(lpConstantTerm(simplificationStepName),Seq(lpUseful.Identity, lpFunctionApp(parentNameLpEnc,quantifiedVars)))
     val applicationStep = lpRefine(application)
     allProofStep = allProofStep :+ applicationStep
@@ -1308,5 +1285,47 @@ object calculusEncoding {
     (proofScript, usedSymbols)
   }
 
+  def encDefExSimp(child: ClauseProxy, parent: ClauseProxy, additionalInfoSimp: Seq[(Seq[Int],String,Term,Term)], additionalInfoDefExp: Seq[Signature.Key], parentNameLpEnc: lpConstantTerm, sig: Signature):(lpProofScript, Set[lpStatement], Set[Signature.Key])={
 
-}
+    //print(s"parent: ${clause2LP(parent.cl,Set.empty,sig)._1.pretty}\nchild: ${clause2LP(child.cl,Set.empty,sig)._1.pretty}\n")
+
+    val defsWereExpanded: Boolean = additionalInfoDefExp.nonEmpty
+    val wasSimplified: Boolean = additionalInfoSimp.nonEmpty
+    val wasEtaExp: Boolean = false
+
+    val bVars = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
+
+    var usedSymbols: Set[lpStatement] = Set.empty
+    var allProofStep: Seq[lpProofScriptStep] = Seq.empty
+
+    // todo: since we might have eta expanision this might have to be changed
+
+    val encSimpChild = if (wasEtaExp) throw new Exception("lp proof for eta expansion not encoded yet") else term2LP(Clause.asTerm(child.cl), bVars, sig)._1
+
+    //// 1. Abstraction step
+    val quantifiedVars = clauseRuleQuantification(parent.cl, bVars, sig)._2
+    if (quantifiedVars.length > 0) {
+      throw new Exception(s"the encoding of simplifications with implicitly quantified vars is not tested yet, comment this and check carefully")
+      val assumeStep = lpAssume(quantifiedVars)
+      allProofStep = allProofStep :+ assumeStep
+    }
+
+
+    //// 2. Proof defExpansion and / or simplification
+    if (wasSimplified){
+
+      val (simpProof, usedSymbolsSimplification) = simplificationProofScript(child.cl,parent.cl,additionalInfoSimp,additionalInfoDefExp.toSet,parentNameLpEnc,quantifiedVars,bVars,sig)
+      usedSymbols = usedSymbols ++ usedSymbolsSimplification
+
+      allProofStep = allProofStep :+ simpProof
+    }
+
+    // combine all steps into one proof script
+    val proofScript = lpProofScript(allProofStep)
+
+    (proofScript, usedSymbols, additionalInfoDefExp.toSet)
+
+  }
+
+
+  }

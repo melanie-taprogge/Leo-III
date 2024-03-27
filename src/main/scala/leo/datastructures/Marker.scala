@@ -173,6 +173,7 @@ class FurtherInfo (val literalsBeforeAfter0: Seq[Seq[Literal]] = Seq.empty, val 
   var addInfoSimp: Seq[(Seq[Int],String,Term,Term)] = Seq.empty
   // unification of types and simplification are represented as booleans for now, eventually I can replace this with information necessary to also encode these steps
   var addInfoEqFac: (Literal,Literal,Literal,Literal,Boolean,Boolean) = (Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),false,false)
+  var addInfoDefExp: Seq[Signature.Key] = Seq.empty
 }
 
 

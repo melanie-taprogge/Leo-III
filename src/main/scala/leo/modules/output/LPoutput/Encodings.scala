@@ -113,19 +113,21 @@ object Encodings {
     }
   }
 
-  def def2LP(t:Term,sig:Signature,usedSymbols:Set[lpStatement]): (lpOlTerm,Set[lpStatement],Seq[(String, Type)])={
+  def def2LP(t:Term,sig:Signature,usedSymbols:Set[lpStatement], encAsRewriteRule: Boolean): (lpOlTerm,Set[lpStatement],Seq[(String, Type)])={
     // Definitions must be handled differently because we want to translate them to rules in LP.
     // Therefore we need to extract the used variable symbols and proceed them with a "$"
-    t match {
-      case _ :::> _ =>
-        // In case of an abstraction the definition defines a function.
-        // todo: other forms of defintion that have to be treated seperateley?
-        val (bVarTys, body) = collectLambdasLP(t)
-        val newBVars = makeDefBVarList(bVarTys, 0)
-        val (encbody, updatedUsedSymbols0) = term2LP(body, fusebVarListwithMap(newBVars, Map()), sig, usedSymbols)
-        var updatedUsedSymbols = updatedUsedSymbols0
-        (encbody, updatedUsedSymbols, newBVars)
-    }
+
+      t match {
+        case _ :::> _ =>
+          // In case of an abstraction the definition defines a function.
+          // todo: other forms of defintion that have to be treated seperateley?
+          val (bVarTys, body) = collectLambdasLP(t)
+          val newBVars = if (encAsRewriteRule) makeDefBVarList(bVarTys, 0) else makeBVarList(bVarTys,0)
+          val (encbody, updatedUsedSymbols0) = term2LP(body, fusebVarListwithMap(newBVars, Map()), sig, usedSymbols)
+          var updatedUsedSymbols = updatedUsedSymbols0
+          (encbody, updatedUsedSymbols, newBVars)
+        case _ => throw new Exception(s"encountered unexpected definition format when trying to encode ${t.pretty} in LP")
+      }
   }
 
   final def clauseVars2LP(fvs: Seq[(Int, Type)], sig: Signature, usedSymbols0: Set[lpStatement]): (Seq[lpTypedVar], Map[Int, String],Set[lpStatement]) = {
@@ -379,14 +381,14 @@ object Encodings {
   }
 
 
-  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long,ClauseProxy], parentInLpEncID: Seq[Long], sig: Signature,parameters0:(Int,Int,Int,Int)): (lpStatement,(Int,Int,Int,Int),Set[lpStatement]) = {
+  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long,ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature,parameters0:(Int,Int,Int,Int)): (lpStatement,(Int,Int,Int,Int),Set[lpStatement]) = {
     val rule = cl.annotation.fromRule
 
     val continuousNumbers = true
 
     val parameters = if (continuousNumbers) parameters0 else (0,0,0,0)
 
-    if (!Seq(leo.datastructures.Role_Conjecture,leo.datastructures.Role_NegConjecture).contains(cl.role)){ // we start our proof with the negated conjecture
+    if (!Seq(leo.datastructures.Role_Conjecture).contains(cl.role)){ // we start our proof with the negated conjecture
 
       rule match {
         case leo.modules.calculus.PolaritySwitch =>
@@ -403,8 +405,11 @@ object Encodings {
           val encodings = encEqFactClause(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig,parameters)
           encodings
         case leo.modules.calculus.DefExpSimp =>
-          val encodings = simplificationProofScript(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoSimp,parentInLpEncID.head,sig)
-          (encodings._1,(0,0,0,0),encodings._2)
+          //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
+          // todo: eta expansion
+
+          val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoSimp,cl.furtherInfo.addInfoDefExp,parentInLpEncID.head,sig)
+          (encodingsSimp._1,(0,0,0,0),encodingsSimp._2)
         //case leo.modules.calculus.PreUni =>
          // throw new Exception(s"${}")
 

@@ -67,6 +67,8 @@ trait Term extends Pretty with Prettier {
     * This may not terminate for recursively defined symbols. */
   def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term
 
+  def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term, Seq[Signature.Key])
+
   //////////////////////////
   // Queries on terms
   //////////////////////////

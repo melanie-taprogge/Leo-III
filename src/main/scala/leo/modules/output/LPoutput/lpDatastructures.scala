@@ -38,7 +38,7 @@ object lpDatastructures {
     }
   }
 
-  case class lpRule(symbol: lpTerm, variableIdentifier: Seq[lpRuleVariable], lambdaTerm: lpTerm) extends lpStatement {
+  case class lpRule(symbol: lpTerm, variableIdentifier: Seq[lpVariable], lambdaTerm: lpTerm) extends lpStatement {
     override def pretty: String = s"rule ${symbol.pretty} ${variableIdentifier.map(var0 => var0.pretty).mkString(" ")} ↪ ${lambdaTerm.pretty};\n"
   }
   
@@ -305,9 +305,8 @@ object lpDatastructures {
   }
 
 
-  case class lpRuleVariable(v: lpOlConstantTerm) extends lpOlTerm {
+  case class lpRuleVariable(v: lpOlConstantTerm) extends lpVariable {
     override def pretty: String = s"(${v.pretty})"
-    override def prf: liftedProp = liftedProp(lpRuleVariable(v))
   }
   case class lpOlTypedVar(name: lpOlConstantTerm,ty: lpOlType) extends lpOlTerm {
     override def pretty: String = name.pretty
@@ -377,6 +376,32 @@ object lpDatastructures {
 
     def addTab(i:Int) : lpProofScriptStep
 
+    def toProofScrips : lpProofScript
+
+    private[lpDatastructures] def openCurlyBracket : String
+
+  }
+
+  case class lpProofScriptCommentLine(comment: String,tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+
+    val tabs = "\t" * tab
+    override def addTab(i: Int): lpProofScriptStep = lpProofScriptCommentLine(comment, tab + i)
+
+    override def toProofScrips: lpProofScript = throw new Exception(s"Error: trying to convert the single comment `$comment` to a proof script")
+
+    override def pretty: String = s"$tabs// $comment"
+    override private[lpDatastructures] def openCurlyBracket : String = s"$tabs{// $comment"
+  }
+
+  case class lpSimplify(symbolsToUnfold: Set[lpConstantTerm], tab: Int = 0)  extends lpProofScriptStep(tab: Int) {
+    override def addTab(i: Int): lpProofScriptStep = lpSimplify(symbolsToUnfold, tab + i)
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpSimplify(symbolsToUnfold, tab)))
+
+    val tabs = "\t" * tab
+    override def pretty: String = s"${tabs}simplify ${symbolsToUnfold.map(sym => sym.pretty).mkString(" ")}"
+
+    override def openCurlyBracket: String = s"${tabs}{simplify ${symbolsToUnfold.map(sym => sym.pretty).mkString(" ")}"
   }
 
   case class lpProofScript(steps: Seq[lpProofScriptStep], tab: Int = 0) extends lpProofScriptStep(tab: Int) {
@@ -385,10 +410,16 @@ object lpDatastructures {
     def addTab(i: Int): lpProofScript = lpProofScript(steps, tab + i)
 
     override def pretty: String = {
-      s"${steps.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")};"
+      s"${steps.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
     }
 
-    def prettyCurlyBrackets: String = s"$tabs{${steps.map(step => s"${step.pretty}").mkString(s";\n$tabs")}}"
+    override private[lpDatastructures] def openCurlyBracket: String = s"{${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
+
+    def prettyCurlyBrackets: String = {
+      s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}}"
+    }
+
+    override def toProofScrips: lpProofScript = lpProofScript(steps, tab)
 
   }
 
@@ -398,15 +429,26 @@ object lpDatastructures {
       val tabs = "\t"*tab
       s"${tabs}refine ${t.pretty}"
     }
+
+    val tabs = "\t" * tab
+    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpRefine(t).pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRefine(t, tab)))
+
   }
 
-  case class lpHave(name: String, ty: lpMlType, proofScriptSteps: Seq[lpProofScriptStep],tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+  case class lpHave(name: String, ty: lpMlType, proofScript: lpProofScript,tab: Int = 0) extends lpProofScriptStep(tab: Int) {
 
-    def addTab(i : Int): lpHave = lpHave(name,ty, proofScriptSteps, tab + i)
+    def addTab(i : Int): lpHave = lpHave(name,ty, proofScript, tab + i)
     override def pretty: String = {
       val tabs: String = "\t"*tab
-      s"${tabs}have $name : ${ty.pretty}\n${lpProofScript(proofScriptSteps).addTab(tab + 1).prettyCurlyBrackets}"
+      s"${tabs}have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}"
     }
+
+    val tabs = "\t" * tab
+    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}" //s"$tabs{${lpHave(name,ty, proofScript).pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpHave(name,ty, proofScript, tab)))
   }
 
   case class lpRwritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
@@ -422,6 +464,11 @@ object lpDatastructures {
       val rewritePattern = if (rewritePattern0.isDefined) s"${rewritePattern0.get.pretty} " else ""
       s"${tabs}rewrite $rewritePattern${rewriteTerm.pretty}"
     }
+
+    val tabs = "\t" * tab
+    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm).pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, tab)))
   }
 
   case class lpReflexivity(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
@@ -430,14 +477,24 @@ object lpDatastructures {
       val tabs: String = "\t" * tab
       s"${tabs}reflexivity"
     }
+
+    val tabs = "\t" * tab
+    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpReflexivity()}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpReflexivity(tab)))
   }
 
   case class lpAssume(vars: Seq[lpUntypedVar], tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpAssume = lpAssume(vars, tab + i)
+
+    val tabs: String = "\t" * tab
     override def pretty: String = {
-      val tabs: String = "\t" * tab
       s"${tabs}assume ${vars.map(var0 => var0.pretty).mkString(" ")}"
     }
+
+    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpAssume(vars).pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpAssume(vars, tab)))
   }
 
 
