@@ -1807,8 +1807,10 @@ package inferenceControl {
         assert(Clause.unit(cl.cl))
         val lit = cl.cl.lits.head
         assert(!lit.equational)
-        val newleft = DefExpSimp(lit.left)(sig)
-        val result = AnnotatedClause(Clause(Literal(newleft, lit.polarity)), InferredFrom(DefExpSimp, cl), cl.properties)
+        val (newleft, addInfo) = DefExpSimp.apply_andTrack(lit.left)(sig)
+        val information: FurtherInfo = cl.furtherInfo
+        information.addInfoSimp = information.addInfoSimp ++ addInfo
+        val result = AnnotatedClause(Clause(Literal(newleft, lit.polarity)), Role_Plain, InferredFrom(DefExpSimp, cl), cl.properties, information)
         Out.trace(s"Def expansion: ${result.pretty(sig)}")
         result
       }
@@ -2100,7 +2102,11 @@ package inferenceControl {
         val simpResult = Simp(cl.cl)
         val result0 = if (simpResult == cl.cl) cl
 //        else AnnotatedClause(simpResult, cl.annotation, addProp(ClauseAnnotation.PropShallowSimplified,cl.properties))
-        else AnnotatedClause(simpResult, InferredFrom(Simp, cl), addProp(ClauseAnnotation.PropShallowSimplified,cl.properties))
+        else {
+          val addInfoSimp = new FurtherInfo()
+          //addInfoSimp.addInfoSimp = ...
+          AnnotatedClause(simpResult, InferredFrom(Simp, cl), addProp(ClauseAnnotation.PropShallowSimplified,cl.properties))
+        }
         val result = rewriteClause(result0)(state)
         Out.finest(s"[Simp] Result: ${result.pretty(sig)}")
         result
@@ -2231,6 +2237,7 @@ package inferenceControl {
       val plainSimp = simp(cw)
       Out.finest(s"[Rewriting] plain simp: ${plainSimp.pretty(sig)}")
       rewriteClause(plainSimp)(state)
+      //fgh
     }
     private final def rewriteClause(cl: AnnotatedClause,groundRewriteRules: Set[AnnotatedClause],
                                     nonGroundRewriteRules: Set[AnnotatedClause])(sig: Signature): AnnotatedClause = {

@@ -10,6 +10,7 @@ import leo.modules.output.LPoutput.LPSignature._
 import leo.modules.output.ToTPTP.toTPTP
 import leo.modules.proof_object.CompressProof
 import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.calculusEncoding._
 
 import scala.collection.mutable
 
@@ -25,7 +26,8 @@ object LPoutput {
       val proof = state.proof
 
       val encodedProblem: StringBuffer = new StringBuffer()
-      var usedSymbols:Set[lpTerm] = Set.empty
+      var usedSymbols:Set[lpStatement] = Set.empty
+      var parameters: (Int,Int,Int,Int) = (0,0,0,0)
 
 
       // encode the typing and definition formulas:
@@ -57,7 +59,7 @@ object LPoutput {
               // todo: for poylmorphic types this might have to be extended
               variables = variables :+ lpRuleVariable(lpOlConstantTerm(v_t._1))
             }
-            val encodedDef = lpRule(lpOlFunctionApp(lpOlConstantTerm(sName),variables).prf,Seq.empty,definition)
+            val encodedDef = lpRule(lpOlConstantTerm(sName),variables,definition)
             //val encodedDef = s"rule $Prf($sName$variables) $ruleArrow $Prf($definition);\n"
             encodedProblem.append(encodedDef.pretty)
           }
@@ -84,6 +86,7 @@ object LPoutput {
         conjCounter = conjCounter + 1
       }
 
+      //print(s"\n\nPROBLEM SO FAR:\n\n${encodedProblem.toString}\n\nNow we do the steps\n\n")
       // encode the clauses representing the steps
       // todo: Also make it possible to just output one long lambda-term
         //val compressedProof = compressedProofOf(CompressProof.stdImportantInferences)(state.derivationClause.get)
@@ -117,21 +120,22 @@ object LPoutput {
             // try to construct a proof
             // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
             val parentInLpEncID = step.annotation.parents.map(parent => identicalSteps.getOrElse(parent.id, parent.id))
-            val (proofTerm,updatedUsedSymbols) = step2LP(step, idClauseMap, parentInLpEncID, sig)
+            val (proofTerm,updatedParameters,updatedUsedSymbols) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
 
             // if the step is actually new, we want to add it to the output
             if (proofTerm == lpOlNothing) {
               // todo: encode these rules! :)
               encodedProblem.append(s"\n// The rule ${step.annotation.fromRule} is not encoded yet\n")
-              encodedProblem.append(s"symbol step${step.id} : $encStep;\n")
+              encodedProblem.append(s"symbol step${step.id} : ${encStep.pretty};\n")
             } else {
               // otherwise we provide it as an axiom
               //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
               // and encode the proof based on its parent clauses
               //encodedProblem.append(s"$proofTerm;\n")
-              encodedProblem.append(lpDefinition(lpConstantTerm(s"tep${step.id}"),Seq.empty,encStep,proofTerm))
+              encodedProblem.append(s"\n${lpDefinition(nameStep(step.id.toInt),Seq.empty,encStep,proofTerm).pretty}\n")
               // and we will add the necessary symbols to the generated Signature
               usedSymbols = updatedUsedSymbols
+              parameters = updatedParameters
             }
           }
 

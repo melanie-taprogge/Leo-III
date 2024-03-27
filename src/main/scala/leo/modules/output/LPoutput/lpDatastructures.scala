@@ -10,28 +10,36 @@ object lpDatastructures {
     def pretty: String
   }
 
-  case class lpDeclaration(name: lpConstantTerm, variables: Seq[lpTypedVar], typing: lpType) extends lpStatement{
+  case class lpDeclaration(name: lpConstantTerm, variables: Seq[lpVariable], typing: lpType) extends lpStatement{
     override def pretty: String = {
       if (variables.isEmpty){
         s"symbol ${name.pretty}: ${typing.pretty};\n"
       } else {
-        s"symbol ${name.pretty} ${variables.map(var0 => s"(${var0.name.pretty} : ${var0.ty.lift2Meta.pretty})").mkString(" ")}: ${typing.pretty};\n"
+        s"symbol ${name.pretty} ${variables.map(var0 => var0.pretty).mkString(" ")}: ${typing.pretty};\n"
       }
     }
   }
 
-  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTypedVar], typing: lpMlType, lambdaTerm: lpTerm) extends lpStatement {
+  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpVariable], typing: lpMlType, proof: lpStatement) extends lpStatement {
     override def pretty: String = {
-      if (variables.isEmpty){
-        s"symbol ${name.pretty} ${variables.map(var0 => s"(${var0.name.pretty} : ${var0.ty.lift2Meta.pretty})").mkString(" ")}: ${typing.pretty} ≔\n${lambdaTerm.pretty};"
+
+      val proofEnc = proof match {
+        case _ : lpTerm =>
+          s"${proof.pretty}"
+        case proofScript : lpProofScript =>
+          s"begin\n${proofScript.addTab(1).pretty}\nend"
+      }
+
+      if (!variables.isEmpty){
+        s"symbol ${name.pretty} ${variables.map(var0 => var0.pretty).mkString(" ")}: ${typing.pretty} ≔\n${proofEnc};\n"
       }else{
-      s"symbol ${name.pretty}: ${typing.pretty} ≔\n${lambdaTerm.pretty};"
+      s"symbol ${name.pretty}: ${typing.pretty} ≔\n${proofEnc};"
     }
     }
   }
 
   case class lpRule(symbol: lpTerm, variableIdentifier: Seq[lpRuleVariable], lambdaTerm: lpTerm) extends lpStatement {
-    override def pretty: String = s"rule ${symbol.pretty} ${variableIdentifier.map(var0 => var0.pretty).mkString(" ")} ↪ ${lambdaTerm.pretty};"
+    override def pretty: String = s"rule ${symbol.pretty} ${variableIdentifier.map(var0 => var0.pretty).mkString(" ")} ↪ ${lambdaTerm.pretty};\n"
   }
   
 
@@ -40,9 +48,7 @@ object lpDatastructures {
   ////////////////////////// LP META LOGIC /////////////////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  abstract class lpTerm {
-    def pretty: String
-  }
+  abstract class lpTerm extends lpStatement
 
   abstract class lpConstants {
     def pretty: String
@@ -55,6 +61,9 @@ object lpDatastructures {
   }
   case object lpArrow extends lpConstants {
     override def pretty: String = "→"
+  }
+  case object lpWildcard extends lpTerm{
+    override def pretty: String = "_"
   }
 
   ////////////////////////// META LOGIC TYPES
@@ -73,9 +82,9 @@ object lpDatastructures {
     override def lift2Meta: lpMlType = lpMetaType
   }
 
-  case class lpMlDependType(vars: Seq[lpTypedVar], body: lpMlType) extends lpMlType {
+  case class lpMlDependType(vars: Seq[lpVariable], body: lpMlType) extends lpMlType {
     override def pretty: String = {
-      s"(${lpPi.pretty} ${vars.map(name_ty => s"(${name_ty.pretty} : ${name_ty.ty.pretty})").mkString(s", ${lpPi.pretty}")}, ${body.pretty})"
+      s"(${lpPi.pretty} ${vars.map(var0 => var0.pretty).mkString(s", ${lpPi.pretty}")}, ${body.pretty})"
     }
     //change nothing when lifting to meta type
     override def lift2Meta: lpMlType = lpMlDependType(vars, body)
@@ -91,7 +100,12 @@ object lpDatastructures {
   }
 
   ////////////////////////// META LOGIC TERMS
-  case class lpTypedVar(name: lpConstantTerm, ty: lpType) extends lpTerm {
+  abstract class lpVariable extends lpTerm
+  case class lpTypedVar(name: lpTerm, ty: lpType) extends lpVariable {
+    override def pretty: String = s"(${name.pretty} : ${ty.lift2Meta.pretty})"
+  }
+
+  case class lpUntypedVar(name: lpTerm) extends lpVariable {
     override def pretty: String = name.pretty
   }
 
@@ -99,9 +113,19 @@ object lpDatastructures {
     override def pretty: String = name
   }
 
-  case class lpLambdaTerm(vars: Seq[lpTypedVar], body: lpTerm) extends lpTerm {
+  case class lpLambdaTerm(vars: Seq[lpVariable], body: lpTerm) extends lpTerm {
     override def pretty: String = {
-      s"(${lpLambda.pretty} ${vars.map(name_ty => s"(${name_ty.pretty} : ${name_ty.ty.pretty})").mkString(" ")}, ${body.pretty})"
+      if (vars.isEmpty){
+        s"${body.pretty}"
+      }else{
+        s"(${lpLambda.pretty} ${vars.map(var0 => var0.pretty).mkString(" ")}, ${body.pretty})"
+      }
+      }
+  }
+
+  case class lpFunctionApp(f: lpTerm, args: Seq[lpTerm]) extends lpTerm {
+    override def pretty: String = {
+      if (args.isEmpty) f.pretty else s"(${f.pretty} ${args.map(_.pretty).mkString(" ")})"
     }
   }
 
@@ -182,6 +206,14 @@ object lpDatastructures {
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType(t))
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOlUserDefinedType(t))
   }
+
+  case class lpOlUserDefinedPolyType(t: String) extends lpOlPolyType {
+    def pretty: String = t
+
+    override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType(t))
+
+    override def lift2Poly: lpOlPolyType = lpOlUserDefinedPolyType(t)
+  }
   case object lpOtype extends lpOlSimpleType {
     def pretty: String = "o"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType("o"))
@@ -244,6 +276,12 @@ object lpDatastructures {
     // change nothing when encoding as meta type
     override def lift2Meta: lpMlType = liftedProp(t)
   }
+
+  case object lpOlWildcard extends lpOlTerm {
+    override def pretty: String = "_"
+
+    override def prf: liftedProp = liftedProp(lpOlWildcard)
+  }
   case object lpOlTop extends lpOlTerm {
     override def pretty: String = "⊤"
     override def prf: liftedProp = liftedProp(lpOlTop)
@@ -268,7 +306,7 @@ object lpDatastructures {
 
 
   case class lpRuleVariable(v: lpOlConstantTerm) extends lpOlTerm {
-    override def pretty: String = s"($$$v)"
+    override def pretty: String = s"(${v.pretty})"
     override def prf: liftedProp = liftedProp(lpRuleVariable(v))
   }
   case class lpOlTypedVar(name: lpOlConstantTerm,ty: lpOlType) extends lpOlTerm {
@@ -276,15 +314,23 @@ object lpDatastructures {
     def lift2Meta: lpTypedVar = lpTypedVar(lpConstantTerm(name.pretty),ty.lift2Meta)
     override def prf: liftedProp = liftedProp(lpOlTypedVar(name,ty))
   }
+
+  case class lpOlUntypedVar(name: lpTerm) extends lpOlTerm {
+    override def pretty: String = name.pretty
+
+    def lift2Meta: lpUntypedVar = lpUntypedVar(lpConstantTerm(name.pretty))
+
+    override def prf: liftedProp = liftedProp(lpOlUntypedVar(name))
+  }
   case class lpOlLambdaTerm(vars: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
     override def pretty: String = {
-      s"(${lpLambda.pretty} ${vars.map(name_ty => s"(${name_ty.pretty} : ${name_ty.ty.pretty})").mkString(" ")}, ${body.pretty})"
+      s"(${lpLambda.pretty} ${vars.map(name_ty => s"(${name_ty.pretty} : ${name_ty.ty.lift2Meta.pretty})").mkString(" ")}, ${body.pretty})"
     }
     override def prf: liftedProp = liftedProp(lpOlLambdaTerm(vars, body))
   }
   case class lpOlFunctionApp(f: lpOlTerm, args: Seq[lpTerm]) extends lpOlTerm{
     override def pretty: String = {
-      if (args.isEmpty) f.pretty else s"($f ${args.map(_.pretty).mkString(" ")})"
+      if (args.isEmpty) f.pretty else s"(${f.pretty} ${args.map(_.pretty).mkString(" ")})"
     }
     override def prf: liftedProp = liftedProp(lpOlFunctionApp(f, args))
   }
@@ -297,10 +343,15 @@ object lpDatastructures {
     override def pretty: String = s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
     override def prf: liftedProp = liftedProp(lpOlUntypedBinaryConnectiveTerm(connective, lhs, rhs))
   }
+
+  case class lpOlUntypedBinaryConnectiveTerm_multi(connective: lpOlBinaryConnective, args: Seq[lpOlTerm]) extends lpOlConnectiveTerm {
+    override def pretty: String = s"(${args.map(arg => arg.pretty).mkString(s" ${connective.pretty} ")})"
+    override def prf: liftedProp = liftedProp(lpOlUntypedBinaryConnectiveTerm_multi(connective, args))
+  }
   case class lpOlTypedBinaryConnectiveTerm(connective: lpOlBinaryConnective, ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
     override def pretty: String = {
       val encodedType = ty match{
-        case lpOlMonoType => s"${lpSet2Schme.pretty} ${ty.pretty}"
+        case lpOlMonoType => s"${ty.lift2Poly.pretty}"
         case _ => throw new Exception(s"failed to print lpTypedBinaryConnectiveTerm($connective,$ty,$lhs,$rhs), $ty has wrong format")
       }
       s"(${connective.pretty} [$encodedType] ${lhs.pretty} ${rhs.pretty})"
@@ -316,6 +367,82 @@ object lpDatastructures {
   }
 
 
+  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  ////////////////////////// LP PROOF SCRIPTS //////////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  abstract class lpProofScriptStep(tab: Int) extends lpStatement{
+
+    if (tab < 0) throw new Exception(s"Error: Trying to add negative tabulator in proof scripts of lambdapi encoding")
+
+    def addTab(i:Int) : lpProofScriptStep
+
+  }
+
+  case class lpProofScript(steps: Seq[lpProofScriptStep], tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    val tabs = "\t" * tab
+
+    def addTab(i: Int): lpProofScript = lpProofScript(steps, tab + i)
+
+    override def pretty: String = {
+      s"${steps.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")};"
+    }
+
+    def prettyCurlyBrackets: String = s"$tabs{${steps.map(step => s"${step.pretty}").mkString(s";\n$tabs")}}"
+
+  }
+
+  case class lpRefine(t: lpFunctionApp, tab: Int = 0) extends lpProofScriptStep(tab: Int){
+    def addTab(i : Int): lpRefine = lpRefine(t, tab + i)
+    override def pretty: String = {
+      val tabs = "\t"*tab
+      s"${tabs}refine ${t.pretty}"
+    }
+  }
+
+  case class lpHave(name: String, ty: lpMlType, proofScriptSteps: Seq[lpProofScriptStep],tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+
+    def addTab(i : Int): lpHave = lpHave(name,ty, proofScriptSteps, tab + i)
+    override def pretty: String = {
+      val tabs: String = "\t"*tab
+      s"${tabs}have $name : ${ty.pretty}\n${lpProofScript(proofScriptSteps).addTab(tab + 1).prettyCurlyBrackets}"
+    }
+  }
+
+  case class lpRwritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
+    override def pretty: String = {
+      s".[${patternVar.pretty} in ${pattern.pretty}]"
+    }
+  }
+
+  case class lpRewrite(rewritePattern0: Option[lpRwritePattern], rewriteTerm: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int){
+    def addTab(i : Int): lpRewrite =lpRewrite(rewritePattern0, rewriteTerm, tab + i)
+    override def pretty: String = {
+      val tabs: String = "\t" * tab
+      val rewritePattern = if (rewritePattern0.isDefined) s"${rewritePattern0.get.pretty} " else ""
+      s"${tabs}rewrite $rewritePattern${rewriteTerm.pretty}"
+    }
+  }
+
+  case class lpReflexivity(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    def addTab(i : Int): lpReflexivity = lpReflexivity(tab + i)
+    override def pretty: String = {
+      val tabs: String = "\t" * tab
+      s"${tabs}reflexivity"
+    }
+  }
+
+  case class lpAssume(vars: Seq[lpUntypedVar], tab: Int = 0) extends lpProofScriptStep(tab: Int){
+    def addTab(i : Int): lpAssume = lpAssume(vars, tab + i)
+    override def pretty: String = {
+      val tabs: String = "\t" * tab
+      s"${tabs}assume ${vars.map(var0 => var0.pretty).mkString(" ")}"
+    }
+  }
+
+
+
+
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   ////////////////////////// TEST TEST TEST  ///////////////////////////////////////////////////////////////////////////////////////
@@ -326,6 +453,8 @@ object lpDatastructures {
     print(s"${lpOlFunctionType(Seq(lpOtype,lpItype,lpOlUserDefinedType("h"))).pretty}\n")
     print(s"${lpOlMonoQuantifiedTerm(lpOlForAll, Seq(lpOlTypedVar(lpOlConstantTerm("a"), lpOtype), lpOlTypedVar(lpOlConstantTerm("b"), lpItype)), lpOlBot).pretty}\n")
     print(s"${lpLambdaTerm(Seq(lpTypedVar(lpConstantTerm("a"),lpliftedObjectType(lpOtype)),lpTypedVar(lpConstantTerm("b"),lpliftedObjectType(lpItype))),lpOlBot).pretty}\n")
+
+    print(s"${lpOlUntypedBinaryConnectiveTerm_multi(lpOr,Seq(lpOlConstantTerm("a"),lpOlConstantTerm("a"),lpOlConstantTerm("a"))).pretty}")
   }
 
 }

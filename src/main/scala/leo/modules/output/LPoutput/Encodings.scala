@@ -29,10 +29,10 @@ object Encodings {
 
  */
 
-  def type2LP (ty: Type, sig: Signature):(lpOlType,Set[lpTerm])={
+  def type2LP (ty: Type, sig: Signature):(lpOlType,Set[lpStatement])={
     type2LP(ty, sig, Set.empty)
   }
-  def type2LP (ty: Type, sig: Signature, usedSymbols0:Set[lpTerm]):(lpOlType,Set[lpTerm])={
+  def type2LP (ty: Type, sig: Signature, usedSymbols0:Set[lpStatement]):(lpOlType,Set[lpStatement])={
     var usedSymbols = usedSymbols0
     ty match {
       case BaseType(id) =>
@@ -113,7 +113,7 @@ object Encodings {
     }
   }
 
-  def def2LP(t:Term,sig:Signature,usedSymbols:Set[lpTerm]): (lpOlTerm,Set[lpTerm],Seq[(String, Type)])={
+  def def2LP(t:Term,sig:Signature,usedSymbols:Set[lpStatement]): (lpOlTerm,Set[lpStatement],Seq[(String, Type)])={
     // Definitions must be handled differently because we want to translate them to rules in LP.
     // Therefore we need to extract the used variable symbols and proceed them with a "$"
     t match {
@@ -128,7 +128,7 @@ object Encodings {
     }
   }
 
-  final def clauseVars2LP(fvs: Seq[(Int, Type)], sig: Signature, usedSymbols0: Set[lpTerm]): (Seq[lpTypedVar], Map[Int, String],Set[lpTerm]) = {
+  final def clauseVars2LP(fvs: Seq[(Int, Type)], sig: Signature, usedSymbols0: Set[lpStatement]): (Seq[lpTypedVar], Map[Int, String],Set[lpStatement]) = {
     val fvCount = fvs.size
     //val boundVars: StringBuffer = new StringBuffer()
     var boundVars: Seq[lpTypedVar] = Seq.empty
@@ -152,7 +152,7 @@ object Encodings {
     }
     (boundVars, resultBindingMap, usedSymbols)
   }
-  def clause2LP0(cl: Clause, bVarMap: Map[Int, String],sig: Signature, usedSymbols0: Set[lpTerm]): (lpOlTerm,Set[lpTerm]) = {
+  def clause2LP0(cl: Clause, bVarMap: Map[Int, String],sig: Signature, usedSymbols0: Set[lpStatement]): (lpOlTerm,Set[lpStatement]) = {
     //val encodedClause = new StringBuilder
     var encodedClause: lpOlTerm = lpOlNothing
     var usedSymbols = usedSymbols0
@@ -162,6 +162,7 @@ object Encodings {
       usedSymbols = usedSymbolsUpdated
       encodedClause = encBot
     }else{
+      var lits: Seq[lpOlTerm] = Seq.empty
       // otherwise we encode and add the literals one by one
       val litIt = cl.lits.iterator
       while (litIt.hasNext) {
@@ -179,7 +180,9 @@ object Encodings {
             encLit = lpOlTypedBinaryConnectiveTerm(lpInEq,encTyTl.lift2Poly,lefEnc,rigEnc)
           }
         } else {
+          //print(s"here is the problem 1\n")
           val (termEnc, usedSymbolsUpdated) = term2LP(lit.left, bVarMap, sig, usedSymbols)
+          //print(s"encoded term: ${termEnc.pretty}\n")
           usedSymbols = usedSymbolsUpdated
           if (lit.polarity){
             encLit = termEnc
@@ -188,19 +191,15 @@ object Encodings {
             }
           }
         // either start the clause with the encoded lit (if no lits have been added so far) or add it to the disjunction
-        if (litIt.hasNext) {
-          if (encodedClause == lpOlNothing){
-            encodedClause = encLit
-          } else {
-            encodedClause = lpOlUntypedBinaryConnectiveTerm(lpOr,encodedClause,encLit)
-          }
+        lits = lits :+ encLit
         }
-        }
+      encodedClause = if (lits.length == 1) lits.head else lpOlUntypedBinaryConnectiveTerm_multi(lpOr,lits)
       }
     (encodedClause,usedSymbols)
     }
 
-  final def clause2LP(cl: Clause, usedSymbols0: Set[lpTerm], sig: Signature): (lpMlType, Set[lpTerm]) = {
+  final def clause2LP_unquantified(cl: Clause, usedSymbols0: Set[lpStatement], sig: Signature): (Seq[lpTypedVar],lpOlTerm, Set[lpStatement]) = {
+    //print(s"\nencoding ${cl.pretty}\n")
     val freeVarsExist = cl.implicitlyBound.nonEmpty || cl.typeVars.nonEmpty
     var usedSymbols = usedSymbols0
     if (freeVarsExist) {
@@ -208,28 +207,41 @@ object Encodings {
       // Add implicitly quantified type variables
       var quantifiedVars: Seq[lpTypedVar] = Seq.empty
       // todo: add the T vars to counted here
-      //  and: is it right to just make these things Set types? It sould be since we can only quantify over mono types right?
+      //  and: is it right to just make these things Set types? It should be since we can only quantify over mono types right?
       quantifiedVars = quantifiedVars ++ (cl.typeVars.reverse.map(i => lpTypedVar(lpConstantTerm(s"T${intToName(i - 1)}"), lpSet)))
       // Add implicitly quantified typed variables
       val (namedFVEnumerationLP, bVarMap, usedSymbolsUpdated) = clauseVars2LP(cl.implicitlyBound, sig, usedSymbols)
       quantifiedVars = quantifiedVars ++ namedFVEnumerationLP
       // With this we now encode the actual clause
       val (encClause, usedSymbolsClause) = clause2LP0(cl, bVarMap, sig, usedSymbolsUpdated)
+      //print(s"done ! ${encClause.pretty}\n")
       usedSymbols = usedSymbolsClause
-      (lpMlDependType(quantifiedVars,encClause.prf), usedSymbols)
+      //(lpMlDependType(quantifiedVars,encClause.prf), usedSymbols)
+      (quantifiedVars,encClause,usedSymbols)
     } else {
       // otherwise we just encode the clause and lift it to a proof term
       val (encClause, usedSymbolsClause) = clause2LP0(cl, Map.empty, sig, usedSymbols)
+      //print(s"done ! ${encClause.pretty}\n")
       usedSymbols = usedSymbolsClause
-      (encClause.prf,usedSymbols)
+      //(encClause.prf,usedSymbols)
+      (Seq.empty,encClause,usedSymbols)
     }
   }
 
-  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature): (lpOlTerm,Set[lpTerm]) = {
+  final def clause2LP(cl: Clause, usedSymbols0: Set[lpStatement], sig: Signature): (lpMlType, Set[lpStatement]) = {
+    val (quantifiedVars,encClause,usedSymbols) = clause2LP_unquantified(cl, usedSymbols0, sig)
+    if (quantifiedVars.isEmpty){
+      (encClause.prf,usedSymbols)
+    }else{
+      (lpMlDependType(quantifiedVars,encClause.prf), usedSymbols)
+    }
+  }
+
+  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature): (lpOlTerm,Set[lpStatement]) = {
     term2LP(t,bVars,sig,Set.empty)
   }
-  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpTerm]): (lpOlTerm,Set[lpTerm]) = {
-
+  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpStatement]): (lpOlTerm,Set[lpStatement]) = {
+    //print(s"encoding a term: ${t.pretty}\n")
     // modelled after toTPTP0
 
     t match {
@@ -265,7 +277,7 @@ object Encodings {
         //throw new Error(s"quantifiers are not encoded yet 1 ${t.pretty}")
       case Exists(_) =>
         // todo: Add explicit types for quantifiers?
-        val (bVarTys, body) = collectForall(t)
+        val (bVarTys, body) = collectExists(t)
         val newBVars = makeBVarList(bVarTys, bVars.size)
         val (encBody, usedSymbolsUpdated) = term2LP(body, fusebVarListwithMap(newBVars, bVars), sig, usedSymbols)
         var usedSymbolsQuant = usedSymbolsUpdated
@@ -294,7 +306,7 @@ object Encodings {
         val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
         val (encTyTl, updatedUsedSymbolsTyL) = type2LP(tl.ty,sig,updatedUsedSymbolsR)
         // todo: here i need to make changes for polymorphic types of LP TYPE Scheme
-        (lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl.lift2Poly,encodedTl,encodedTr), updatedUsedSymbolsTyL + lpEq)
+        (lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl,encodedTl,encodedTr), updatedUsedSymbolsTyL + lpEq)
       case tl !=== tr =>
         val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
         val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
@@ -365,36 +377,43 @@ object Encodings {
       case _ => throw new IllegalArgumentException("Unexpected term format during conversion to LP")
     }
   }
-  
 
-  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long,ClauseProxy], parentInLpEncID: Seq[Long], sig: Signature): (lpTerm,Set[lpTerm]) = {
+
+  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long,ClauseProxy], parentInLpEncID: Seq[Long], sig: Signature,parameters0:(Int,Int,Int,Int)): (lpStatement,(Int,Int,Int,Int),Set[lpStatement]) = {
     val rule = cl.annotation.fromRule
+
+    val continuousNumbers = true
+
+    val parameters = if (continuousNumbers) parameters0 else (0,0,0,0)
 
     if (!Seq(leo.datastructures.Role_Conjecture,leo.datastructures.Role_NegConjecture).contains(cl.role)){ // we start our proof with the negated conjecture
 
       rule match {
         case leo.modules.calculus.PolaritySwitch =>
           //todo: dont forget to map to the correct formula! make special case for negated conjecture
-          val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head,parentInLpEncID.head,sig) //¿polarity switch always only has one parent, right?
-          (encoding._1,encoding._3)
+          val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head,parentInLpEncID.head,sig,parameters) //¿polarity switch always only has one parent, right?
+          encoding
         case leo.modules.calculus.FuncExt =>
-          val encoding = encFuncExtPosClause(cl, cl.annotation.parents.head,cl.furtherInfo.edLitBeforeAfter,parentInLpEncID.head,sig)
-          (encoding._1, Set.empty) // no new symbols this time
+          val encoding = encFuncExtPosClause(cl, cl.annotation.parents.head,cl.furtherInfo.edLitBeforeAfter,parentInLpEncID.head,sig,parameters)
+          (encoding._1,encoding._2, Set.empty) // no new symbols this time
         case leo.modules.calculus.BoolExt =>
-          val encoding = encBoolExtClause(cl, cl.annotation.parents.head,parentInLpEncID.head, sig)
-          (encoding._1, encoding._3)
+          val encoding = encBoolExtClause(cl, cl.annotation.parents.head, parentInLpEncID.head, sig,parameters)
+          encoding
         case leo.modules.calculus.OrderedEqFac =>
-          val encodings = encEqFactClause(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig)
-          //throw new Exception(s"Eq factoring info: ${cl.furtherInfo.addInfoEqFac}")
-          (encodings._1, encodings._3)
+          val encodings = encEqFactClause(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig,parameters)
+          encodings
+        case leo.modules.calculus.DefExpSimp =>
+          val encodings = simplificationProofScript(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoSimp,parentInLpEncID.head,sig)
+          (encodings._1,(0,0,0,0),encodings._2)
         //case leo.modules.calculus.PreUni =>
          // throw new Exception(s"${}")
+
         case _ =>
           //print(s"\n $rule not encoded yet \n\n")
-          (lpOlNothing,Set.empty)
+          (lpOlNothing,parameters,Set.empty)
       }
     }//todo: either introduce else or filter out conj before!
-    else (lpOlNothing,Set.empty)
+    else (lpOlNothing,parameters,Set.empty)
   }
 
 }

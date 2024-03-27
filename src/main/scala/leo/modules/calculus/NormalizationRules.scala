@@ -26,6 +26,11 @@ object DefExpSimp extends CalculusRule {
     Simp.normalize(t.δ_expand_upTo(symb).betaNormalize.etaExpand)
   }
 
+  final def apply_andTrack(t: Term)(implicit sig: Signature): (Term, Seq[(Seq[Int], String, Term, Term)]) = {
+    val symb: Set[Signature.Key] = Set(sig("?").key, sig("&").key, sig("=>").key)
+    Simp.normalize_andTrack(t.δ_expand_upTo(symb).betaNormalize.etaExpand)
+  }
+
   final def apply(cl: Clause)(implicit sig: Signature): Clause = {
     val litsIt = cl.lits.iterator
     var newLits: Seq[Literal] = Vector()
@@ -979,6 +984,17 @@ object Simp extends CalculusRule {
     val result = simp
     if (t.sharing) Term.insert(result)
     else result
+  }
+
+  final def normalize_andTrack(t: Term): (Term, Seq[(Seq[Int], String, Term, Term)]) = {
+    // termSimp(t)
+    import leo.modules.procedures.{Simplification, GroundArithmeticEval}
+    val arith = GroundArithmeticEval.apply(t)
+    val (simp, addInfo) = Simplification.track(arith)
+
+    val result = simp
+    if (t.sharing) (Term.insert(result), addInfo)
+    else (result, addInfo)
   }
 
   /**
