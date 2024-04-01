@@ -26,6 +26,8 @@ object SimplificationEncoding {
     def ty: lpMlType
 
     def proof: lpTerm
+
+    def dec: lpDeclaration
   }
 
   case object Simp1 extends simplificationRules{
@@ -44,14 +46,13 @@ object SimplificationEncoding {
       lpLambdaTerm(Seq(lpUntypedVar(x1),lpTypedVar(h1,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,x1).prf)),lpFunctionApp(h1,Seq(x1,lpLambdaTerm(Seq(lpUntypedVar(h2)),lpUntypedVar(h2)),lpLambdaTerm(Seq(lpUntypedVar(h2)),lpUntypedVar(h2)))))
     }
 
-    override def pretty: String = {
+    val arguments: Seq[lpVariable] =
+      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${x1.pretty}]")))
+      else Seq(lpUntypedVar(x1))
 
-      val arguments: Seq[lpVariable] =
-        if(implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${x1.pretty}]")))
-        else Seq(lpUntypedVar(x1))
+    override def dec: lpDeclaration = lpDeclaration(Simp1.name,arguments,ty)
 
-      lpDefinition(Simp1.name,arguments,ty,proof).pretty
-    }
+    override def pretty: String = lpDefinition(Simp1.name,arguments,ty,proof).pretty
   }
 
   case object Simp1_eq extends simplificationRules {
@@ -67,14 +68,35 @@ object SimplificationEncoding {
       throw new Exception("proofs for simplificationRules not encoded yet")
     }
 
-    override def pretty: String = {
+    val arguments: Seq[lpVariable] =
+      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${x1.pretty}]")))
+      else Seq(lpUntypedVar(x1))
 
-      val arguments: Seq[lpVariable] =
-        if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${x1.pretty}]")))
-        else Seq(lpUntypedVar(x1))
+    override def dec: lpDeclaration = lpDeclaration(Simp1_eq.name,arguments,ty)
 
-      lpDefinition(Simp1.name, arguments, ty, proof).pretty
+    override def pretty: String = lpDefinition(Simp1_eq.name, arguments, ty, proof).pretty
+  }
+
+  case object Simp7_eq extends simplificationRules {
+
+    val x1 = lpOlConstantTerm("x")
+
+    override def name: lpConstantTerm = lpConstantTerm("Simp7_eq")
+
+    // Prf(eq [↑ o] (x ∨ ⊥) x)
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,lpOlBot),x1).prf
+
+    override def proof: lpTerm = {
+      throw new Exception("proofs for simplificationRules not encoded yet")
     }
+
+    val arguments: Seq[lpVariable] =
+      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${x1.pretty}]")))
+      else Seq(lpUntypedVar(x1))
+
+    override def dec: lpDeclaration = lpDeclaration(Simp7_eq.name,arguments,ty)
+
+    override def pretty: String = lpDefinition(Simp7_eq.name, arguments, ty, proof).pretty
   }
 
   case object Simp9_eq extends simplificationRules {
@@ -85,20 +107,42 @@ object SimplificationEncoding {
     override def name: lpConstantTerm = lpConstantTerm("Simp9_eq")
 
     // Simp9_eq [T] x : Prf (eq [↑ o] (eq [T] x x) ⊤)
-    override def ty: lpMlType = lpMlDependType(Seq(lpUntypedVar(lpConstantTerm(T.pretty)),lpUntypedVar(x1)),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,T,x1,x1),lpOlTop).prf)
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,T,x1,x1),lpOlTop).prf
 
     override def proof: lpTerm = {
       throw new Exception("proofs for simplificationRules not encoded yet")
     }
 
-    override def pretty: String = {
+    val arguments: Seq[lpVariable] =
+      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${T.pretty}${x1.pretty}]")))
+      else Seq(lpUntypedVar(T),lpUntypedVar(x1))
 
-      val arguments: Seq[lpVariable] =
-        if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${T.pretty}${x1.pretty}]")))
-        else Seq(lpUntypedVar(x1))
+    override def dec: lpDeclaration = lpDeclaration(Simp9_eq.name,arguments,ty)
 
-      lpDefinition(Simp1.name, arguments, ty, proof).pretty
+    override def pretty: String = lpDefinition(Simp9_eq.name, arguments, ty, proof).pretty
+  }
+
+  case object Simp10_eq extends simplificationRules {
+
+    val T = lpOlUserDefinedType("T")
+    val x1 = lpOlConstantTerm("x")
+
+    override def name: lpConstantTerm = lpConstantTerm("Simp10_eq")
+
+    // Simp10_eq [T] x : Prf (inEq [↑ o] (inEq [T] x x) ⊥)
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpInEq, T, x1, x1), lpOlBot).prf
+
+    override def proof: lpTerm = {
+      throw new Exception("proofs for simplificationRules not encoded yet")
     }
+
+    val arguments: Seq[lpVariable] =
+      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${T.pretty}${x1.pretty}]")))
+      else Seq(lpUntypedVar(T),lpUntypedVar(x1))
+
+    override def dec: lpDeclaration = lpDeclaration(Simp10_eq.name,arguments,ty)
+
+    override def pretty: String = lpDefinition(Simp10_eq.name, arguments, ty, proof).pretty
   }
 
   case object Simp16_eq extends simplificationRules {
@@ -106,15 +150,15 @@ object SimplificationEncoding {
     override def name: lpConstantTerm = lpConstantTerm("Simp16_eq")
 
     // Simp16_eq : Prf (eq [↑ o] (¬ ⊤) ⊥)
-    override def ty: lpMlType = throw new Exception("proofs for simplificationRules not encoded yet")
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlUnaryConnectiveTerm(lpNot,lpOlTop),lpOlBot).prf
 
     override def proof: lpTerm = {
       throw new Exception("proofs for simplificationRules not encoded yet")
     }
 
-    override def pretty: String = {
-      lpDefinition(Simp1.name, Seq.empty, ty, proof).pretty
-    }
+    override def dec: lpDeclaration = lpDeclaration(Simp16_eq.name,Seq.empty,ty)
+
+    override def pretty: String = lpDefinition(Simp16_eq.name, Seq.empty, ty, proof).pretty
   }
 
 }

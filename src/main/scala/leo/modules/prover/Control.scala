@@ -1114,17 +1114,24 @@ package inferenceControl {
 //          Set(res)
 //        } else Set()
         Out.finest(s"Unification failed, but looking for uni simp.")
-        val detUniSimps = detUniInferences(cl0)(state)
+        val detUniSimps = detUniInferences(cl0)(state) //todo M
         Out.finest(s"No unification, but Uni Simp result: ${detUniSimps.map(_.pretty(sig)).mkString("\n")}")
         detUniSimps
       } else {
         var uniResult: Set[AnnotatedClause] = Set.empty
+        var newResult: Set[AnnotatedClause] = Set.empty
         val uniResultIt = uniResult0.iterator
         while (uniResultIt.hasNext) {
           val uniRes = uniResultIt.next()
           uniResult = uniResult union defaultUnify(freshVarGen, uniRes)(state)
+          // add the information about the kind of unification
+          uniResult foreach {aCl =>
+            val addInfo = aCl.furtherInfo
+            addInfo.addInfoUniRule = ("uniAfterFactoring",(uniLit1, uniLit2))
+            newResult = newResult + AnnotatedClause(aCl.cl,aCl.role,aCl.annotation,aCl.properties,addInfo)
+          }
         }
-        uniResult
+        newResult
       }
     }
 
@@ -1199,7 +1206,10 @@ package inferenceControl {
                                uniResult: UniResult,
                                rule: CalculusRule)(sig: Signature): AnnotatedClause = {
       val (clause, subst) = uniResult
-      val res = AnnotatedClause(clause, InferredFrom(rule, Seq((origin, ToTPTP(subst._1, subst._2, origin.cl.implicitlyBound, origin.cl.typeVars)(sig)))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,origin.properties | ClauseAnnotation.PropUnified))
+      val (tPTPRepresent, addInfoUnification0) = ToTPTP.apply_andTrack(subst._1, subst._2, origin.cl.implicitlyBound, origin.cl.typeVars)(sig)
+      val addInfoUnification = new FurtherInfo()
+      addInfoUnification.addInfoUni = (addInfoUnification.addInfoUni._1 ++ addInfoUnification0._1,addInfoUnification.addInfoUni._2 ++ addInfoUnification0._2)
+      val res = AnnotatedClause(clause, Role_Plain, InferredFrom(rule, Seq((origin, tPTPRepresent))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,origin.properties | ClauseAnnotation.PropUnified),addInfoUnification)
       res
     }
 

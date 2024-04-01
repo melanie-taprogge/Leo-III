@@ -24,4 +24,20 @@ object lpUseful {
     override def pretty: String = definition.pretty
   }
 
+  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+  ////////////////////////// APPLY DEDUCTION RULES /////////////////////////////////////////////////////////////////////////////////
+  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+  def applyToEqualityTerm(ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm, eqTermName: lpTerm, p: lpOlTerm, prfPlhsName: Option[lpTerm]): lpFunctionApp = {
+    if (reducedLogic) {
+      val args = if (prfPlhsName.isDefined) Seq(lhs,rhs,eqTermName,p,prfPlhsName.get) else Seq(lhs,rhs,eqTermName,p)
+      lpFunctionApp(lpConstantTerm("=def"),args)
+    }
+    else {
+      val args = if (prfPlhsName.isDefined) Seq(p,prfPlhsName.get) else Seq(p)
+      lpFunctionApp(eqTermName,args)
+    }
+  }
+
+
 }

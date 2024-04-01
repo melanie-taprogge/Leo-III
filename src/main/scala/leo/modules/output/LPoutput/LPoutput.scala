@@ -1,6 +1,6 @@
 package leo.modules.output.LPoutput
 
-import leo.datastructures.{ClauseProxy, Role_Conjecture, Role_NegConjecture}
+import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture}
 import leo.modules.embeddings.DHOLEmbedding.constants
 import leo.modules.output.{ToTPTP, tptpEscapeName}
 import leo.modules.prover.LocalState
@@ -11,10 +11,39 @@ import leo.modules.output.ToTPTP.toTPTP
 import leo.modules.proof_object.CompressProof
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.calculusEncoding._
+import leo.modules.output.LPoutput.SimplificationEncoding
 
 import scala.collection.mutable
 
 object LPoutput {
+
+  def generateSignature(usedSymbols: Set[lpStatement]): String = {
+
+    var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
+
+    // sort the symbols
+    usedSymbols foreach { symbol =>
+      symbol match {
+        case simpRule: SimplificationEncoding.simplificationRules =>
+          simplificationRules = simplificationRules + simpRule
+        case _ =>
+        // do nothing
+      }
+    }
+
+    // now print the symbols
+    val output: mutable.StringBuilder = new StringBuilder()
+    output.append("//SIGNATURE\n\n\n\n")
+
+    // add simplification rules
+    if (simplificationRules.nonEmpty) output.append("////// Simplification Rules \n\n")
+    simplificationRules foreach { simpRrule =>
+      output.append(simpRrule.dec.pretty)
+      output.append("\n")
+    }
+
+    output.toString()
+  }
 
   def dosomething(state: LocalState):Unit={
 
@@ -26,6 +55,7 @@ object LPoutput {
       val proof = state.proof
 
       val encodedProblem: StringBuffer = new StringBuffer()
+      val encodedProof: StringBuffer = new StringBuffer()
       var usedSymbols:Set[lpStatement] = Set.empty
       var parameters: (Int,Int,Int,Int) = (0,0,0,0)
 
@@ -79,6 +109,7 @@ object LPoutput {
       }
 
       // encode the used axioms
+      /*
       var axCounter = 0
       axiomsInProof(proof) foreach {ax =>
         val (encClause, usedSymbolsNew) = clause2LP(ax.cl,usedSymbols,sig)
@@ -87,6 +118,7 @@ object LPoutput {
         encodedProblem.append(lpDeclaration(lpConstantTerm(s"axiom$axCounter"),Seq.empty,encClause).pretty)
         axCounter = axCounter +1
       }
+       */
 
       // encode the conjecture
       /*
@@ -109,13 +141,15 @@ object LPoutput {
         var idClauseMap: mutable.HashMap[Long,ClauseProxy] = mutable.HashMap.empty
         val identicalSteps: mutable.HashMap[Long,lpConstantTerm] = mutable.HashMap.empty
         var conjCounter = 0
+        var axCounter = 0
 
-        compressedProof foreach {step =>
-          print(s"\nstep number ${step.id}, role ${step.role}\n\n")
+        compressedProof foreach { step =>
           val stepId = step.id
           idClauseMap = idClauseMap + (stepId -> step)
 
-          if (step.role == Role_NegConjecture){
+          //print(s"step num: $stepId\n")
+
+          if (step.role == Role_NegConjecture) {
             val (encConj, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
             usedSymbols = usedSymbolsNew
             //encodedProblem.append(s"symbol negatedConjecture$conjCounter : $encConj;\n")
@@ -125,7 +159,14 @@ object LPoutput {
             identicalSteps += (stepId -> conjName)
             //print(s"identical steps: $identicalSteps\n")
             conjCounter = conjCounter + 1
-          } else {
+          } else if (step.role == Role_Axiom){ //todo: what about other roles like lamme etc. ?
+            val (encClause, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
+            usedSymbols = usedSymbolsNew
+            val axName = lpConstantTerm(s"axiom$axCounter")
+            encodedProblem.append(lpDeclaration(axName, Seq.empty, encClause).pretty)
+            identicalSteps += (stepId -> axName)
+            axCounter = axCounter + 1
+          }else {
 
             val (encStep, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
             usedSymbols = usedSymbolsNew
@@ -137,7 +178,6 @@ object LPoutput {
                 //print(s"\nstep number ${parent.id} endoing ${encParent.pretty}, role ${parent.role}\n\n")
                 if (encParent == encStep) {
                   // update the dictionary keeping track of eqivalent steps
-                  print(s"identical steps: $identicalSteps\n")
                   val existingValue: lpConstantTerm = {
                     if (identicalSteps.contains(stepId)) {
                       if (identicalSteps(stepId) != nameStep(parent.id.toInt)) {
@@ -157,8 +197,6 @@ object LPoutput {
                     }
                   }
                   //val existingValue = identicalSteps.getOrElseUpdate(stepId, nameStep(parent.id.toInt))
-                  print(s"identical steps: $identicalSteps\n")
-                  print(s"existingValue: $existingValue\n")
                 } else encodeStep = true
               }
             }
@@ -173,14 +211,14 @@ object LPoutput {
               // if the step is actually new, we want to add it to the output
               if (proofTerm == lpOlNothing) {
                 // todo: encode these rules! :)
-                encodedProblem.append(s"\n// The rule ${step.annotation.fromRule} is not encoded yet\n")
-                encodedProblem.append(s"symbol step${step.id} : ${encStep.pretty};\n")
+                encodedProof.append(s"\n// The rule ${step.annotation.fromRule} is not encoded yet\n")
+                encodedProof.append(s"symbol step${step.id} : ${encStep.pretty};\n")
               } else {
                 // otherwise we provide it as an axiom
                 //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
                 // and encode the proof based on its parent clauses
                 //encodedProblem.append(s"$proofTerm;\n")
-                encodedProblem.append(s"\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm).pretty}\n")
+                encodedProof.append(s"\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm).pretty}\n")
                 // and we will add the necessary symbols to the generated Signature
                 usedSymbols = updatedUsedSymbols
                 parameters = updatedParameters
@@ -209,7 +247,11 @@ object LPoutput {
            */
       }
 
+      // generate the signature
+      val signatureOutput = generateSignature(usedSymbols)
+      print(signatureOutput)
       print(encodedProblem)
+      print(encodedProof)
     }
 
     extractNecessaryFormulas(state)

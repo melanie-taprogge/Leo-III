@@ -12,7 +12,7 @@ import leo.modules.calculus._
 import leo.modules.output._
 import leo.modules.output.LPoutput.LPSignature._
 import leo.modules.output.LPoutput.calculusEncoding._
-import leo.modules.output.ToTPTP.{collectExists, collectForall}
+import leo.modules.output.ToTPTP.{collectExists, collectForall, typeToTHF}
 import leo.modules.output.LPoutput.lpDatastructures._
 
 import scala.collection.mutable
@@ -112,6 +112,25 @@ object Encodings {
       case _ => (vars, t)
     }
   }
+
+  final def clauseImplicitsToTPTPQuantifierList_map(implicitlyQuantified: Seq[(Int, Type)])(sig: Signature): Map[Int, String] = {
+    // shoretened version to only consruct the map
+    //todo either incorporate somewhere or make it a proper function
+    val count = implicitlyQuantified.size
+    var resultBindingMap: Map[Int, String] = Map()
+
+    var curImplicitlyQuantified = implicitlyQuantified
+    var i = 0
+    while (i < count) {
+      val (scope, _) = curImplicitlyQuantified.head
+      curImplicitlyQuantified = curImplicitlyQuantified.tail
+      val name = intToName(count - i - 1)
+      resultBindingMap = resultBindingMap + (scope -> name)
+      i = i + 1
+    }
+    resultBindingMap
+  }
+
 
   def def2LP(t:Term,sig:Signature,usedSymbols:Set[lpStatement], encAsRewriteRule: Boolean): (lpOlTerm,Set[lpStatement],Seq[(String, Type)])={
     // Definitions must be handled differently because we want to translate them to rules in LP.
@@ -243,6 +262,7 @@ object Encodings {
     term2LP(t,bVars,sig,Set.empty)
   }
   def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpStatement]): (lpOlTerm,Set[lpStatement]) = {
+    //todo: dont i need the offset? was it an oversight not to use it in term2lp?
     //print(s"encoding a term: ${t.pretty}\n")
     // modelled after toTPTP0
 
@@ -381,7 +401,7 @@ object Encodings {
   }
 
 
-  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long,ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature,parameters0:(Int,Int,Int,Int)): (lpStatement,(Int,Int,Int,Int),Set[lpStatement]) = {
+  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long,ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0:(Int,Int,Int,Int)): (lpStatement,(Int,Int,Int,Int),Set[lpStatement]) = {
     val rule = cl.annotation.fromRule
 
     val continuousNumbers = true
@@ -407,11 +427,17 @@ object Encodings {
         case leo.modules.calculus.DefExpSimp =>
           //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
           // todo: eta expansion
-
           val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoSimp,cl.furtherInfo.addInfoDefExp,parentInLpEncID.head,sig)
           (encodingsSimp._1,(0,0,0,0),encodingsSimp._2)
-        //case leo.modules.calculus.PreUni =>
-         // throw new Exception(s"${}")
+        case leo.modules.calculus.Simp =>
+          throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
+          // todo: eta expansion
+          val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
+          (encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
+        case leo.modules.calculus.PreUni =>
+          val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
+          (encodingPreUni._1,parameters,encodingPreUni._2)
+          //throw new Exception(s"${cl.furtherInfo.addInfoUni}")
 
         case _ =>
           //print(s"\n $rule not encoded yet \n\n")

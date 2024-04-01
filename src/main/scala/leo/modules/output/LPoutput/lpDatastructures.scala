@@ -6,6 +6,8 @@ object lpDatastructures {
   ////////////////////////// KINDS OF STATEMENTS ///////////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
+  val reducedLogic = true
+
   abstract class lpStatement{
     def pretty: String
   }
@@ -259,12 +261,20 @@ object lpDatastructures {
   final case object lpOr extends lpOlBinaryConnective {override def pretty: String = "∨"}
   final case object lpAnd extends lpOlBinaryConnective {override def pretty: String = "∧"}
   final case object lpImp extends lpOlBinaryConnective {override def pretty: String = "⇒"}
-  final case object lpEq extends lpOlBinaryConnective {override def pretty: String = "eq"}
+  final case object lpEq extends lpOlBinaryConnective {
+    override def pretty: String = if (reducedLogic) "=" else "eq"
+    def definitionName(): lpConstantTerm = {
+      if (reducedLogic) (lpConstantTerm(s"=def"))
+
+      else throw new Exception(s"trying to use =def in non-reduced logic")
+    }
+  }
   final case object lpInEq extends lpOlBinaryConnective {override def pretty: String = "inEq"}
 
   abstract class lpOlQuantifier extends lpOlConnective
   final case object lpOlExists extends lpOlQuantifier {override def pretty: String = "∃"}
   final case object lpOlForAll extends lpOlQuantifier {override def pretty: String = "∀"}
+
 
   abstract class lpOlTerm extends lpTerm{
     def prf: lpMlType
@@ -308,6 +318,7 @@ object lpDatastructures {
   case class lpRuleVariable(v: lpOlConstantTerm) extends lpVariable {
     override def pretty: String = s"(${v.pretty})"
   }
+
   case class lpOlTypedVar(name: lpOlConstantTerm,ty: lpOlType) extends lpOlTerm {
     override def pretty: String = name.pretty
     def lift2Meta: lpTypedVar = lpTypedVar(lpConstantTerm(name.pretty),ty.lift2Meta)
@@ -349,11 +360,17 @@ object lpDatastructures {
   }
   case class lpOlTypedBinaryConnectiveTerm(connective: lpOlBinaryConnective, ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
     override def pretty: String = {
-      val encodedType = ty match{
-        case lpOlMonoType => s"${ty.lift2Poly.pretty}"
-        case _ => throw new Exception(s"failed to print lpTypedBinaryConnectiveTerm($connective,$ty,$lhs,$rhs), $ty has wrong format")
+      if (reducedLogic) {
+        if (connective == lpInEq) lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,ty, lhs, rhs)).pretty
+        else s"( ${connective.pretty} ${lhs.pretty} ${rhs.pretty})"
       }
-      s"(${connective.pretty} [$encodedType] ${lhs.pretty} ${rhs.pretty})"
+      else {
+        val encodedType = ty match {
+          case lpOlMonoType => s"${ty.lift2Poly.pretty}"
+          case _ => throw new Exception(s"failed to print lpTypedBinaryConnectiveTerm($connective,$ty,$lhs,$rhs), $ty has wrong format")
+        }
+        s"(${connective.pretty} [$encodedType] ${lhs.pretty} ${rhs.pretty})"
+      }
     }
     override def prf: liftedProp = liftedProp(lpOlTypedBinaryConnectiveTerm(connective, ty, lhs, rhs))
   }
@@ -416,7 +433,8 @@ object lpDatastructures {
     override private[lpDatastructures] def openCurlyBracket: String = s"{${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
 
     def prettyCurlyBrackets: String = {
-      s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}}"
+      if (steps.length == 1) s"${steps.head.addTab(tab).openCurlyBracket}}"
+      else s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}}"
     }
 
     override def toProofScrips: lpProofScript = lpProofScript(steps, tab)
@@ -451,13 +469,13 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpHave(name,ty, proofScript, tab)))
   }
 
-  case class lpRwritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
+  case class lpRewritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
     override def pretty: String = {
       s".[${patternVar.pretty} in ${pattern.pretty}]"
     }
   }
 
-  case class lpRewrite(rewritePattern0: Option[lpRwritePattern], rewriteTerm: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int){
+  case class lpRewrite(rewritePattern0: Option[lpRewritePattern], rewriteTerm: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpRewrite =lpRewrite(rewritePattern0, rewriteTerm, tab + i)
     override def pretty: String = {
       val tabs: String = "\t" * tab

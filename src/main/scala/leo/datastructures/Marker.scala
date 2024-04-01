@@ -1,7 +1,8 @@
 package leo.datastructures
 
 import leo.datastructures.TPTP.AnnotatedFormula.FormulaType.FormulaType
-import leo.modules.HOLSignature.LitTrue
+import leo.modules.HOLSignature.{LitFalse, LitTrue}
+import leo.modules.calculus.Unification
 import leo.modules.output.Output
 
 import scala.annotation.tailrec
@@ -174,6 +175,8 @@ class FurtherInfo (val literalsBeforeAfter0: Seq[Seq[Literal]] = Seq.empty, val 
   // unification of types and simplification are represented as booleans for now, eventually I can replace this with information necessary to also encode these steps
   var addInfoEqFac: (Literal,Literal,Literal,Literal,Boolean,Boolean) = (Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),false,false)
   var addInfoDefExp: Seq[Signature.Key] = Seq.empty
+  var addInfoUniRule: (String,(Literal,Literal)) = ("",(Literal(LitFalse(),false),Literal(LitFalse(),false))) // todo for now I am doing it this way but maybe if i do not need this for other rules as well it would be better to use tuples
+  var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
 }
 
 
