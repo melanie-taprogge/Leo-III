@@ -1,5 +1,6 @@
 package leo.modules.output.LPoutput
 
+import leo.datastructures.Clause.maxImplicitlyBound
 import leo.datastructures.Literal.{asTerm, vars}
 import leo.modules.output.LPoutput.LPSignature._
 import leo.modules.output.LPoutput.Encodings._
@@ -616,6 +617,8 @@ object calculusEncoding {
   }
 
   def makeLiteralEquational(lit: Literal,desiredPolarity: Boolean,bVarMap: Map[Int, String], sig: Signature,parameters0: (Int, Int, Int, Int)):(lpOlTerm,lpOlTerm,lpTerm,lpTerm,lpOlTerm,lpOlTerm, (Int, Int, Int, Int), Set[lpStatement])={
+    // this is the old version that produces proof terms rather than proof scripts
+
     // takes a literal and an desired polarity and returns:
     // - the encoded version of the literal itself and the equational version
     // - the lambda term of type Prf lit -> Prf eqLit as well as Prf eqLit -> Prf lit
@@ -720,6 +723,39 @@ object calculusEncoding {
         }
 
       }
+    }
+  }
+
+  def findLitInClause(lit: Literal, parent: Clause): Int = {
+    val indicesOfOccurrence: IndexedSeq[Int] = parent.lits.indices.filter(index => parent.lits(index) == lit)
+    val positionInClause = if (indicesOfOccurrence.length == 1) indicesOfOccurrence.head
+    else if (indicesOfOccurrence.length == 0) throw new Exception(s"literal to transform not found in clause when attempfing to generate lp encoding")
+    else throw new Exception(s"literal to transform found more than once when attempfing to generate lp encoding")
+    positionInClause
+  }
+
+  def generateClausePatternTerm(varPos: Int, clauseLen: Int, patternVar: lpOlUntypedVar, eqPos: Option[Int]): Option[lpRewritePattern] = {
+    // given the position of the literal that a rule should be applied to in a clause and weather or not this clause in embedded in an equality to be proven,
+    // generate a rewrite pattern
+
+    val clausePattern = if (clauseLen > 1) {
+      val args = Seq.fill(clauseLen)(lpOlWildcard).updated(varPos, patternVar)
+      lpOlUntypedBinaryConnectiveTerm_multi(lpOr, args)
+    } else {
+      patternVar
+    }
+
+    eqPos match {
+      case Some(pos) =>
+        val patternEq = {
+          if (pos == 0) lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, clausePattern, lpOlWildcard)
+          else if (pos == 0) lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlWildcard, clausePattern)
+          else throw new Exception(s"position $pos provided to encode position in equality")
+        }
+        Some(lpRewritePattern(patternEq, patternVar))
+      case None =>
+        if (clausePattern == patternVar) None
+        else Some(lpRewritePattern(clausePattern, patternVar))
     }
   }
 
@@ -1212,6 +1248,36 @@ object calculusEncoding {
     }
   }
 
+  def simplificationInfoToSteps(parent: Clause, additionalInfo: Seq[(Seq[Int],String,Term,Term)], sig: Signature):(Seq[lpProofScriptStep],Set[lpStatement])={
+    var usedSymbols: Set[lpStatement] = Set.empty
+    var rewriteSteps: Seq[lpProofScriptStep] = Seq.empty
+
+    additionalInfo foreach { tuple =>
+      val (appliedSimpRule, needsTypeInst) = SimplificationEncoding.SimpRuleMap(tuple._2)
+      usedSymbols = usedSymbols + appliedSimpRule
+      val (rewritePattern0, termAtRewriteVar) = acessSubterm(Clause.asTerm(parent), tuple._1, sig)
+      //print(s"enc parent term: ${term2LP(tuple._3,bVars,sig,Set.empty)._1.pretty}\n")
+      //the pattern we need to match can not only be determined based on the terms because we also need to account for the
+      // equality between the child and parent clause we added!
+      val rewritePattern = lpRewritePattern(lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, rewritePattern0, lpOlWildcard))
+      val rewriteStep = if (needsTypeInst) {
+        // in this case we need to find out the type of the terms in this equality to instanciate the simplification rule with them
+        val ty = termAtRewriteVar match {
+          case tl === tr =>
+            type2LP(tl.ty, sig, Set.empty)._1
+          //todo: can equivalence also occour here
+          case _ => throw new Exception(s"detected connective other than equality where equality was exprected")
+        }
+        lpRewrite(Option(rewritePattern), lpFunctionApp(appliedSimpRule.name, Seq(lpConstantTerm(s"[${ty.lift2Poly.pretty}]"))))
+      }
+      else lpRewrite(Option(rewritePattern), appliedSimpRule.name)
+      //print(s"position: ${tuple._1}\n")
+      //print(s"${rewriteStep.pretty}\n")
+      rewriteSteps = rewriteSteps :+ rewriteStep
+    }
+    (rewriteSteps,usedSymbols)
+  }
+
 
   def simplificationProofScript(child: Clause, parent: Clause, additionalInfo: Seq[(Seq[Int],String,Term,Term)], symbolsToUnfold: Set[Signature.Key], parentNameLpEnc: lpConstantTerm, quantifiedVars: Seq[lpUntypedVar], bVars: Map[Int, String], sig: Signature):(lpProofScript, Set[lpStatement])={
 
@@ -1244,29 +1310,9 @@ object calculusEncoding {
     }
 
     //// 2. Equality between parent and child
-    additionalInfo foreach { tuple =>
-      val (appliedSimpRule, needsTypeInst) = SimplificationEncoding.SimpRuleMap(tuple._2)
-      usedSymbols = usedSymbols + appliedSimpRule
-      val (rewritePattern0, termAtRewriteVar) = acessSubterm(Clause.asTerm(parent),tuple._1,sig)
-      //print(s"enc parent term: ${term2LP(tuple._3,bVars,sig,Set.empty)._1.pretty}\n")
-      //the pattern we need to match can not only be determined based on the terms because we also need to account for the
-      // equality between the child and parent clause we added!
-      val rewritePattern = lpRewritePattern(lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,rewritePattern0,lpOlWildcard))
-      val rewriteStep =  if (needsTypeInst) {
-        // in this case we need to find out the type of the terms in this equality to instanciate the simplification rule with them
-        val ty = termAtRewriteVar match {
-          case tl === tr =>
-            type2LP(tl.ty,sig,Set.empty)._1
-            //todo: can equivalence also occour here
-          case _ => throw new Exception(s"detected connective other than equality where equality was exprected")
-        }
-        lpRewrite(Option(rewritePattern),lpFunctionApp(appliedSimpRule.name,Seq(lpConstantTerm(s"[${ty.lift2Poly.pretty}]"))))
-      }
-      else lpRewrite(Option(rewritePattern),appliedSimpRule.name)
-      //print(s"position: ${tuple._1}\n")
-      //print(s"${rewriteStep.pretty}\n")
-      rewriteSteps = rewriteSteps :+ rewriteStep
-    }
+    val (additionalSteps, usedSymbolsNew) = simplificationInfoToSteps(parent, additionalInfo, sig)
+    rewriteSteps = rewriteSteps ++ additionalSteps
+    usedSymbols = usedSymbols ++ usedSymbolsNew
     val encParent = term2LP(Clause.asTerm(parent),bVars,sig)._1
     val encChild = term2LP(Clause.asTerm(child),bVars,sig)._1
     // at the end, only something like x=x should remain of the focussed goal. We add the tactic "reflexivity" to prove this.
@@ -1388,31 +1434,7 @@ object calculusEncoding {
     }
   }
 
-  def generateClausePatternTerm(varPos: Int, clauseLen: Int, patternVar: lpOlUntypedVar, eqPos: Option[Int]): Option[lpRewritePattern] ={
-    // given the position of the literal that a rule should be applied to in a clause and weather or not this clause in embedded in an equality to be proven,
-    // generate a rewrite pattern
-
-    val clausePattern = if (clauseLen > 1) {
-      val args = Seq.fill(clauseLen)(lpOlWildcard).updated(varPos, patternVar)
-      lpOlUntypedBinaryConnectiveTerm_multi(lpOr, args)
-    } else {
-      patternVar
-    }
-
-    eqPos match{
-      case Some(pos) =>
-        val patternEq = { if (pos == 0) lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,clausePattern,lpOlWildcard)
-          else if (pos == 0) lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlWildcard,clausePattern)
-          else throw new Exception(s"position $pos provided to encode position in equality")
-        }
-        Some(lpRewritePattern(patternEq,patternVar))
-      case None =>
-        if( clausePattern == patternVar) None
-        else Some(lpRewritePattern(clausePattern,patternVar))
-    }
-  }
-
-  def wholeHaveRewriteStep(rewriteScript: lpProofScript, nameStep: String, nameSubStep: String, before: lpOlTerm, sourceBefore: lpTerm, after: lpOlTerm): lpHave = {
+  def wholeHaveRewriteStep(rewriteSteps: Seq[lpProofScriptStep], nameStep: String, nameSubStep: String, before: lpOlTerm, sourceBefore: lpTerm, after: lpOlTerm): lpHave = {
     //todo: use this in my simplification steps?
 
     // In many cases, we want to generate Sub-Steps for rewritings in proofs that first prove the equality of Term A and B (when for instance B is a simplified version of A)
@@ -1420,7 +1442,8 @@ object calculusEncoding {
 
     // 1. Proof equality
     val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,before,after)
-    val subStep = lpHave(nameSubStep, equalityToProve.prf, rewriteScript)
+    val withAddedReflexivity = lpProofScript(rewriteSteps :+ lpReflexivity())
+    val subStep = lpHave(nameSubStep, equalityToProve.prf, withAddedReflexivity)
 
     // 2. Proof the "after" given the equality
     //val stepProof = lpProofScript(Seq(subStep,lpRefine(lpFunctionApp(lpConstantTerm(nameSubStep),Seq(lpUseful.Identity,sourceBefore)))))
@@ -1429,14 +1452,14 @@ object calculusEncoding {
     // the whole Have step:
     lpHave(nameStep,after.prf,stepProof)
   }
-  def removeUnificationConstraint(uniC: Literal, parent: Clause): (lpProofScript, Set[lpStatement])={
+
+  def removeUnificationConstraint(uniC: Literal, parent: Clause): (Seq[lpProofScriptStep], Set[lpStatement])={
     // prove that unification literal can be removed from a clause when they either have the form ¬⊤ or x≠x (modulo unification)
 
     var usedSymbols: Set[lpStatement] = Set.empty
 
-    // identify the position of the unification literals in parent clause and
-    val indicesOfOccurrence: IndexedSeq[Int] = parent.lits.indices.filter(index => parent.lits(index) == uniC)
-    val positionInClause = if (indicesOfOccurrence.length == 1) indicesOfOccurrence.head else throw new Exception(s"unification constraint found more than once when attempfing to generate lp encoding")
+    // identify the position of the unification literals in parent clause
+    val positionInClause = findLitInClause(uniC,parent)
     // todo: make sure this can not occour and if it can make a special case for it (extra function to remove duplicates or sth. like that)
     val patternVar = lpOlUntypedVar(lpOlConstantTerm("x"))
 
@@ -1473,7 +1496,7 @@ object calculusEncoding {
     rewriteSteps = rewriteSteps :+ rewriteStep_step2
     usedSymbols = usedSymbols + SimplificationEncoding.Simp7_eq
 
-    (lpProofScript(rewriteSteps),usedSymbols)
+    (rewriteSteps,usedSymbols)
   }
 
   def encPreUni(cl: ClauseProxy, parent: ClauseProxy, addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]), addInfoUniRule: (String, (Literal, Literal)), parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Set[lpStatement]) = {
@@ -1593,6 +1616,85 @@ object calculusEncoding {
 
   }
 
+  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int],String,Term,Term)], parentModoluRw: Option[Clause], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature)={//: (lpProofScript, Set[lpStatement]) = {
+    // todo: will there be issues if variables that are bound within the literals have different names?
+    // todo: look at cases in which the rewrite rule is not ground specifically
+
+    val rewriteEqClause = parents(1).cl
+    val parent = parents(0).cl
+    val bVarsRewriteEq = clauseVars2LP(rewriteEqClause.implicitlyBound, sig, Set.empty)._2
+    val (rewriteEqImpVars,encRewriteEq0,_) = clause2LP_unquantified(rewriteEqClause,Set.empty,sig)
+    var encRewriteEq = encRewriteEq0
+    if (rewriteEqImpVars.nonEmpty) throw new Exception(s"encRewrite for non grounded rules is not encoded yet")
+    val (parentImpVars,encParent,_) = clause2LP_unquantified(parent,Set.empty,sig)
+    val (childImpVars,encChild,_) = clause2LP_unquantified(cl.cl,Set.empty,sig)
+    if (childImpVars.nonEmpty) throw new Exception(s"encRewrite for child with free variables is not encoded yet (but only application should be missing :))")
+    var sourceBeforeEq: lpTerm = parentNameLpEnc(1)
+    val sourceBeforeParent: lpTerm = parentNameLpEnc(0)
+
+    var usedSymbols: Set[lpStatement] = Set.empty
+    var allSteps: Seq[lpProofScriptStep] = Seq.empty
+    //print(s"encRewriteEq: ${encRewriteEq.pretty}\n")
+    //print(s"encParent: ${encParent.pretty}\n")
+
+    // 1. If the parent has implicitly bound variables, we assume them
+    val impBoundParent = parentImpVars.map(var0 => var0.untyped)
+    if (impBoundParent.nonEmpty) allSteps = allSteps :+ lpAssume(impBoundParent)
 
 
-}
+    // 2. Test if the clause representing the rewrite equation has the right form (only has one literal that is positive and equational)
+    // If it is not equational, transform it to an equational one
+
+    // Cases in which clause can not be used as rewrite rule
+    if (rewriteEqClause.lits.length != 1) throw new Exception(s"Error attempting to encode rewrite step in LP: found a rewrite rule with more than one literal...")
+    val rewriteEq = rewriteEqClause.lits.head
+    if (rewriteEq.equational & !rewriteEq.polarity) throw new Exception(s"Error attempting to encode rewrite step in LP: rewrite rule is equational but not positive")
+
+    // Cases in which the literal representing the rewrite rule first has to be transformed
+    if (!rewriteEq.equational){
+      // construct a proof script for the transformation
+      // todo: can simplification be necessary here?
+      val (transformStep, transformedRewriteEq) = if (rewriteEq.polarity){
+        // transform positive non equational literal to positive equational one
+        usedSymbols = usedSymbols + mkPosPropPosLit_script()
+        (lpRewrite(None,lpConstantTerm(mkPosPropPosLit_script().name)),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,term2LP(rewriteEq.left,bVarsRewriteEq,sig)._1,lpOlTop))
+      }else{
+        // transform negative non equational literal to positive equational one with bottom on the lhs
+        usedSymbols = usedSymbols + mkNegPropEqBot_script()
+        (lpRewrite(None,lpConstantTerm(mkNegPropEqBot_script().name)),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,term2LP(rewriteEq.left,bVarsRewriteEq,sig)._1,lpOlBot))
+      }
+      val transformationStepName = "TransformRewriteRuleClause"
+      val haveTransformStep = wholeHaveRewriteStep(Seq(transformStep),transformationStepName,"H1",encRewriteEq,sourceBeforeEq,transformedRewriteEq)
+      allSteps = allSteps :+ haveTransformStep
+      encRewriteEq = transformedRewriteEq
+      sourceBeforeEq = lpConstantTerm(transformationStepName)
+    }
+
+    // 3. Rewrite the parent
+    // todo: will we still find the position if variables have different names? I assume i should prove the rules with quantifications then it should work
+    // todo: search within the individual lits rather than in the overal clause?
+
+    val nameRewriteStep = "Rewrite"
+    var rewriteSkript: Seq[lpProofScriptStep] = Seq(lpRewrite(None,sourceBeforeEq))
+
+    // 4. Proof simplifications if necessary
+    if (addInfoSimp.nonEmpty){
+      throw new Exception(s"rewriting with following simplification is implemented but untested, check carefully")
+      val (simplificationSteps, usedSymbolsNew) = simplificationInfoToSteps(parentModoluRw.get,addInfoSimp,sig)
+      rewriteSkript = rewriteSkript ++ simplificationSteps
+      usedSymbols = usedSymbols ++ usedSymbolsNew
+    }
+
+    // 5. Combine the steps and refine the goal with the rewriting step
+    val haveRewriteStep = wholeHaveRewriteStep(rewriteSkript,nameRewriteStep,"H2",encParent,sourceBeforeParent,encChild)
+    allSteps = allSteps :+ haveRewriteStep
+    allSteps = allSteps :+ lpRefine(lpFunctionApp(lpConstantTerm(nameRewriteStep),Seq()))
+    val finishedProof = lpProofScript(allSteps)
+
+    (finishedProof,usedSymbols)
+
+  }
+
+
+  
+  }

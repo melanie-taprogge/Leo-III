@@ -177,6 +177,7 @@ class FurtherInfo (val literalsBeforeAfter0: Seq[Seq[Literal]] = Seq.empty, val 
   var addInfoDefExp: Seq[Signature.Key] = Seq.empty
   var addInfoUniRule: (String,(Literal,Literal)) = ("",(Literal(LitFalse(),false),Literal(LitFalse(),false))) // todo for now I am doing it this way but maybe if i do not need this for other rules as well it would be better to use tuples
   var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
+  var addInfoRewriting: Option[Clause] = None
 }
 
 

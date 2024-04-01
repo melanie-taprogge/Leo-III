@@ -2289,9 +2289,16 @@ package inferenceControl {
           else deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties)
           AnnotatedClause(newCl, InferredFrom(RewriteSimp, Seq(cl) ++ rewriteRulesUsed.toSeq), newAnnotation)
         }
-        val simpResult = Simp.shallowSimp(result0.cl)(sig)
+        val (simpResult, addInfo) = Simp.shallowSimp_andTrack(result0.cl)(sig)
         val result = if (simpResult == result0.cl) result0
-        else AnnotatedClause(simpResult, InferredFrom(Simp, Seq(result0)), result0.properties)
+        else {
+          //print(s"${result0.cl.pretty}\n")
+          //print(s"${simpResult.pretty}\n")
+          val information: FurtherInfo = cl.furtherInfo
+          information.addInfoSimp = information.addInfoSimp ++ addInfo
+          information.addInfoRewriting = Some(result0.cl)
+          AnnotatedClause(simpResult, Role_Plain, InferredFrom(Simp, Seq(result0)), result0.properties, information)
+        }
         Out.debug(s"[Rewriting] Result: ${result.pretty(sig)}")
         result
       }

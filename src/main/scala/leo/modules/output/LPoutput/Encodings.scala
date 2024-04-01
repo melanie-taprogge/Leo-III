@@ -438,7 +438,10 @@ object Encodings {
           val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
           (encodingPreUni._1,parameters,encodingPreUni._2)
           //throw new Exception(s"${cl.furtherInfo.addInfoUni}")
-
+        case leo.modules.calculus.RewriteSimp =>
+          //throw new Exception(s"add info rewriting: ${cl.furtherInfo.addInfoRewriting}")
+          val encodingRewrite = encRewrite(cl,cl.annotation.parents,cl.furtherInfo.addInfoSimp,cl.furtherInfo.addInfoRewriting,parentInLpEncID,sig)
+          (encodingRewrite._1,parameters,encodingRewrite._2)
         case _ =>
           //print(s"\n $rule not encoded yet \n\n")
           (lpOlNothing,parameters,Set.empty)

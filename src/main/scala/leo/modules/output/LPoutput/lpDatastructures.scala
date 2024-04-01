@@ -12,6 +12,17 @@ object lpDatastructures {
     def pretty: String
   }
 
+  abstract class lpDefinedRules extends lpStatement{
+
+    def name: String
+    def ty: lpMlType
+
+    def proof: lpProofScript
+
+    def dec: lpDeclaration
+
+  }
+
   case class lpDeclaration(name: lpConstantTerm, variables: Seq[lpVariable], typing: lpType) extends lpStatement{
     override def pretty: String = {
       if (variables.isEmpty){
@@ -105,6 +116,8 @@ object lpDatastructures {
   abstract class lpVariable extends lpTerm
   case class lpTypedVar(name: lpTerm, ty: lpType) extends lpVariable {
     override def pretty: String = s"(${name.pretty} : ${ty.lift2Meta.pretty})"
+
+    def untyped: lpUntypedVar = lpUntypedVar(name)
   }
 
   case class lpUntypedVar(name: lpTerm) extends lpVariable {

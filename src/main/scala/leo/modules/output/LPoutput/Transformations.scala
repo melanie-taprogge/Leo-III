@@ -233,6 +233,33 @@ object Transformations {
 
   }
 
+  case class mkNegPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(¬ a) → Prf(eq [↑ o] (¬ a) ⊤)
+
+    override def name: String = "mkNegPropPosEq"
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTop)).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(lpConstantTerm(name), Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(lpConstantTerm(name), Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+  }
+
+  case class mkNegPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
+
+    override def name: String = "mkNegPropEqBot"
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlBot)).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkNegPropEqBot_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(lpConstantTerm(name), Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(lpConstantTerm(name), Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+  }
+
   def mkPosPropNegLit(a: lpTerm, parameters: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
     // Provide a proof of the type Prf(a) → Prf(¬(eq [↑ o] (¬ a) ⊤))
     // todo: replace with proper lp term
@@ -284,6 +311,20 @@ object Transformations {
     val lambdaTerm = lpFunctionApp(lpLambdaTerm(Seq(lpUntypedVar(x1),lpUntypedVar(h1)),lpFunctionApp(lpPropExt.name,Seq(x1,lpOlTop,lpLambdaTerm(Seq(lpUntypedVar(lpWildcard),lpUntypedVar(b1),lpUntypedVar(h2)),h2),lpLambdaTerm(Seq(lpUntypedVar(lpWildcard)),h1)))),Seq(a))
     (lambdaTerm, (hCount, bCount, xCount, parameters._4), Set(lpPropExt))
 
+  }
+
+  case class mkPosPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(a) → Prf(eq [↑ o] a ⊤)
+
+    override def name: String = "mkPosPropPosEq"
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlConstantTerm(patternVarName),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlConstantTerm(patternVarName),lpOlTop)).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(lpConstantTerm(name),Seq(lpUntypedVar(lpConstantTerm(patternVarName))),ty)
+
+    override def pretty: String = lpDefinition(lpConstantTerm(name),Seq(lpUntypedVar(lpConstantTerm(patternVarName))),ty,proof).pretty
   }
 
   def mkPosLitNegProp(a: lpTerm, parameters: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {

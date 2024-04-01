@@ -9,9 +9,10 @@ import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature._
 import leo.modules.output.ToTPTP.toTPTP
 import leo.modules.proof_object.CompressProof
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.lpDatastructures.{lpDefinedRules, _}
 import leo.modules.output.LPoutput.calculusEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding
+import leo.modules.output.LPoutput.Transformations._
 
 import scala.collection.mutable
 
@@ -20,12 +21,15 @@ object LPoutput {
   def generateSignature(usedSymbols: Set[lpStatement]): String = {
 
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
+    var otherRules: Set[lpDefinedRules] = Set.empty
 
     // sort the symbols
     usedSymbols foreach { symbol =>
       symbol match {
         case simpRule: SimplificationEncoding.simplificationRules =>
           simplificationRules = simplificationRules + simpRule
+        case defRule: lpDefinedRules =>
+          otherRules = otherRules + defRule
         case _ =>
         // do nothing
       }
@@ -39,6 +43,13 @@ object LPoutput {
     if (simplificationRules.nonEmpty) output.append("////// Simplification Rules \n\n")
     simplificationRules foreach { simpRrule =>
       output.append(simpRrule.dec.pretty)
+      output.append("\n")
+    }
+
+    // add other Rules
+    if (otherRules.nonEmpty) output.append("////// Other Rules \n\n")
+    otherRules foreach { otherRule =>
+      output.append(otherRule.dec.pretty)
       output.append("\n")
     }
 
