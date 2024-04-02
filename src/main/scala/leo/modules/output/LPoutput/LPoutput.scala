@@ -231,7 +231,7 @@ object LPoutput {
                 //encodedProblem.append(s"$proofTerm;\n")
                 encodedProof.append(s"\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm).pretty}\n")
                 // and we will add the necessary symbols to the generated Signature
-                usedSymbols = updatedUsedSymbols
+                usedSymbols = usedSymbols ++ updatedUsedSymbols
                 parameters = updatedParameters
               }
             }
@@ -263,6 +263,7 @@ object LPoutput {
       print(signatureOutput)
       print(encodedProblem)
       print(encodedProof)
+      print(s"used symbols $usedSymbols\n")
     }
 
     extractNecessaryFormulas(state)

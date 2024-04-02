@@ -23,17 +23,15 @@ object lpDatastructures {
 
   }
 
-  case class lpDeclaration(name: lpConstantTerm, variables: Seq[lpVariable], typing: lpType) extends lpStatement{
+  case class lpDeclaration(name: lpConstantTerm, variables: Seq[lpTerm], typing: lpType, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpStatement{
     override def pretty: String = {
-      if (variables.isEmpty){
-        s"symbol ${name.pretty}: ${typing.pretty};\n"
-      } else {
-        s"symbol ${name.pretty} ${variables.map(var0 => var0.pretty).mkString(" ")}: ${typing.pretty};\n"
-      }
+      val gap1 = if (implicitArgs.isEmpty) "" else " "
+      val gap2 = if (variables.isEmpty) "" else " "
+      s"symbol ${name.pretty}$gap1${implicitArgs.map(var0 => s"[${var0.pretty}]").mkString(" ")}$gap2${variables.map(var0 => var0.pretty).mkString(" ")}: ${typing.pretty};\n"
     }
   }
 
-  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpVariable], typing: lpMlType, proof: lpStatement) extends lpStatement {
+  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], typing: lpMlType, proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpStatement {
     override def pretty: String = {
 
       val proofEnc = proof match {
@@ -43,11 +41,9 @@ object lpDatastructures {
           s"begin\n${proofScript.addTab(1).pretty}\nend"
       }
 
-      if (!variables.isEmpty){
-        s"symbol ${name.pretty} ${variables.map(var0 => var0.pretty).mkString(" ")}: ${typing.pretty} ≔\n${proofEnc};\n"
-      }else{
-      s"symbol ${name.pretty}: ${typing.pretty} ≔\n${proofEnc};"
-    }
+      val gap1 = if (implicitArgs.isEmpty) "" else " "
+      val gap2 = if (variables.isEmpty) "" else " "
+      s"symbol ${name.pretty}$gap1${implicitArgs.map(var0 => s"[${var0.pretty}]").mkString(" ")}$gap2${variables.map(var0 => var0.pretty).mkString(" ")}: ${typing.pretty} ≔\n${proofEnc};\n"
     }
   }
 
@@ -138,9 +134,11 @@ object lpDatastructures {
       }
   }
 
-  case class lpFunctionApp(f: lpTerm, args: Seq[lpTerm]) extends lpTerm {
+  case class lpFunctionApp(f: lpTerm, args: Seq[lpTerm], implicitArgs: Seq[lpTerm]= Seq.empty) extends lpTerm {
     override def pretty: String = {
-      if (args.isEmpty) f.pretty else s"(${f.pretty} ${args.map(_.pretty).mkString(" ")})"
+      val gap1 = if(implicitArgs.isEmpty) "" else " "
+      val gap2 = if(args.isEmpty) "" else " "
+      s"(${f.pretty}$gap1${implicitArgs.map(arg => s"[${arg.pretty}]").mkString(" ")}$gap2${args.map(_.pretty).mkString(" ")})"
     }
   }
 
@@ -221,6 +219,7 @@ object lpDatastructures {
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType(t))
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOlUserDefinedType(t))
   }
+
 
   case class lpOlUserDefinedPolyType(t: String) extends lpOlPolyType {
     def pretty: String = t
@@ -375,7 +374,7 @@ object lpDatastructures {
     override def pretty: String = {
       if (reducedLogic) {
         if (connective == lpInEq) lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,ty, lhs, rhs)).pretty
-        else s"( ${connective.pretty} ${lhs.pretty} ${rhs.pretty})"
+        else s"( ${connective.pretty} [${ty.pretty}] ${lhs.pretty} ${rhs.pretty})"
       }
       else {
         val encodedType = ty match {

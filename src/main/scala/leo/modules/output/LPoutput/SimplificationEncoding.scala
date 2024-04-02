@@ -15,10 +15,18 @@ object SimplificationEncoding {
   val implicitArguments = false
 
   // map of names to the simplification rules and a boolean decoding weather or not we need type instanciation
+  val SimpNeedsTyping:  Map[simplificationRules,Boolean] =
+    Map(Simp1_eq -> false,
+        Simp9_eq -> true,
+        Simp10_eq -> true,
+        Simp16_eq -> false,
+        )
+
   val SimpRuleMap: Map[String,(simplificationRules,Boolean)] =
-    Map("Simp1" -> (Simp1_eq, false),
-        "Simp9" -> (Simp9_eq, true),
-        "Simp16" -> (Simp16_eq, false))
+    Map("Simp1" -> (Simp1_eq, SimpNeedsTyping(Simp1_eq)),
+        "Simp9" -> (Simp9_eq, SimpNeedsTyping(Simp9_eq)),
+        "Simp10" -> (Simp10_eq, SimpNeedsTyping(Simp10_eq)),
+        "Simp16" -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)))
 
   abstract class simplificationRules extends lpStatement{
     def name: lpConstantTerm

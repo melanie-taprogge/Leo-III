@@ -416,8 +416,8 @@ object Encodings {
           val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head,parentInLpEncID.head,sig,parameters) //¿polarity switch always only has one parent, right?
           encoding
         case leo.modules.calculus.FuncExt =>
-          val encoding = encFuncExtPosClause(cl, cl.annotation.parents.head,cl.furtherInfo.edLitBeforeAfter,parentInLpEncID.head,sig,parameters)
-          (encoding._1,encoding._2, Set.empty) // no new symbols this time
+          val encoding = encFuncExtPosClause_script(cl, cl.annotation.parents.head,cl.furtherInfo.edLitBeforeAfter,parentInLpEncID.head,sig,parameters)
+          (encoding._1,parameters,encoding._2) // no new symbols this time
         case leo.modules.calculus.BoolExt =>
           val encoding = encBoolExtClause(cl, cl.annotation.parents.head, parentInLpEncID.head, sig,parameters)
           encoding
