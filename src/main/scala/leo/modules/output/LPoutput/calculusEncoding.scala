@@ -11,7 +11,7 @@ import leo.modules.output.intToName
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.Transformations._
 import leo.modules.output.LPoutput.SimplificationEncoding
-import leo.modules.output.LPoutput.lpInferenceRuleEncoding.funextPosEq_rev
+import leo.modules.output.LPoutput.lpInferenceRuleEncoding.{funextPosEq_rev, polaritySwitchEqLit, polaritySwitchNonEqLit}
 import leo.modules.output.LPoutput.lpUseful
 import leo.modules.output.ToTPTP.clauseImplicitsToTPTPQuantifierList
 
@@ -334,6 +334,84 @@ object calculusEncoding {
     }
   }
 
+  def encPolaritySwitchClause_proofScript(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Set[lpStatement]) = {
+
+    var usedSymbols: Set[lpStatement] = Set.empty
+
+    val bVarMap = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
+
+    var allSteps: Seq[lpProofScriptStep] = Seq.empty
+    var allRewriteSteps: Seq[lpProofScriptStep] = Seq.empty
+    var polaritySwitchCount: Int = 0
+
+    // first: abstract over the variables free in the child
+    val freeVarsChild = child.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
+    if (freeVarsChild.nonEmpty) allSteps = allSteps :+ lpAssume(freeVarsChild)
+
+    // second: Go over the literals of the parent and apply polarity switch if applicable
+    parent.cl.lits foreach { origLit =>
+      if (origLit.equational){
+        (origLit.left, origLit.right) match{
+          case (Not(l),Not(r)) =>
+            // in this case we just transform the literal of form a = b to (¬ a) = (¬ b)
+            val encLeft = term2LP(l,bVarMap,sig)._1
+            val encRight = term2LP(r,bVarMap,sig)._1
+            val transfLit = Literal.apply(l,r,origLit.polarity)
+
+            // prove the equality between the lit before and after transformation
+            val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,encLeft,encRight),term2LP(asTerm(origLit),bVarMap,sig)._1)
+            val polaritySwitchStep = lpRefine(polaritySwitchEqLit.instanciate(encLeft,encRight))
+            val polaritySwitchName = s"PolaritySwitch$polaritySwitchCount"
+            polaritySwitchCount = polaritySwitchCount + 1
+            val havepolaritySwitchStep = lpHave(polaritySwitchName,equalityToProve.prf,lpProofScript(Seq(polaritySwitchStep)))
+            allSteps = allSteps :+ havepolaritySwitchStep
+            usedSymbols = usedSymbols + polaritySwitchEqLit
+
+            // apply this as a rewrite rule to the clause
+            val posInClause = findLitInClause(transfLit,child.cl)
+            val patternVar = lpOlUntypedVar(lpOlConstantTerm("x"))
+            val patternTerm = if (origLit.polarity) patternVar else lpOlUnaryConnectiveTerm(lpNot,patternVar)
+            val rewritePattern = generateClausePatternTerm(posInClause,child.cl.lits.length,None,patternVar,patternTerm)
+            val rewriteStep = lpRewrite(rewritePattern,lpConstantTerm(polaritySwitchName))
+            allRewriteSteps = allRewriteSteps :+ rewriteStep
+          case _ => // nothing happens in this case
+        }
+      }else if (!origLit.polarity)
+        origLit.left match {
+        case Not(l) =>
+          // in this case we just transform the literal of form a to (¬ ¬ a)
+          val encLeft = term2LP(l, bVarMap, sig)._1
+          val transfLit = Literal.apply(l, true)
+
+          // prove the equality between the lit before and after transformation
+          val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encLeft, lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,encLeft)))
+          val polaritySwitchStep = lpRefine(polaritySwitchNonEqLit.instanciate(encLeft))
+          val polaritySwitchName = s"PolaritySwitch$polaritySwitchCount"
+          polaritySwitchCount = polaritySwitchCount + 1
+          val havepolaritySwitchStep = lpHave(polaritySwitchName, equalityToProve.prf, lpProofScript(Seq(polaritySwitchStep)))
+          allSteps = allSteps :+ havepolaritySwitchStep
+          usedSymbols = usedSymbols + polaritySwitchNonEqLit
+
+          // apply this as a rewrite rule to the clause
+          val posInClause = findLitInClause(transfLit, child.cl)
+          val rewritePattern = generateClausePatternTerm(posInClause, child.cl.lits.length, None)
+          val rewriteStep = lpRewrite(rewritePattern, lpConstantTerm(polaritySwitchName))
+          allRewriteSteps = allRewriteSteps :+ rewriteStep
+
+        case _ => // nothing happens in this case
+      }
+    }
+    allSteps = allSteps ++ allRewriteSteps
+
+
+    // last step: apply the variables we abstracted over to the parent clause and refine with it
+
+    // assuming the variables are not renamed, we can just apply the impbound vars that were already present in the parent
+    allSteps = allSteps :+ lpRefine(lpFunctionApp(parentNameLpEnc, freeVarsChild))
+
+    (lpProofScript(allSteps), usedSymbols)
+    }
+
   def encFuncExtPosLit(l0: Literal, l1: Literal, appliedVars: Seq[lpUntypedVar], bVarMap: Map[Int, String], sig: Signature, parameters: (Int, Int, Int, Int)): (Boolean, lpTerm, (Int, Int, Int, Int)) = {
     // encode the proofs for the FunExt rules of the literals
     // if something was changed I return (True,proof), otherwise (False,"")
@@ -477,7 +555,7 @@ object calculusEncoding {
 
       // first: abstract over the variables free in the child
       val freeVarsChild = child.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
-      allSteps = allSteps :+ lpAssume(freeVarsChild)
+      if (freeVarsChild.nonEmpty) allSteps = allSteps :+ lpAssume(freeVarsChild)
 
       // second: for each literal that funct ext was applied to, proof after=before to use as a rewrite rule later on
       var editLitCount = 0
@@ -503,8 +581,8 @@ object calculusEncoding {
           val refinewithFunExt = {
             if (!origLit.polarity) throw new Exception(s"functional extensionality of negative literals not encoded yet")
             else {
-              usedSymbols = usedSymbols + funextPosEq_rev()
-              lpRefine(funextPosEq_rev().instanciate(None, encOrigLitLhs, encOrigLitRhs, appliedVars))
+              usedSymbols = usedSymbols + funextPosEq_rev(appliedVars.length)
+              lpRefine(funextPosEq_rev(appliedVars.length).instanciate(None, encOrigLitLhs, encOrigLitRhs, appliedVars))
             }
           }
           allSteps = allSteps :+ lpHave(nameEqFactStep, equalityToProve.prf, lpProofScript(Seq(refinewithFunExt)))
@@ -799,7 +877,7 @@ object calculusEncoding {
     positionInClause
   }
 
-  def generateClausePatternTerm(varPos: Int, clauseLen: Int, eqPos: Option[Int] = None, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpOlConstantTerm("x"))): Option[lpRewritePattern] = {
+  def generateClausePatternTerm(varPos: Int, clauseLen: Int, eqPos: Option[Int] = None, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpOlConstantTerm("x")),wrapperTerm: lpOlTerm = lpOlUntypedVar(lpOlConstantTerm("x"))): Option[lpRewritePattern] = {
     // given the position of the literal that a rule should be applied to in a clause and weather or not this clause in embedded in an equality to be proven,
     // generate a rewrite pattern
 

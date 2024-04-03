@@ -196,9 +196,9 @@ object Encodings {
           val (encTyTl, updatedUsedSymbolsTyL) = type2LP(left.ty,sig,usedSymbolsR)
           usedSymbols = updatedUsedSymbolsTyL
           if (lit.polarity) {
-            encLit = lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl.lift2Poly,lefEnc,rigEnc)
+            encLit = lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl,lefEnc,rigEnc)
           } else {
-            encLit = lpOlTypedBinaryConnectiveTerm(lpInEq,encTyTl.lift2Poly,lefEnc,rigEnc)
+            encLit = lpOlTypedBinaryConnectiveTerm(lpInEq,encTyTl,lefEnc,rigEnc)
           }
         } else {
           //print(s"here is the problem 1\n")
@@ -413,8 +413,10 @@ object Encodings {
       rule match {
         case leo.modules.calculus.PolaritySwitch =>
           //todo: dont forget to map to the correct formula! make special case for negated conjecture
-          val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head,parentInLpEncID.head,sig,parameters) //¿polarity switch always only has one parent, right?
-          encoding
+          //val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head,parentInLpEncID.head,sig,parameters) //¿polarity switch always only has one parent, right?
+          //encoding
+          val encoding = encPolaritySwitchClause_proofScript(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
+          (encoding._1,(0,0,0,0),encoding._2)
         case leo.modules.calculus.FuncExt =>
           val encoding = encFuncExtPosClause_script(cl, cl.annotation.parents.head,cl.furtherInfo.edLitBeforeAfter,parentInLpEncID.head,sig,parameters)
           (encoding._1,parameters,encoding._2) // no new symbols this time

@@ -263,7 +263,7 @@ object LPoutput {
       print(signatureOutput)
       print(encodedProblem)
       print(encodedProof)
-      print(s"used symbols $usedSymbols\n")
+      //print(s"used symbols $usedSymbols\n")
     }
 
     extractNecessaryFormulas(state)
