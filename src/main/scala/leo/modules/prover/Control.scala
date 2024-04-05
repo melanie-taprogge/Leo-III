@@ -6,6 +6,7 @@ import leo.modules.prover.{Interaction, RunStrategy, State}
 import leo.modules.{FVState, GeneralState, myAssert}
 import leo.modules.relevance.AxiomFilterConfig
 import leo.{Configuration, Out}
+import leo.modules.output.LPoutput.Encodings.clause2LP
 
 /**
   * Facade object for various control methods of the seq. proof procedure.
@@ -1226,12 +1227,16 @@ package inferenceControl {
           val (cA_boolExt, bE, bE_other) = BoolExt.canApply(cw.cl)
           if (cA_boolExt) {
             Out.debug(s"Bool Ext on: ${cw.pretty(sig)}")
-            val result = BoolExt.apply(cw.cl, bE, bE_other).map(AnnotatedClause(_, InferredFrom(BoolExt, cw), addProp(ClauseAnnotation.PropBoolExt, deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cw.properties))))
-            //val clauses = BoolExt.apply_withLP(cw.cl, bE, bE_other)
-            //val pairing: Set[(Clause, Seq[(Literal, BoolExt.ExtLits)])] = clauses._1.zip(clauses._2)
-            //val result = pairing.map(c_a => AnnotatedClause(c_a._1, InferredFrom(BoolExt, cw), addProp(ClauseAnnotation.PropBoolExt, deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cw.properties))))
-            //val result = clauses._1.map(c_a => AnnotatedClause(c_a, InferredFrom(BoolExt, cw), addProp(ClauseAnnotation.PropBoolExt, deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cw.properties))))
+            //val result = BoolExt.apply(cw.cl, bE, bE_other).map(AnnotatedClause(_, InferredFrom(BoolExt, cw), addProp(ClauseAnnotation.PropBoolExt, deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cw.properties))))
 
+            val clauses = BoolExt.apply_andTrack(cw.cl, bE, bE_other)
+            var result: Set[AnnotatedClause] = Set.empty
+            clauses foreach {pair =>
+              val newInfo = new FurtherInfo() //todo : im sure there is a more elegant way of instantiation
+              newInfo.addInfoBoolExt = newInfo.addInfoBoolExt ++ pair._2
+              //print(s"res applyandTrack: ${clause2LP(pair._1,Set.empty,state.signature)._1.pretty}\n")
+              result = result + AnnotatedClause(pair._1, Role_Plain, InferredFrom(BoolExt, cw), addProp(ClauseAnnotation.PropBoolExt, deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cw.properties)), newInfo)
+            }
             Out.trace(s"Bool Ext result:\n\t${result.map(_.pretty(sig)).mkString("\n\t")}")
             result
           } else Set()

@@ -260,10 +260,9 @@ object LPoutput {
 
       // generate the signature
       val signatureOutput = generateSignature(usedSymbols)
-      print(signatureOutput)
-      print(encodedProblem)
-      print(encodedProof)
-      //print(s"used symbols $usedSymbols\n")
+      //print(signatureOutput)
+      //print(encodedProblem)
+      //print(encodedProof)
     }
 
     extractNecessaryFormulas(state)

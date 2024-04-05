@@ -101,7 +101,7 @@ object lpDatastructures {
 
   case class lpMlFunctionType(objects :Seq[lpMlType]) extends lpMlType {
     override def pretty: String = {
-      objects.map(ty => ty.pretty).mkString(s" ${lpArrow.pretty} ")
+      s"(${objects.map(ty => ty.pretty).mkString(s" ${lpArrow.pretty} ")})"
     }
 
     //change nothing when lifting to meta type
@@ -156,11 +156,11 @@ object lpDatastructures {
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpOlTypeConstructor.pretty} to meta level")
   }
   case object lpSet extends lpOlTypeConstants {
-    override def pretty: String = "Set"
+    override def pretty: String = "MonoSet"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpSet.pretty} to meta level")
   }
   case object lpScheme extends lpOlTypeConstants {
-    override def pretty: String = "Scheme"
+    override def pretty: String = "PolySet"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpScheme.pretty} to meta level")
   }
   case object lpPrf extends lpOlTypeConstants {
@@ -168,7 +168,7 @@ object lpDatastructures {
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpPrf.pretty} to meta level")
   }
   case object lpSet2Schme extends lpOlTypeConstants {
-    override def pretty: String = "↑"
+    override def pretty: String = "mono"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpScheme.pretty} to meta level")
   }
   case object lpEl extends lpMlType {
@@ -192,8 +192,8 @@ object lpDatastructures {
   case class lpliftedObjectType(ty: lpOlType) extends lpMlType {
     def pretty: String = {
       ty match {
-        case lpOlMonoType => s"(${lpEl.pretty} ${ty.pretty})"
-        case lpOlPolyType => s"(${lpEls.pretty} ${ty.pretty})"
+        case _ :lpOlMonoType => s"(${lpEl.pretty} ${ty.pretty})"
+        case _ :lpOlPolyType => s"(${lpEls.pretty} ${ty.pretty})"
         case _ => throw new Exception(s"failed to print lpliftedObjectType, $ty has wrong format")
       }
     }
@@ -242,10 +242,10 @@ object lpDatastructures {
     "$o" -> lpOtype,
     "$i" -> lpItype)
 
-  case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlMonoType {
-    def pretty: String = s"(${args.map(t => t.pretty).mkString(s" ${lpOlTypeConstructor.pretty} ")})"
+  case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlPolyType {
+    def pretty: String = s"(${args.map(t => t.lift2Poly.pretty).mkString(s" ${lpOlTypeConstructor.pretty} ")})"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlFunctionType(args))
-    override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOlFunctionType(args))
+    override def lift2Poly: lpOlPolyType = (lpOlFunctionType(args))
   }
 
   case class lpOlMonoComposedType(name: lpConstantTerm, args: Seq[lpType]) extends lpOlMonoType { //todo ?
@@ -374,7 +374,7 @@ object lpDatastructures {
     override def pretty: String = {
       if (reducedLogic) {
         if (connective == lpInEq) lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,ty, lhs, rhs)).pretty
-        else s"( ${connective.pretty} [${ty.pretty}] ${lhs.pretty} ${rhs.pretty})"
+        else s"( ${connective.pretty} [${ty.lift2Poly.pretty}] ${lhs.pretty} ${rhs.pretty})"
       }
       else {
         val encodedType = ty match {
@@ -442,7 +442,10 @@ object lpDatastructures {
       s"${steps.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
     }
 
-    override private[lpDatastructures] def openCurlyBracket: String = s"{${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
+    override private[lpDatastructures] def openCurlyBracket: String = {
+      if (steps.length == 1) s"${steps.head.addTab(tab).openCurlyBracket}"
+      else s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
+    }
 
     def prettyCurlyBrackets: String = {
       if (steps.length == 1) s"${steps.head.addTab(tab).openCurlyBracket}}"
@@ -453,17 +456,23 @@ object lpDatastructures {
 
   }
 
-  case class lpRefine(t: lpFunctionApp, tab: Int = 0) extends lpProofScriptStep(tab: Int){
-    def addTab(i : Int): lpRefine = lpRefine(t, tab + i)
+  case class lpRefine(t: lpFunctionApp, subproofs: Seq[lpProofScript] = Seq.empty, tab: Int = 0) extends lpProofScriptStep(tab: Int){
+    def addTab(i : Int): lpRefine = lpRefine(t, subproofs, tab + i)
     override def pretty: String = {
       val tabs = "\t"*tab
-      s"${tabs}refine ${t.pretty}"
+      //s"${tabs}have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}"
+      s"${tabs}refine ${t.pretty}${subproofs.map(prf => s"\n${prf.addTab(tab+1).prettyCurlyBrackets}").mkString("")}"
     }
 
     val tabs = "\t" * tab
-    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpRefine(t).pretty}"
 
-    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRefine(t, tab)))
+    override private[lpDatastructures] def openCurlyBracket: String = {
+      // s"$tabs{${lpRefine(t).pretty}" (old version)
+      // s"${tabs}{have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}" (haveStep for reference)
+      s"${tabs}{refine ${t.pretty}${subproofs.map(prf => s"\n${prf.addTab(tab+1).prettyCurlyBrackets}").mkString("")}"
+    }
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRefine(t, subproofs, tab)))
 
   }
 
@@ -514,7 +523,7 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpReflexivity(tab)))
   }
 
-  case class lpAssume(vars: Seq[lpUntypedVar], tab: Int = 0) extends lpProofScriptStep(tab: Int){
+  case class lpAssume(vars: Seq[lpTerm], tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpAssume = lpAssume(vars, tab + i)
 
     val tabs: String = "\t" * tab

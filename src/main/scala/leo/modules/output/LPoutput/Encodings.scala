@@ -421,7 +421,9 @@ object Encodings {
           val encoding = encFuncExtPosClause_script(cl, cl.annotation.parents.head,cl.furtherInfo.edLitBeforeAfter,parentInLpEncID.head,sig,parameters)
           (encoding._1,parameters,encoding._2) // no new symbols this time
         case leo.modules.calculus.BoolExt =>
-          val encoding = encBoolExtClause(cl, cl.annotation.parents.head, parentInLpEncID.head, sig,parameters)
+          //throw new Exception(s"${cl.furtherInfo.addInfoBoolExt}")
+          //val encoding = encBoolExtClause(cl, cl.annotation.parents.head, parentInLpEncID.head, sig,parameters)
+          val encoding = encBoolExtClause_proofScript(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
           encoding
         case leo.modules.calculus.OrderedEqFac =>
           val encodings = encEqFactClause(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig,parameters)

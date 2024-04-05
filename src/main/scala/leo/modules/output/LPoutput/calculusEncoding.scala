@@ -662,6 +662,149 @@ object calculusEncoding {
 
   }
 
+
+
+  def generateClorRule(positions: Seq[Boolean], proofNames: String)={
+    // generate a proof script to only transform single literals in clauses and still proof the entire clause
+    // the positions vector then encodes how many literals the remaining clause has and for positions a clause application has to be prooven
+
+    // first we generate a list of variables and stuff
+    // in this step we also construct the transformtion to be prooven and start assuming variables and hypothesis
+    var clause0: Seq[lpOlUntypedVar] = Seq.empty
+    var clause1: Seq[lpOlUntypedVar] = Seq.empty
+
+    // To construct the type of the rule we are proving here, we need to require the proofs for the transforamtions of the individual literals
+    var trnsformationProofs: Seq[lpMlType] = Seq.empty
+
+    // we track the variable and hypothesis names we need to assume in the proof script
+    var varsToBeAssumed: Seq[lpOlUntypedVar] = Seq.empty
+    var hypothesisToBeAssumed: Seq[lpUntypedVar] = Seq.empty
+    var quantifiedVars: Seq[lpTypedVar] = Seq.empty
+
+    // map each variable that is transformed to the hypothesis representing this transfomration
+    val transHypName: mutable.HashMap[lpOlUntypedVar,lpUntypedVar] = mutable.HashMap.empty
+
+    var varCount = 0
+    var hypCount = 0
+    positions foreach {pos =>
+      val variableOrig = lpOlUntypedVar(lpConstantTerm(s"x$varCount"))
+      clause0 = clause0 :+ variableOrig
+      varsToBeAssumed = varsToBeAssumed :+ variableOrig
+      quantifiedVars = quantifiedVars :+ lpTypedVar(lpConstantTerm(s"x$varCount"),lpOtype)
+      if (pos){
+        // we add the changed variable to the new clause
+        varCount = varCount + 1
+        val variableNew = lpOlUntypedVar(lpConstantTerm(s"x$varCount"))
+        varsToBeAssumed = varsToBeAssumed :+ variableNew
+        quantifiedVars = quantifiedVars :+ lpTypedVar(lpConstantTerm(s"x$varCount"),lpOtype)
+        clause1 = clause1 :+ variableNew
+        // since we want to transform this literal, we need to provide a proof that we can indeed do so. We assume it in the script as a hypothesis.
+        trnsformationProofs = trnsformationProofs :+ lpMlFunctionType(Seq(variableOrig.prf,variableNew.prf))
+        val newHypo = lpUntypedVar(lpConstantTerm(s"h$hypCount"))
+        hypCount = hypCount + 1
+        hypothesisToBeAssumed = hypothesisToBeAssumed :+ newHypo
+        // and we add it to the map
+        transHypName += (variableOrig -> newHypo)
+      }else{
+        clause1 = clause1 :+ lpOlUntypedVar(lpConstantTerm(s"x$varCount"))
+      }
+      varCount = varCount + 1
+    }
+
+    // whith this we can construct the type of the rule we proof and can begin the proof script
+    val clause0enc = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,clause0)
+    val clause1enc = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,clause1)
+
+    // the las hypothesis we assume is clause0
+    val newHypo = lpUntypedVar(lpConstantTerm(s"h$hypCount"))
+    hypCount = hypCount + 1
+    hypothesisToBeAssumed = hypothesisToBeAssumed :+ newHypo
+
+    // we add these two as prf terms to the type we are trying to proof
+    val typeOfRule = lpMlDependType(quantifiedVars,lpMlFunctionType(trnsformationProofs ++ Seq(clause0enc.prf, clause1enc.prf)))
+
+    def nestedLorIlApp(lhs:Seq[lpOlTerm], rhs:Seq[lpOlTerm], prfRhs: lpTerm): lpFunctionApp ={
+      // iterativeley construct the proofs for disjunctions of literals based on a proof for the rhs. This is necessary to avoid errors in cases where (a \lor b) \lor (c \lor d ( ...
+      // would otherwise been proven
+      if (lhs.length == 1) lpUseful.orIr().instanciate(lhs.head,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,rhs),Some(prfRhs))
+      else{
+        val currentVar = lhs.last
+        val newLhs = lhs.init
+        val newRhs = Seq(currentVar) ++ rhs
+        val newProof = lpUseful.orIr().instanciate(currentVar,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,rhs),Some(prfRhs))
+        nestedLorIlApp(newLhs,newRhs,newProof)
+      }
+    }
+
+    def gen0(positionsGen: Seq[Boolean], clause0Gen: Seq[lpOlUntypedVar], clause1Unprocessed0: Seq[lpOlUntypedVar], clause1Processed0: Seq[lpOlUntypedVar], hCountGen0: Int, currentAssumtion: lpUntypedVar): (lpProofScriptStep, Set[lpStatement]) = {
+
+      var usedSymbols: Set[lpStatement] = Set.empty
+      var hCountGen = hCountGen0
+
+      val clause1Unprocessed = clause1Unprocessed0.tail
+      val clause1Processed = clause1Processed0 :+ clause1Unprocessed0.head
+
+      if (positionsGen.length == 1) {
+        val refLhs = if (positionsGen.head) lpFunctionApp(transHypName.getOrElse(clause0Gen.head, throw new Exception("key not found generateClorRule")), Seq(currentAssumtion)) else currentAssumtion
+        // in this case the current hypothesis should be the proof for we are looking for //todo ?
+        //(lpProofScript(Seq(lpRefine(lpFunctionApp(refLhs, Seq())))), usedSymbols)
+        val proofRhs = lpFunctionApp(refLhs, Seq())
+        val completeProof = nestedLorIlApp(clause1Processed0,clause1Unprocessed0,proofRhs)
+        ((lpProofScript(Seq(lpRefine(completeProof))),Set()))
+
+      } else {
+        // the clause is longer than 0 => we need to apply ∨E
+        val orElInstantiation = lpUseful.orE().instanciate(clause0Gen.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause0Gen.tail), lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Processed ++ clause1Unprocessed), Some(lpOlWildcard), Some(lpOlWildcard), Some(currentAssumtion))
+        usedSymbols = usedSymbols + lpUseful.orE()
+        // then we need two proofs: that the lhs of clause0 implies clause1 and the same for the rhs.
+        val (lhs, rhs): (lpProofScript, lpProofScript) = {
+          // the lhs does not have to be transformed
+          val newHyp = lpUntypedVar(lpConstantTerm(s"h$hCountGen"))
+          val newAssumeStep = lpAssume(Seq(newHyp))
+          hCountGen = hCountGen + 1
+          // depending on weather or not the lhs was transformed, we need either a hypothesis represnting a proof of itself or one representing the proof of its transformatons
+          val refLhs = if (positionsGen.head) lpFunctionApp(transHypName.getOrElse(clause0Gen.head, throw new Exception("key not found generateClorRule")), Seq(newHyp)) else newHyp
+          val lhsRefineStep = {
+            if (clause1Processed.length == 1) {
+              usedSymbols = usedSymbols + lpUseful.orIl()
+              lpRefine(lpUseful.orIl().instanciate(clause1Processed.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed), Some(refLhs)))
+            }
+            else {
+              lpRefine(lpUseful.orIr().instanciate(lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Processed0), lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed0), Some(lpUseful.orIl().instanciate(clause1Unprocessed0.head,(lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed0.tail)),Some(refLhs)))))
+              val proofrhs = lpUseful.orIl().instanciate(clause1Unprocessed0.head,(lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed0.tail)),Some(refLhs))
+              val completeProof = nestedLorIlApp(clause1Processed0,clause1Unprocessed0,proofrhs)
+              usedSymbols = usedSymbols + lpUseful.orIl() + lpUseful.orIr
+              lpRefine(completeProof)
+            }
+          }
+          usedSymbols = usedSymbols + lpUseful.orIl()
+          if (!positionsGen.tail.forall(_ == false)) {
+            // some of the other literals yet have to be transformed
+            val (rhsProof, newUsedSymbols) = gen0(positionsGen.tail, clause0Gen.tail, clause1Unprocessed, clause1Processed, hCountGen, newHyp)
+            usedSymbols = usedSymbols ++ newUsedSymbols
+            (lpProofScript(Seq(newAssumeStep, lhsRefineStep)), lpProofScript(Seq(newAssumeStep, rhsProof)))
+          } else {
+            // no transformations left to proof! So we can simply assume both sides and refine with the application of the assumption to the right lor-introduction
+            //val rhsRefineStep = lpRefine(lpUseful.orIr().instanciate(lpOlUntypedBinaryConnectiveTerm_multi(lpOr,clause1Processed), lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed), Some(newHyp)))
+            val completeProof = nestedLorIlApp(clause1Processed,clause1Unprocessed,newHyp)
+            usedSymbols = usedSymbols + lpUseful.orIr() + lpUseful.orIr()
+            //(lpProofScript(Seq(newAssumeStep, lhsRefineStep)), lpProofScript(Seq(newAssumeStep, rhsRefineStep)))
+            (lpProofScript(Seq(newAssumeStep, lhsRefineStep)), lpProofScript(Seq(newAssumeStep,lpRefine(completeProof))))
+          }
+        }
+        val proofScript = lpProofScript(Seq(lpRefine(orElInstantiation, Seq(lhs, rhs))))
+        (proofScript, usedSymbols)
+      }
+    }
+
+    // now we can construct the overall proof!
+    val assumeStep = lpAssume(varsToBeAssumed ++ hypothesisToBeAssumed)
+    val (proof, usedSymbols) = gen0(positions,clause0,clause1,Seq.empty,hypCount,hypothesisToBeAssumed.last)
+    val haveStep = lpHave(proofNames,typeOfRule,lpProofScript(Seq(assumeStep,proof)))
+
+    (haveStep, usedSymbols)
+  }
+
   def encBoolExtClause(child: ClauseProxy, parent: ClauseProxy ,parentNameLpEnc: lpConstantTerm, sig: Signature, parameters0: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int),Set[lpStatement]) = {
 
     val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
@@ -736,6 +879,81 @@ object calculusEncoding {
 
   }
 
+  def encBoolExtClause_proofScript(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, addInfo: Set[(Literal,Seq[Literal])], sig: Signature): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
+
+    val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
+
+    // we also need to quantify over the variables that the clause implicitly quantified over and apply them to the previous stps in their application to the rule
+    var clauseQuantification: Set[lpTypedVar] = Set.empty
+    var applySymbolsToParent: Seq[lpUntypedVar] = Seq.empty
+    parent.cl.implicitlyBound foreach { var0 =>
+      clauseQuantification = clauseQuantification + lpTypedVar(lpConstantTerm(bVarMap(var0._1)), type2LP(var0._2, sig)._1.lift2Meta)
+      applySymbolsToParent = applySymbolsToParent :+ lpUntypedVar(lpConstantTerm(bVarMap(var0._1)))
+    }
+
+    // find out what literals of the parent were used to get to what literals in the child
+    print(s"\nencoding boolext\n")
+    addInfo foreach{ info =>
+      print(s"addInfo: ${term2LP(asTerm(info._1),bVarMap,sig)._1.pretty} -> ${term2LP(asTerm((info._2(0))),bVarMap,sig)._1.pretty} and ${term2LP(asTerm((info._2(1))),bVarMap,sig)._1.pretty}\n")
+
+    }
+
+    /*
+    // seq of literals to which a corresponding clause has to be found in parents
+    // todo: instead track which children belong to which parents
+    val toDo: Seq[Literal] = child.cl.lits
+    parent.cl.lits.foreach { lit =>
+
+      if (BoolExt.canApply(lit)) {
+        // compute the possible literals that oculd result from an application of BoolExt to this literal
+        val possibleRes = BoolExt.apply(lit)
+        // check if they possible new literals are in the new clauses of the child clause
+        if (toDo.containsSlice(possibleRes._1) | toDo.containsSlice(possibleRes._2)) {
+          //todo: for now i simply map these together but to be safe i should check weather i can account for all the literals in the result while applying transformations
+          // that only need each literal of the parent once
+          if (toDo.containsSlice(possibleRes._1)) {
+            if (lit.polarity) {
+              // Prf(eq [↑ o] a b) → Prf((¬ a) ∨  b)
+              val encoding = encBoolExtLit(lit, "posR", bVarMap, sig, parameters)._2
+              transformations = transformations :+ encoding
+            } else {
+              throw new Exception(s"mode of BoolExt enc not yet implemented 1")
+            }
+          }
+          if (toDo.containsSlice(possibleRes._2)) {
+            if (lit.polarity) {
+              // Prf(eq [↑ o] a b) → Prf(a ∨ (¬ b))
+              val encoding = encBoolExtLit(lit, "posL", bVarMap, sig, parameters)._2
+              transformations = transformations :+ encoding
+            } else {
+              throw new Exception(s"mode of BoolExt enc not yet implemented 2")
+            }
+          }
+
+        } else throw new Exception(s"no bool Ext applied to value that it should have been applied to: ${term2LP(asTerm(lit), bVarMap, sig)._1}")
+      } else {
+        transformations = transformations :+ lpOlNothing
+      }
+      // first test if the literal was edited or is also in child
+    }
+
+    if (transformations.length > 1) {
+      // this is not implemented but idealy just passing transformations to clauseRulApp (or whatever the function is called) should do the trick
+      throw new Exception(s"encBoolExtClause not implemented for clauses longer than one literal") //todo : i think i do not even have to diff. cases once this is implemented, instead this can probably also handle the lower case
+    }
+    else {
+      val lambdaTerm = lpLambdaTerm(clauseQuantification.toSeq, lpFunctionApp(transformations.head, Seq(lpFunctionApp(parentNameLpEnc, applySymbolsToParent))))
+      (s"($LPlambda ${clauseQuantification.toString}, (${transformations.head}) ($parentNameLpEnc ${applySymbolsToParent.mkString(" ")}))", parameters, Set("em")) //todo: add em axiom
+      (lambdaTerm, parameters, Set(lpEm))
+    }
+
+    // todo: in some cases the order of the literals is changed by Leo ...
+
+     */
+    (lpOlNothing,(0,0,0,0),Set.empty)
+  }
+
+
   def encEqFactNegInst(T:lpType, otherLit_l:lpOlTerm, otherLit_r:lpOlTerm, maxLit_l: lpOlTerm, maxLit_r: lpOlTerm, parameters: (Int, Int, Int, Int)):(lpTerm,(Int, Int, Int, Int),Set[lpStatement])={
     // for now I just use the symbol instead of the lambda term:
     //todo: Instanciate actual lambda Term
@@ -746,6 +964,7 @@ object calculusEncoding {
     val lambdaTerm = lpFunctionApp(eqFactNegName,Seq(otherLit_l,otherLit_r,maxLit_l,maxLit_r))
     ((lambdaTerm, parameters,Set.empty))
   }
+
 
   def encEqFactPosInst(T: lpType, otherLit_l: lpOlTerm, otherLit_r: lpOlTerm, maxLit_l: lpOlTerm, maxLit_r: lpOlTerm, parameters: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
     // for now I just use the symbol instead of the lambda term:
@@ -1115,7 +1334,7 @@ object calculusEncoding {
       parameters = parametersNew
       //print(s"encoded step: $encStep1\n")
     } else {
-      // if both literals are equational we can simply encode the left and right side
+      // if both literals are equational, we can simply encode the left and right side
       otherLit_l = term2LP(otherLit.left, bVarMap, sig)._1
       otherLit_r = term2LP(otherLit.right, bVarMap, sig)._1
       maxLit_l = term2LP(maxLit.left, bVarMap, sig)._1

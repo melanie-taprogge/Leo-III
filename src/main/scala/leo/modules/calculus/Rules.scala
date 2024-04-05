@@ -1,10 +1,11 @@
 package leo.modules.calculus
 
 import leo.Out
-import leo.datastructures.Literal.Side
+import leo.datastructures.Literal.{Side, asTerm}
 import leo.datastructures._
 import leo.modules.HOLSignature.{LitTrue, o}
 import leo.modules.output.{SZS_CounterTheorem, SZS_EquiSatisfiable, SZS_Theorem}
+import leo.modules.output.LPoutput.Encodings.clause2LP
 
 import scala.:+
 import scala.annotation.tailrec
@@ -153,18 +154,19 @@ object BoolExt extends CalculusRule {
     transformed.map(c => Clause.apply(c, cl.implicitlyBound, cl.typeVars)) //TODO CHECK THIS
   }
 
-  final def apply_withLP(cl: Clause, extLits: ExtLits, otherLits: OtherLits): (Set[Clause], Set[Seq[(Literal, ExtLits)]]) = {
-    var transformed = Set(otherLits)
+  final def apply_andTrack(cl: Clause, extLits: ExtLits, otherLits: OtherLits): Set[(Clause,Set[(Literal,Seq[Literal])])] = {
+    var transformed: Set[(Seq[Literal],Set[(Literal,Seq[Literal])])] = Set((otherLits,Set.empty))
     // track what literals were transformed in what way
-    var additionalInfo: Set[Seq[(Literal, ExtLits)]] = Set.empty
     val extIt = extLits.iterator
     while (extIt.hasNext) {
       val extLit = extIt.next()
       val nu = apply(extLit)
-      transformed = transformed.map(_ ++ nu._1) union transformed.map(_ ++ nu._2)
-      additionalInfo = additionalInfo.map(_ :+ (extLit, nu._1)) union additionalInfo.map(_ :+ (extLit, nu._2))
+      print(s"ext lit: ${extLit.pretty}\n")
+      print(s"nu 1: ${nu._1.length}\n")
+      transformed = transformed.map(tr => (tr._1 ++ nu._1, tr._2 ++ Set((extLit,nu._1)))) union transformed.map(tr => (tr._1 ++ nu._2, tr._2 ++ Set((extLit,nu._2))))
+      //transformed = transformed.map(tr => (tr._1 ++ nu._1, tr._2)) union transformed.map(tr => (tr._1 ++ nu._2, tr._2))
     }
-    (transformed.map(c => Clause.apply(c, cl.implicitlyBound, cl.typeVars)), additionalInfo) //TODO CHECK THIS
+    (transformed.map(c => (Clause.apply(c._1, cl.implicitlyBound, cl.typeVars),c._2)) ) //TODO CHECK THIS
   }
 
   final def apply(l: Literal): (ExtLits, ExtLits) = {
