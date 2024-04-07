@@ -93,7 +93,7 @@ object lpDatastructures {
 
   case class lpMlDependType(vars: Seq[lpVariable], body: lpMlType) extends lpMlType {
     override def pretty: String = {
-      s"(${lpPi.pretty} ${vars.map(var0 => var0.pretty).mkString(s", ${lpPi.pretty}")}, ${body.pretty})"
+      s"(${lpPi.pretty} ${vars.map(var0 => var0.pretty).mkString(s", ${lpPi.pretty} ")}, ${body.pretty})"
     }
     //change nothing when lifting to meta type
     override def lift2Meta: lpMlType = lpMlDependType(vars, body)

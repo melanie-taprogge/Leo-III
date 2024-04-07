@@ -662,9 +662,106 @@ object calculusEncoding {
 
   }
 
+  def nestedLorIlApp(lhs: Seq[lpOlTerm], rhs: Seq[lpOlTerm], prfRhs: lpTerm): lpFunctionApp = {
+    // iterativeley construct the proofs for disjunctions of literals based on a proof for the rhs. This is necessary to avoid errors in cases where (a \lor b) \lor (c \lor d ( ...
+    // would otherwise been proven
+    if (lhs.length == 1) lpUseful.orIr().instanciate(lhs.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, rhs), Some(prfRhs))
+    else {
+      val currentVar = lhs.last
+      val newLhs = lhs.init
+      val newRhs = Seq(currentVar) ++ rhs
+      val newProof = lpUseful.orIr().instanciate(currentVar, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, rhs), Some(prfRhs))
+      nestedLorIlApp(newLhs, newRhs, newProof)
+    }
+  }
+
+  def changePositions(positions: Seq[Int], proofNames: String) ={//: (lpHave,Set[lpStatement])={
+    // given is a sequence of integers, this represent the position of the literal at the index of the integer in the positions sequence in the clause we want to proove
+
+    //todo: check that the positions vector has the right format, otherwise just order the variables
+
+    // the first step is the generation of the type representing the reordering we are trying to prove
+    var clause0: Seq[lpOlUntypedVar] = Seq.empty
+    var clause1: Seq[lpOlUntypedVar] = Seq.fill(positions.length)(lpOlUntypedVar(lpOlNothing))
+
+    val origPosMap: mutable.HashMap[lpOlUntypedVar,Int] = mutable.HashMap.empty
+
+    var varCount = 0
+    var hypCount = 0
+
+    positions foreach { pos =>
+      val variable = lpOlUntypedVar(lpConstantTerm(s"x$varCount"))
+      clause0 = clause0 :+ variable
+      clause1 = clause1.updated(pos, variable)
+      origPosMap += (variable -> pos)
+      varCount = varCount + 1
+    }
+
+    // with this we can construct the type of the rule we proof and can begin the proof script
+    val clause0enc = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause0)
+    val clause1enc = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1)
+
+    // the las hypothesis we assume is clause0
+    val hypothesis = lpUntypedVar(lpConstantTerm(s"h$hypCount"))
+    hypCount = hypCount + 1
+
+    // we add these two as prf terms to the type we are trying to proof
+    val typeOfRule = lpMlDependType(clause0.map(var0 => lpUntypedVar(var0.name)), lpMlFunctionType(Seq(clause0enc.prf, clause1enc.prf)))
+
+    def generate(clause0Unprocessed0: Seq[lpOlUntypedVar], clause0Processed0: Seq[lpOlUntypedVar], clause1Gen: Seq[lpOlUntypedVar], hCountGen0: Int, currentAssumtion: lpUntypedVar, origPosMap: mutable.HashMap[lpOlUntypedVar,Int]): (lpProofScriptStep, Set[lpStatement]) = {
+
+      var hCountGen = hCountGen0
+      var usedSymols: Set[lpStatement] = Set.empty
+
+      if (clause0Unprocessed0.length == 1){
+        // first we need to find out where in the new clause the variable shall fo and find out what variables are left of it and what are right
+        val posInNewCl = origPosMap(clause0Unprocessed0.head)
+        val (lhs, rhs) = clause1Gen.splitAt(posInNewCl)
+        val rhsPrf = if (rhs.length == 1) currentAssumtion else lpUseful.orIl().instanciate(rhs.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, rhs.tail), Some(currentAssumtion))
+        val prf = lpProofScript(Seq(lpRefine(nestedLorIlApp(lhs, rhs, rhsPrf))))
+        (prf, usedSymols)
+
+      }else{
+        val orElInstantiation = lpUseful.orE().instanciate(clause0Unprocessed0.head,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,clause0Unprocessed0.tail),lpOlUntypedBinaryConnectiveTerm_multi(lpOr,clause1Gen),Some(lpOlWildcard),Some(lpOlWildcard),Some(currentAssumtion))
+        val newHyp = lpUntypedVar(lpConstantTerm(s"h$hCountGen"))
+        val newAssumeStep = lpAssume(Seq(newHyp))
+        hCountGen = hCountGen + 1
+        val prfLhs = {
+          // first we need to find out where in the new clause the variable shall fo and find out what variables are left of it and what are right
+          val posInNewCl = origPosMap(clause0Unprocessed0.head)
+          val (lhsLhs, lhsRhs) = clause1Gen.splitAt(posInNewCl)
+          if (lhsLhs.length == 0) lpProofScript(Seq(newAssumeStep, lpRefine(lpUseful.orIl().instanciate(lhsRhs.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, lhsRhs.tail), Some(newHyp)))))
+          else {
+            val lhsRhsPrf = if (lhsRhs.length == 1) newHyp else lpUseful.orIl().instanciate(lhsRhs.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, lhsRhs.tail), Some(newHyp))
+            lpProofScript(Seq(newAssumeStep,lpRefine(nestedLorIlApp(lhsLhs,lhsRhs,lhsRhsPrf))))
+          }
+        }
+        val prfRhs = {
+          val clause0Unprocessed = clause0Unprocessed0.tail
+          val clause0Processed = clause0Processed0 :+ clause0Unprocessed0.head
+          val (prfRhs0,newUsedSymbols) = generate(clause0Unprocessed,clause0Processed,clause1Gen, hCountGen, newHyp, origPosMap)
+          usedSymols = usedSymols ++ newUsedSymbols
+          lpProofScript(Seq(newAssumeStep,prfRhs0))
+        }
+        val proofScript = lpProofScript(Seq(lpRefine(orElInstantiation, Seq(prfLhs, prfRhs))))
+        (proofScript, usedSymols)
+      }
+    }
+
+    // now we can construct the overall proof!
+    val assumeStep = lpAssume(clause0 :+ hypothesis)
+    val (proof, usedSymbols) = generate( clause0, Seq.empty, clause1, hypCount, hypothesis, origPosMap)
+    val haveStep = lpHave(proofNames, typeOfRule, lpProofScript(Seq(assumeStep, proof)))
+
+    print(haveStep.pretty)
+
+    (haveStep, usedSymbols)
 
 
-  def generateClorRule(positions: Seq[Boolean], proofNames: String)={
+    }
+
+
+  def generateClorRule(positions: Seq[Boolean], proofNames: String) : (lpHave,Set[lpStatement])={
     // generate a proof script to only transform single literals in clauses and still proof the entire clause
     // the positions vector then encodes how many literals the remaining clause has and for positions a clause application has to be prooven
 
@@ -723,23 +820,10 @@ object calculusEncoding {
     // we add these two as prf terms to the type we are trying to proof
     val typeOfRule = lpMlDependType(quantifiedVars,lpMlFunctionType(trnsformationProofs ++ Seq(clause0enc.prf, clause1enc.prf)))
 
-    def nestedLorIlApp(lhs:Seq[lpOlTerm], rhs:Seq[lpOlTerm], prfRhs: lpTerm): lpFunctionApp ={
-      // iterativeley construct the proofs for disjunctions of literals based on a proof for the rhs. This is necessary to avoid errors in cases where (a \lor b) \lor (c \lor d ( ...
-      // would otherwise been proven
-      if (lhs.length == 1) lpUseful.orIr().instanciate(lhs.head,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,rhs),Some(prfRhs))
-      else{
-        val currentVar = lhs.last
-        val newLhs = lhs.init
-        val newRhs = Seq(currentVar) ++ rhs
-        val newProof = lpUseful.orIr().instanciate(currentVar,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,rhs),Some(prfRhs))
-        nestedLorIlApp(newLhs,newRhs,newProof)
-      }
-    }
-
-    def gen0(positionsGen: Seq[Boolean], clause0Gen: Seq[lpOlUntypedVar], clause1Unprocessed0: Seq[lpOlUntypedVar], clause1Processed0: Seq[lpOlUntypedVar], hCountGen0: Int, currentAssumtion: lpUntypedVar): (lpProofScriptStep, Set[lpStatement]) = {
+    def generate(positionsGen: Seq[Boolean], clause0Gen: Seq[lpOlUntypedVar], clause1Unprocessed0: Seq[lpOlUntypedVar], clause1Processed0: Seq[lpOlUntypedVar], hCountgenerate: Int, currentAssumtion: lpUntypedVar): (lpProofScriptStep, Set[lpStatement]) = {
 
       var usedSymbols: Set[lpStatement] = Set.empty
-      var hCountGen = hCountGen0
+      var hCountGen = hCountgenerate
 
       val clause1Unprocessed = clause1Unprocessed0.tail
       val clause1Processed = clause1Processed0 :+ clause1Unprocessed0.head
@@ -773,14 +857,14 @@ object calculusEncoding {
               lpRefine(lpUseful.orIr().instanciate(lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Processed0), lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed0), Some(lpUseful.orIl().instanciate(clause1Unprocessed0.head,(lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed0.tail)),Some(refLhs)))))
               val proofrhs = lpUseful.orIl().instanciate(clause1Unprocessed0.head,(lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed0.tail)),Some(refLhs))
               val completeProof = nestedLorIlApp(clause1Processed0,clause1Unprocessed0,proofrhs)
-              usedSymbols = usedSymbols + lpUseful.orIl() + lpUseful.orIr
+              usedSymbols = usedSymbols + lpUseful.orIl() + lpUseful.orIr()
               lpRefine(completeProof)
             }
           }
           usedSymbols = usedSymbols + lpUseful.orIl()
           if (!positionsGen.tail.forall(_ == false)) {
             // some of the other literals yet have to be transformed
-            val (rhsProof, newUsedSymbols) = gen0(positionsGen.tail, clause0Gen.tail, clause1Unprocessed, clause1Processed, hCountGen, newHyp)
+            val (rhsProof, newUsedSymbols) = generate(positionsGen.tail, clause0Gen.tail, clause1Unprocessed, clause1Processed, hCountGen, newHyp)
             usedSymbols = usedSymbols ++ newUsedSymbols
             (lpProofScript(Seq(newAssumeStep, lhsRefineStep)), lpProofScript(Seq(newAssumeStep, rhsProof)))
           } else {
@@ -799,7 +883,7 @@ object calculusEncoding {
 
     // now we can construct the overall proof!
     val assumeStep = lpAssume(varsToBeAssumed ++ hypothesisToBeAssumed)
-    val (proof, usedSymbols) = gen0(positions,clause0,clause1,Seq.empty,hypCount,hypothesisToBeAssumed.last)
+    val (proof, usedSymbols) = generate(positions,clause0,clause1,Seq.empty,hypCount,hypothesisToBeAssumed.last)
     val haveStep = lpHave(proofNames,typeOfRule,lpProofScript(Seq(assumeStep,proof)))
 
     (haveStep, usedSymbols)
@@ -897,6 +981,8 @@ object calculusEncoding {
       print(s"addInfo: ${term2LP(asTerm(info._1),bVarMap,sig)._1.pretty} -> ${term2LP(asTerm((info._2(0))),bVarMap,sig)._1.pretty} and ${term2LP(asTerm((info._2(1))),bVarMap,sig)._1.pretty}\n")
 
     }
+
+    changePositions(Seq(3,0,4,1,2),"fdsfds")
 
     /*
     // seq of literals to which a corresponding clause has to be found in parents
