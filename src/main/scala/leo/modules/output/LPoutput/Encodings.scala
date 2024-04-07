@@ -424,7 +424,7 @@ object Encodings {
           //throw new Exception(s"${cl.furtherInfo.addInfoBoolExt}")
           //val encoding = encBoolExtClause(cl, cl.annotation.parents.head, parentInLpEncID.head, sig,parameters)
           val encoding = encBoolExtClause_proofScript(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
-          encoding
+          (encoding._1,(0,0,0,0),encoding._2)
         case leo.modules.calculus.OrderedEqFac =>
           val encodings = encEqFactClause(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig,parameters)
           encodings

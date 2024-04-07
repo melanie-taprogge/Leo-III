@@ -242,10 +242,10 @@ object lpDatastructures {
     "$o" -> lpOtype,
     "$i" -> lpItype)
 
-  case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlPolyType {
-    def pretty: String = s"(${args.map(t => t.lift2Poly.pretty).mkString(s" ${lpOlTypeConstructor.pretty} ")})"
+  case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlMonoType {
+    def pretty: String = s"(${args.map(t => t.pretty).mkString(s" ${lpOlTypeConstructor.pretty} ")})"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlFunctionType(args))
-    override def lift2Poly: lpOlPolyType = (lpOlFunctionType(args))
+    override def lift2Poly: lpOlPolyType = (lpliftedMonoType(lpOlFunctionType(args)))
   }
 
   case class lpOlMonoComposedType(name: lpConstantTerm, args: Seq[lpType]) extends lpOlMonoType { //todo ?

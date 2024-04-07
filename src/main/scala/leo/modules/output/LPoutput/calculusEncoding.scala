@@ -675,7 +675,7 @@ object calculusEncoding {
     }
   }
 
-  def changePositions(positions: Seq[Int], proofNames: String) ={//: (lpHave,Set[lpStatement])={
+  def changePositions(positions: Seq[Int], proofNames: String): (lpHave,Set[lpStatement])={
     // given is a sequence of integers, this represent the position of the literal at the index of the integer in the positions sequence in the clause we want to proove
 
     //todo: check that the positions vector has the right format, otherwise just order the variables
@@ -963,80 +963,60 @@ object calculusEncoding {
 
   }
 
-  def encBoolExtClause_proofScript(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, addInfo: Set[(Literal,Seq[Literal])], sig: Signature): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
+  def encBoolExtClause_proofScript(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, addInfo: Set[(Literal,Seq[Literal])], sig: Signature): (lpProofScript, Set[lpStatement]) = {
 
     val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
 
+    var usedSymbols: Set[lpStatement] = Set.empty
+
+    var allSteps: Seq[lpProofScriptStep] = Seq.empty
+
     // we also need to quantify over the variables that the clause implicitly quantified over and apply them to the previous stps in their application to the rule
-    var clauseQuantification: Set[lpTypedVar] = Set.empty
+    //var clauseQuantification: Set[lpTypedVar] = Set.empty
     var applySymbolsToParent: Seq[lpUntypedVar] = Seq.empty
     parent.cl.implicitlyBound foreach { var0 =>
-      clauseQuantification = clauseQuantification + lpTypedVar(lpConstantTerm(bVarMap(var0._1)), type2LP(var0._2, sig)._1.lift2Meta)
+      //clauseQuantification = clauseQuantification + lpTypedVar(lpConstantTerm(bVarMap(var0._1)), type2LP(var0._2, sig)._1.lift2Meta)
       applySymbolsToParent = applySymbolsToParent :+ lpUntypedVar(lpConstantTerm(bVarMap(var0._1)))
     }
 
+    // first: abstract over the variables free in the child
+    if (applySymbolsToParent.nonEmpty) allSteps = allSteps :+ lpAssume(applySymbolsToParent)
+
     // find out what literals of the parent were used to get to what literals in the child
-    print(s"\nencoding boolext\n")
+    var transitions: Seq[lpFunctionApp] = Seq.empty
     addInfo foreach{ info =>
-      print(s"addInfo: ${term2LP(asTerm(info._1),bVarMap,sig)._1.pretty} -> ${term2LP(asTerm((info._2(0))),bVarMap,sig)._1.pretty} and ${term2LP(asTerm((info._2(1))),bVarMap,sig)._1.pretty}\n")
-
-    }
-
-    changePositions(Seq(3,0,4,1,2),"fdsfds")
-
-    /*
-    // seq of literals to which a corresponding clause has to be found in parents
-    // todo: instead track which children belong to which parents
-    val toDo: Seq[Literal] = child.cl.lits
-    parent.cl.lits.foreach { lit =>
-
-      if (BoolExt.canApply(lit)) {
-        // compute the possible literals that oculd result from an application of BoolExt to this literal
-        val possibleRes = BoolExt.apply(lit)
-        // check if they possible new literals are in the new clauses of the child clause
-        if (toDo.containsSlice(possibleRes._1) | toDo.containsSlice(possibleRes._2)) {
-          //todo: for now i simply map these together but to be safe i should check weather i can account for all the literals in the result while applying transformations
-          // that only need each literal of the parent once
-          if (toDo.containsSlice(possibleRes._1)) {
-            if (lit.polarity) {
-              // Prf(eq [↑ o] a b) → Prf((¬ a) ∨  b)
-              val encoding = encBoolExtLit(lit, "posR", bVarMap, sig, parameters)._2
-              transformations = transformations :+ encoding
-            } else {
-              throw new Exception(s"mode of BoolExt enc not yet implemented 1")
-            }
-          }
-          if (toDo.containsSlice(possibleRes._2)) {
-            if (lit.polarity) {
-              // Prf(eq [↑ o] a b) → Prf(a ∨ (¬ b))
-              val encoding = encBoolExtLit(lit, "posL", bVarMap, sig, parameters)._2
-              transformations = transformations :+ encoding
-            } else {
-              throw new Exception(s"mode of BoolExt enc not yet implemented 2")
-            }
-          }
-
-        } else throw new Exception(s"no bool Ext applied to value that it should have been applied to: ${term2LP(asTerm(lit), bVarMap, sig)._1}")
-      } else {
-        transformations = transformations :+ lpOlNothing
+      val (before,afterLhs,afterRhs) = (info._1, info._2(0),info._2(1))
+      val beforeEnc = term2LP(asTerm(info._1),bVarMap,sig)._1
+      val beforeLhsEnc =  term2LP(info._1.left,bVarMap,sig)._1
+      val beforeRhsEnc =  term2LP(info._1.right,bVarMap,sig)._1
+      val afterEnc = (term2LP(asTerm((info._2(0))),bVarMap,sig)._1,term2LP(asTerm((info._2(1))),bVarMap,sig)._1)
+      //print(s"addInfo: ${beforeEnc.pretty} -> ${afterEnc._1.pretty} and ${afterEnc._2.pretty}\n")
+      // prove this transition
+      // there are four possible results of the application of the bool-Ext rule:
+      // we first need to identify the version applied here:
+      // The literal we are encoding can either be of positive or of negative polarity...
+      val (lhs,pol): (Boolean,Boolean) = if (before.polarity){
+        // -> for positive polarity: The a literal of the form a = b is transformed to (¬ a ∨ b) or (a ∨ ¬ b)
+        if (!afterLhs.polarity & afterRhs.polarity) (true,true)
+        else if (afterLhs.polarity & !afterRhs.polarity) (false,true)
+        else throw new Exception(s"attempting to encode boolExt in lp but found wrong format")
+      }else{
+        // -> for negative polarity: The a literal of the form ¬ (a = b) is transformed to (¬ a ∨ ¬ b) or (a ∨ b)
+        if (afterLhs.polarity & afterRhs.polarity) (true, false)
+        else if (!afterLhs.polarity & !afterRhs.polarity) (false, false)
+        else throw new Exception(s"attempting to encode boolExt in lp but found wrong format")
       }
-      // first test if the literal was edited or is also in child
+      usedSymbols = usedSymbols + lpInferenceRuleEncoding.boolExt(lhs,pol)
+      transitions = transitions :+ lpInferenceRuleEncoding.boolExt(lhs,pol).instanciate(beforeLhsEnc,beforeRhsEnc)
     }
 
-    if (transformations.length > 1) {
-      // this is not implemented but idealy just passing transformations to clauseRulApp (or whatever the function is called) should do the trick
-      throw new Exception(s"encBoolExtClause not implemented for clauses longer than one literal") //todo : i think i do not even have to diff. cases once this is implemented, instead this can probably also handle the lower case
-    }
-    else {
-      val lambdaTerm = lpLambdaTerm(clauseQuantification.toSeq, lpFunctionApp(transformations.head, Seq(lpFunctionApp(parentNameLpEnc, applySymbolsToParent))))
-      (s"($LPlambda ${clauseQuantification.toString}, (${transformations.head}) ($parentNameLpEnc ${applySymbolsToParent.mkString(" ")}))", parameters, Set("em")) //todo: add em axiom
-      (lambdaTerm, parameters, Set(lpEm))
-    }
+    // after prooving the transformation of the individual literals, reorderings etc. are necessary to proof the transforamtion of the original clause to the one we derived
+    if (parent.cl.lits.length > 1) throw new Exception(s"Encoding of boolExt in LP for clauses with more than one literal not encoded yet")
+    else allSteps = allSteps :+ lpRefine(lpFunctionApp(transitions.head, Seq(lpFunctionApp(parentNameLpEnc, applySymbolsToParent))))
 
-    // todo: in some cases the order of the literals is changed by Leo ...
+    val proof = lpProofScript(allSteps)
 
-     */
-    (lpOlNothing,(0,0,0,0),Set.empty)
+    (proof,usedSymbols)
   }
 
 

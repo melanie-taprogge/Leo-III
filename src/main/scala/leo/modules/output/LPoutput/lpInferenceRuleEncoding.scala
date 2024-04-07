@@ -35,6 +35,42 @@ object lpInferenceRuleEncoding {
     }
   }
 
+  case class boolExt(lhs: Boolean, polarity: Boolean) extends inferenceRules {
+
+    // transform an equality literal of form a=b to either (¬ a ∨ b) or (a ∨ ¬ b)
+    // lhs encodes weather we want the negation on the lhs (¬ a ∨ b) or not, then we return the version for the rhs (a ∨ ¬ b)
+
+    if (!polarity) throw new Exception(s"bool ext for negative polarity not encoded yet")
+
+    override def name: String = {
+      val side = if (lhs) "L" else "R"
+      s"boolExt$side"
+    }
+
+    val x = lpOlConstantTerm("x")
+    val y = lpOlConstantTerm("y")
+
+    override def ty: lpMlType = {
+      if (lhs){
+        // a b : Prf(eq [↑ o] a b) → Prf((¬ a) ∨  b)
+        lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x,y).prf,lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlUnaryConnectiveTerm(lpNot,x),y).prf))
+      }else{
+        // a b : Prf(eq [↑ o] a b) → Prf(a ∨ (¬ b))
+        lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x,y).prf,lpOlUntypedBinaryConnectiveTerm(lpOr,x,lpOlUnaryConnectiveTerm(lpNot,y)).prf))
+      }
+    }
+
+    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet") //todo: generate depending on number of args
+
+    override def dec: lpDeclaration = lpDeclaration(lpConstantTerm(name), Seq(x,y), ty)
+
+    override def pretty: String = lpDefinition(lpConstantTerm(name), Seq(x,y), ty, proof).pretty
+
+    def instanciate(x0: lpOlTerm, y0: lpOlTerm): lpFunctionApp = {
+      lpFunctionApp(lpConstantTerm(name), Seq(x0,y0))
+    }
+  }
+
   case object polaritySwitchEqLit extends inferenceRules {
 
     override def name: String = s"polaritySwitchEqLit"
