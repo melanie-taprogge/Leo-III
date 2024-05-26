@@ -11,23 +11,52 @@ import leo.modules.output.ToTPTP.toTPTP
 import leo.modules.proof_object.CompressProof
 import leo.modules.output.LPoutput.lpDatastructures.{lpDefinedRules, _}
 import leo.modules.output.LPoutput.calculusEncoding._
+import leo.modules.output.LPoutput.lpUseful._
+import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding
 import leo.modules.output.LPoutput.Transformations._
+import java.nio.file.{Files, Paths}
+import java.nio.charset.StandardCharsets
 
 import scala.collection.mutable
 
 object LPoutput {
 
-  def generateSignature(usedSymbols: Set[lpStatement]): String = {
+  val nameLpOutputFolder = "testOutput"
+  val nameLogicFile = "extt"
+  val nameRewriteRuleFile = "rwr"
+  val nameCorrectnessFile = "correctness"
+  val nameNaturalDeductionFile = "nd"
+  val nameRulesFile = "rules"
+  val nameProofFile = "encodedProof"
+
+  def generateSignature(usedSymbols: Set[lpStatement]): (mutable.StringBuilder,mutable.StringBuilder,mutable.StringBuilder) = {
+
+    val correctnessFileSB: mutable.StringBuilder = new StringBuilder()
+    correctnessFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRewriteRuleFile};\n\n")
+    val naturalDeductionFileSB: mutable.StringBuilder = new StringBuilder()
+    naturalDeductionFileSB.append(s"require open ${nameLpOutputFolder}.${nameLogicFile};\n\n")
+    val rulesFileSB: mutable.StringBuilder = new StringBuilder()
+    rulesFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameNaturalDeductionFile};\n\n")
+
+    print(s"used symbols: ${usedSymbols.map(symb => (symb))}")
 
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
+    var infRules: Set[lpInferenceRuleEncoding.inferenceRules] = Set.empty
+    var infRulesRWfree: Set[lpInferenceRuleEncoding.inferenceRules] = Set.empty
+    var basicRules: Set[lpBasicRules] = Set.empty
 
     // sort the symbols
     usedSymbols foreach { symbol =>
       symbol match {
+        case basicRule: lpBasicRules =>
+          basicRules = basicRules + basicRule
         case simpRule: SimplificationEncoding.simplificationRules =>
           simplificationRules = simplificationRules + simpRule
+        case infRule: lpInferenceRuleEncoding.inferenceRules =>
+          if (infRule.proofRWfree) infRulesRWfree = infRulesRWfree + infRule
+          else infRules = infRules + infRule
         case defRule: lpDefinedRules =>
           otherRules = otherRules + defRule
         case _ =>
@@ -37,26 +66,57 @@ object LPoutput {
 
     // now print the symbols
     val output: mutable.StringBuilder = new StringBuilder()
+    val correctnessSb: mutable.StringBuilder = new StringBuilder()
     output.append("//SIGNATURE\n\n\n\n")
+
+    // add basic rules to output and to correctness
+    // todo: make sure that things like the basic rules that can depend on each other are given in the right order
+    if (basicRules.nonEmpty) output.append("////// Basic Rules \n\n")
+    basicRules foreach { basicRule =>
+      correctnessFileSB.append(basicRule.pretty)
+      correctnessFileSB.append("\n")
+      naturalDeductionFileSB.append(basicRule.dec.pretty)
+      naturalDeductionFileSB.append("\n")
+    }
 
     // add simplification rules
     if (simplificationRules.nonEmpty) output.append("////// Simplification Rules \n\n")
     simplificationRules foreach { simpRrule =>
-      output.append(simpRrule.dec.pretty)
-      output.append("\n")
+      rulesFileSB.append(simpRrule.dec.pretty)
+      rulesFileSB.append("\n")
+    }
+
+    // add inference rules, todo: in some cases trigger the dynamic generation of rules here
+    if (infRules.nonEmpty) output.append("////// Inference Rules with RW rules \n\n")
+    infRules foreach { infRrule =>
+      if (infRrule.proofIsDefined) rulesFileSB.append(infRrule.pretty)
+      else rulesFileSB.append(infRrule.dec.pretty)
+      rulesFileSB.append("\n")
+    }
+
+    // add inference rules, todo: in some cases trigger the dynamic generation of rules here
+    if (infRulesRWfree.nonEmpty) output.append("////// Inference Rules \n\n")
+    infRulesRWfree foreach { infRrule =>
+      if (infRrule.proofIsDefined) rulesFileSB.append(infRrule.pretty)
+      else rulesFileSB.append(infRrule.dec.pretty)
+      rulesFileSB.append("\n")
     }
 
     // add other Rules
-    if (otherRules.nonEmpty) output.append("////// Other Rules \n\n")
+    if (otherRules.nonEmpty) rulesFileSB.append("////// Other Rules \n\n")
     otherRules foreach { otherRule =>
-      output.append(otherRule.dec.pretty)
-      output.append("\n")
+      rulesFileSB.append(otherRule.dec.pretty)
+      rulesFileSB.append("\n")
     }
 
-    output.toString()
+    (correctnessFileSB, naturalDeductionFileSB,rulesFileSB)
   }
 
-  def dosomething(state: LocalState):Unit={
+  def outputLPFiles(state: LocalState, lpOutputPath: String):Unit={
+
+    val proofFileSB: mutable.StringBuilder = new StringBuilder()
+    proofFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameNaturalDeductionFile} ${nameLpOutputFolder}.${nameRulesFile};\n\n")
+
 
     print(s"\n\nLP-ENCODING\n\n")
 
@@ -65,14 +125,16 @@ object LPoutput {
       val sig = state.signature
       val proof = state.proof
 
-      val encodedProblem: StringBuffer = new StringBuffer()
-      val encodedProof: StringBuffer = new StringBuffer()
-      var usedSymbols:Set[lpStatement] = Set.empty
+      //val encodedProblem: StringBuffer = new StringBuffer()
+      //val encodedProof: StringBuffer = new StringBuffer()
+      var usedSymbols:Set[lpStatement] = Set(eqDef(),eqRef()) // always add them because they are necessary for equality tactics. Todo: handle differently
       var parameters: (Int,Int,Int,Int) = (0,0,0,0)
 
 
       // encode the typing and definition formulas:
       val keysToTypeDecsAndDefs = sig.allUserConstants.intersect(symbolsInProof(proof).union(sig.typeSymbols))
+
+      proofFileSB.append("// PROBLEM ENCODING ///////////////////////////\n")
 
       keysToTypeDecsAndDefs.foreach {key =>
         val symbol = sig.apply(key)
@@ -81,14 +143,14 @@ object LPoutput {
         if (symbol.hasKind) {
           //user defined types: add declarations to the problem
           //todo: what is saved as a kind? look at lines 96-99 in toTPTPscala again
-          encodedProblem.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,lpSet).pretty)
+          proofFileSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,lpSet).pretty)
           usedSymbols = usedSymbols + lpSet
 
         }else{
           if (symbol.hasType) {
             val (typeDec, updatedUsedSymbols) = type2LP(symbol._ty, sig, usedSymbols)
             usedSymbols = updatedUsedSymbols
-            encodedProblem.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,typeDec.lift2Meta).pretty)
+            proofFileSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,typeDec.lift2Meta).pretty)
           }
 
           if (symbol.hasDefn) {
@@ -114,7 +176,7 @@ object LPoutput {
               }
             }
             //val encodedDef = s"rule $Prf($sName$variables) $ruleArrow $Prf($definition);\n"
-            encodedProblem.append(encodedDef.pretty)
+            proofFileSB.append(encodedDef.pretty)
           }
         }
       }
@@ -154,6 +216,8 @@ object LPoutput {
         var conjCounter = 0
         var axCounter = 0
 
+        proofFileSB.append("// PROOF ENCODING ///////////////////////////\n")
+
         compressedProof foreach { step =>
           val stepId = step.id
           idClauseMap = idClauseMap + (stepId -> step)
@@ -165,7 +229,7 @@ object LPoutput {
             usedSymbols = usedSymbolsNew
             //encodedProblem.append(s"symbol negatedConjecture$conjCounter : $encConj;\n")
             val conjName = lpConstantTerm(s"negatedConjecture$conjCounter")
-            encodedProblem.append(lpDeclaration(conjName, Seq.empty, encConj).pretty)
+            proofFileSB.append(lpDeclaration(conjName, Seq.empty, encConj).pretty)
             // let the corresponding step number point to "negated_conjecture"
             identicalSteps += (stepId -> conjName)
             //print(s"identical steps: $identicalSteps\n")
@@ -174,7 +238,7 @@ object LPoutput {
             val (encClause, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
             usedSymbols = usedSymbolsNew
             val axName = lpConstantTerm(s"axiom$axCounter")
-            encodedProblem.append(lpDeclaration(axName, Seq.empty, encClause).pretty)
+            proofFileSB.append(lpDeclaration(axName, Seq.empty, encClause).pretty)
             identicalSteps += (stepId -> axName)
             axCounter = axCounter + 1
           }else {
@@ -183,6 +247,7 @@ object LPoutput {
             usedSymbols = usedSymbolsNew
 
             var encodeStep = false
+
             step.annotation.parents foreach { parent =>
               if (!Seq().contains(parent.role)) { //Role_NegConjecture Role_Conjecture
                 val encParent = clause2LP(parent.cl, usedSymbols, sig)._1
@@ -215,21 +280,22 @@ object LPoutput {
             if (encodeStep == true) {
 
               // try to construct a proof
+
               // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
               val parentInLpEncID = step.annotation.parents.map(parent => identicalSteps.getOrElse(parent.id, nameStep(parent.id.toInt)))
-              val (proofTerm, updatedParameters, updatedUsedSymbols) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
+              val (ruleName,proofTerm, updatedParameters, updatedUsedSymbols) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
 
               // if the step is actually new, we want to add it to the output
               if (proofTerm == lpOlNothing) {
                 // todo: encode these rules! :)
-                encodedProof.append(s"\n// The rule ${step.annotation.fromRule} is not encoded yet\n")
-                encodedProof.append(s"symbol step${step.id} : ${encStep.pretty};\n")
+                proofFileSB.append(s"\n// The rule ${step.annotation.fromRule} is not encoded yet\n")
+                proofFileSB.append(s"symbol step${step.id} : ${encStep.pretty};\n")
               } else {
                 // otherwise we provide it as an axiom
                 //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
                 // and encode the proof based on its parent clauses
                 //encodedProblem.append(s"$proofTerm;\n")
-                encodedProof.append(s"\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm).pretty}\n")
+                proofFileSB.append(s"\n// $ruleName\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm).pretty}\n")
                 // and we will add the necessary symbols to the generated Signature
                 usedSymbols = usedSymbols ++ updatedUsedSymbols
                 parameters = updatedParameters
@@ -259,10 +325,33 @@ object LPoutput {
       }
 
       // generate the signature
-      val signatureOutput = generateSignature(usedSymbols)
-      print(signatureOutput)
-      print(encodedProblem)
-      print(encodedProof)
+
+      val (correctnessFileSB, naturalDeductionFileSB,rulesFileSB) = generateSignature(usedSymbols)
+
+      //print(encodedProblem)
+      //print(encodedProof)
+
+      //print(s"change order proof:\n ${changePositions(Seq(0,2,1),"fdsafda")._1.pretty}")
+      //print(s"apply only to some literals:\n${generateClorRule(Seq(false,true,true),"jaaaaas")._1.pretty}")
+
+      val content = "This is the new content to write into the file."
+
+      // write the files
+
+      val correctnessFilePath = Paths.get(s"${lpOutputPath}${nameCorrectnessFile}.lp")
+      Files.write(correctnessFilePath, correctnessFileSB.toString.getBytes(StandardCharsets.UTF_8))
+
+      naturalDeductionFileSB.append(s"builtin \"eqind\" ≔ ${eqDef().name.pretty};\n")//todo: pass linking to builtin differently")
+      naturalDeductionFileSB.append(s"builtin \"refl\" ≔ ${eqRef().name.pretty};\n")//todo: pass linking to builtin differently")
+      val ndFilePath = Paths.get(s"${lpOutputPath}${nameNaturalDeductionFile}.lp")
+      Files.write(ndFilePath, naturalDeductionFileSB.toString.getBytes(StandardCharsets.UTF_8))
+
+      val rulesFilePath = Paths.get(s"${lpOutputPath}${nameRulesFile}.lp")
+      Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))
+
+      val proofFilePath = Paths.get(s"${lpOutputPath}${nameProofFile}.lp")
+      Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
+
     }
 
     extractNecessaryFormulas(state)

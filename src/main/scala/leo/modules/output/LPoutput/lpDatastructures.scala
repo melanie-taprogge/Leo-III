@@ -14,7 +14,11 @@ object lpDatastructures {
 
   abstract class lpDefinedRules extends lpStatement{
 
-    def name: String
+    def proofIsDefined: Boolean = false
+
+    def proofRWfree: Boolean = true
+
+    def name: lpConstantTerm
     def ty: lpMlType
 
     def proof: lpProofScript
@@ -93,7 +97,8 @@ object lpDatastructures {
 
   case class lpMlDependType(vars: Seq[lpVariable], body: lpMlType) extends lpMlType {
     override def pretty: String = {
-      s"(${lpPi.pretty} ${vars.map(var0 => var0.pretty).mkString(s", ${lpPi.pretty} ")}, ${body.pretty})"
+      val quantification = if (vars.nonEmpty) s"${lpPi.pretty} ${vars.map(var0 => var0.pretty).mkString(s", ${lpPi.pretty} ")}, " else ""
+      s"($quantification${body.pretty})"
     }
     //change nothing when lifting to meta type
     override def lift2Meta: lpMlType = lpMlDependType(vars, body)
@@ -106,6 +111,14 @@ object lpDatastructures {
 
     //change nothing when lifting to meta type
     override def lift2Meta: lpMlType = lpMlFunctionType(objects)
+  }
+
+  case class lpClause(impBoundVars: Seq[lpOlTypedVar], lits: Seq[lpOlTerm]) extends lpMlType {
+    override def pretty: String = lpMlDependType(impBoundVars.map(_.lift2Meta),lpOlUntypedBinaryConnectiveTerm_multi(lpOr,lits).prf).pretty
+
+    def withoutQuant: lpOlUntypedBinaryConnectiveTerm_multi = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,lits)
+
+    override def lift2Meta: lpMlType = throw new Exception("error: trying to lift lpClause to meta")
   }
 
   ////////////////////////// META LOGIC TERMS
@@ -155,9 +168,11 @@ object lpDatastructures {
     override def pretty: String = "⤳"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpOlTypeConstructor.pretty} to meta level")
   }
-  case object lpSet extends lpOlTypeConstants {
+  case object lpSet extends lpOlType {
     override def pretty: String = "MonoSet"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpSet.pretty} to meta level")
+
+    override def lift2Poly: lpOlPolyType = throw new Exception(s"attempting to lift ${lpSet.pretty} to poly")
   }
   case object lpScheme extends lpOlTypeConstants {
     override def pretty: String = "PolySet"
@@ -224,10 +239,19 @@ object lpDatastructures {
   case class lpOlUserDefinedPolyType(t: String) extends lpOlPolyType {
     def pretty: String = t
 
-    override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType(t))
+    override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedPolyType(t))
 
     override def lift2Poly: lpOlPolyType = lpOlUserDefinedPolyType(t)
   }
+
+  case class lpOlUserDefinedMonoType(t: String) extends lpOlMonoType {
+    def pretty: String = t
+
+    override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType(t))
+
+    override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOlUserDefinedMonoType(t))
+  }
+
   case object lpOtype extends lpOlSimpleType {
     def pretty: String = "o"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType("o"))
@@ -334,8 +358,12 @@ object lpDatastructures {
   case class lpOlTypedVar(name: lpOlConstantTerm,ty: lpOlType) extends lpOlTerm {
     override def pretty: String = name.pretty
     def lift2Meta: lpTypedVar = lpTypedVar(lpConstantTerm(name.pretty),ty.lift2Meta)
+
     override def prf: liftedProp = liftedProp(lpOlTypedVar(name,ty))
+
+    def untyped: lpOlUntypedVar = lpOlUntypedVar(name)
   }
+
 
   case class lpOlUntypedVar(name: lpTerm) extends lpOlTerm {
     override def pretty: String = name.pretty
@@ -378,7 +406,7 @@ object lpDatastructures {
       }
       else {
         val encodedType = ty match {
-          case lpOlMonoType => s"${ty.lift2Poly.pretty}"
+          case _ :lpOlMonoType => s"${ty.lift2Poly.pretty}"
           case _ => throw new Exception(s"failed to print lpTypedBinaryConnectiveTerm($connective,$ty,$lhs,$rhs), $ty has wrong format")
         }
         s"(${connective.pretty} [$encodedType] ${lhs.pretty} ${rhs.pretty})"
@@ -410,6 +438,8 @@ object lpDatastructures {
     private[lpDatastructures] def openCurlyBracket : String
 
   }
+
+
 
   case class lpProofScriptCommentLine(comment: String,tab: Int = 0) extends lpProofScriptStep(tab: Int) {
 
@@ -455,6 +485,8 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(steps, tab)
 
   }
+
+
 
   case class lpRefine(t: lpFunctionApp, subproofs: Seq[lpProofScript] = Seq.empty, tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpRefine = lpRefine(t, subproofs, tab + i)

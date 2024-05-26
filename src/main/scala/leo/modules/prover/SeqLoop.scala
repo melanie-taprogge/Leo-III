@@ -480,8 +480,12 @@ object SeqLoop {
       }
     }
 
-    dosomething(state)
+    if (Configuration.LPOUTPUTPATH.isDefined){
+      val lpOutputPath = if(Configuration.LPOUTPUTPATH.get.endsWith("/")) Configuration.LPOUTPUTPATH.get else s"${Configuration.LPOUTPUTPATH.get}/"
+      print(s"saving Lambdapi output files to $lpOutputPath")
 
+      outputLPFiles(state,lpOutputPath)
+    }
   }
 
   @inline final def prematureCancel(counter: Long): Boolean = {

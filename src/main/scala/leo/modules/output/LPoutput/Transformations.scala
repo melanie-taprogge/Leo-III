@@ -234,30 +234,107 @@ object Transformations {
   }
 
   case class mkNegPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(¬ a) → Prf(eq [↑ o] (¬ a) ⊤)
+    // Provide a proof of the type Prf(¬ a) → Prf(= [mono o] (¬ a) ⊤)
 
-    override def name: String = "mkNegPropPosEq"
+    override def name: lpConstantTerm = lpConstantTerm("mkNegPropPosEq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTop)).prf
 
     override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
 
-    override def dec: lpDeclaration = lpDeclaration(lpConstantTerm(name), Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(lpConstantTerm(name), Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+    def transformLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
+
+  }
+
+  case class mkNegPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(= [mono o] (¬ a) (¬ (= [mono o] a ⊤)))
+
+    override def name: lpConstantTerm = lpConstantTerm("mkNegPropNegEq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop))).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+    def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop)), x0, lpOlTop)
+
+  }
+
+  case class mkNegLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(= [mono o] (¬ (= [mono o] (¬ a) ⊤)) a)
+
+    override def name: lpConstantTerm = lpConstantTerm("mkNegLitPosPropEq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)),lpOlTop)),lpOlConstantTerm(patternVarName)).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkNegLitPosProp_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+    def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
+
+    def transformLit(x0: lpOlTerm): (lpOlTerm) = x0
+
+  }
+
+  case class mkNegLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(= [mono o] (¬ (= [mono o] a ⊤)) (¬ a))
+
+    override def name: lpConstantTerm = lpConstantTerm("mkNegLitNegPropEq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlConstantTerm(patternVarName), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkNegLitPosProp_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+    def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
+
+    def transformLit(x0: lpOlTerm): (lpOlTerm) = lpOlUnaryConnectiveTerm(lpNot, x0)
+
+  }
+
+  case class mkPosLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(= [mono o] (= [mono o] (¬ a) ⊤) (¬ a))
+
+    override def name: lpConstantTerm = lpConstantTerm("mkPosLitNegPropEq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTop), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkPosLitNegProp_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+    def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
+
+    def transformLit(x0: lpOlTerm): (lpOlTerm) =  lpOlUnaryConnectiveTerm(lpNot, x0)
+
   }
 
   case class mkNegPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
 
-    override def name: String = "mkNegPropEqBot"
+    override def name: lpConstantTerm = lpConstantTerm("mkNegPropEqBot")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlBot)).prf
 
     override def proof: lpProofScript = throw new Exception("proof for mkNegPropEqBot_script not encoded yet")
 
-    override def dec: lpDeclaration = lpDeclaration(lpConstantTerm(name), Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(lpConstantTerm(name), Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
   }
 
   def mkPosPropNegLit(a: lpTerm, parameters: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
@@ -288,6 +365,40 @@ object Transformations {
 
   }
 
+  case class mkPosPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(= [mono o] a (¬(= [mono o] (¬ a) ⊤)))
+
+    override def name: lpConstantTerm = lpConstantTerm("mkPosPropNegEq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTop))).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+    //def instanciate():lpFunctionApp =
+    def transformLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
+  }
+
+  case class mkPosPropPos_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(= [mono o] a (= [mono o] a ⊤))
+
+    override def name: lpConstantTerm = lpConstantTerm("mkPosPropPosEq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop)).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+    //def instanciate():lpFunctionApp =
+    def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop), x0, lpOlTop)
+  }
+
   def mkPosPropPosLit(a: lpTerm, parameters: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
     // Provide a proof of the type Prf(a) → Prf(eq [↑ o] a ⊤)
     // todo: replace with proper lp term
@@ -316,15 +427,15 @@ object Transformations {
   case class mkPosPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(a) → Prf(eq [↑ o] a ⊤)
 
-    override def name: String = "mkPosPropPosEq"
+    override def name: lpConstantTerm = lpConstantTerm("mkPosPropPosEq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlConstantTerm(patternVarName),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlConstantTerm(patternVarName),lpOlTop)).prf
 
     override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
 
-    override def dec: lpDeclaration = lpDeclaration(lpConstantTerm(name),Seq(lpUntypedVar(lpConstantTerm(patternVarName))),ty)
+    override def dec: lpDeclaration = lpDeclaration(name,Seq(lpUntypedVar(lpConstantTerm(patternVarName))),ty)
 
-    override def pretty: String = lpDefinition(lpConstantTerm(name),Seq(lpUntypedVar(lpConstantTerm(patternVarName))),ty,proof).pretty
+    override def pretty: String = lpDefinition(name,Seq(lpUntypedVar(lpConstantTerm(patternVarName))),ty,proof).pretty
   }
 
   def mkPosLitNegProp(a: lpTerm, parameters: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
