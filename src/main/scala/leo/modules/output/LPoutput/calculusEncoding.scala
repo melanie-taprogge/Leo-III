@@ -1627,13 +1627,13 @@ object calculusEncoding {
       } else litsAfter = litsAfter :+ lit
       litsToFind = litsToFind.filterNot(_ != lit)
     }
-    if (litsToFind.nonEmpty) throw new Exception("not all literals could be found")
+    //if (litsToFind.nonEmpty) throw new Exception("not all literals could be found")
 
     var rewriteSteps: Seq[lpRewrite] = Seq.empty
 
     orderedLits foreach { lit =>
 
-      val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, Some(1))
+      val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None)
 
       val (lhs0, rhs0, ty0, ispos) = lit match { //todo: summarize
 
@@ -1658,7 +1658,8 @@ object calculusEncoding {
 
     // Combine into a have step
     val clauseAfter = lpClause(origClause.impBoundVars, litsAfter)
-    val haveStep = wholeHaveRewriteStep(rewriteSteps, nameStept.name, nameSubStep, origClause.withoutQuant, sourceBefore, clauseAfter.withoutQuant)
+    //val haveStep = wholeHaveRewriteStep(rewriteSteps, nameStept.name, nameSubStep, origClause.withoutQuant, sourceBefore, clauseAfter.withoutQuant)
+    val haveStep = lpHave(nameStept.name,clauseAfter.withoutQuant.prf,lpProofScript(rewriteSteps :+ lpRefine(lpFunctionApp(sourceBefore,Seq()))))
     (haveStep, litsAfter, usedSymbols)
   }
 
@@ -1751,7 +1752,7 @@ object calculusEncoding {
     var litsToFind = origClause.lits
     val positionsInClause: mutable.HashMap[lpOlTerm, Int] = mutable.HashMap.empty
     var litsAfter: Seq[lpOlTerm] = Seq.empty
-    if (!lits.forall(lit => litsToFind.contains(lit))) throw new Exception("not all lits were found in clause")
+    //if (!lits.forall(lit => litsToFind.contains(lit))) throw new Exception("not all lits were found in clause")
     litsToFind foreach { lit =>
       if (lits.contains(lit)) { //todo: check that each literal was actually found too.
         orderedLits = orderedLits :+ lit
@@ -1767,7 +1768,7 @@ object calculusEncoding {
 
     orderedLits foreach { lit =>
 
-      val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, Some(1))
+      val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None)
 
       if (desiredEquational){
         lit match {
@@ -1776,16 +1777,16 @@ object calculusEncoding {
               //throw new Exception("1")
               // hier müsste bestimmt z.t. statt lit t stehen^
               //val instRule = lpFunctionApp(mkNegPropPosLit_script().name, Seq(t))
-              usedSymbols = usedSymbols + mkNegPropPosLit_script()
-              rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropPosLit_script().name)
-              val transformedLit = mkNegPropPosLit_script().transformLit(t)
+              usedSymbols = usedSymbols + mkPosLitNegProp_script()
+              rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosLitNegProp_script().name)
+              val transformedLit = mkPosLitNegProp_script().origLit(t)
               litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit._1)
               transformations.update(lit, transformedLit)
             } else {
-              val instRule = lpFunctionApp(mkNegPropNegLit_script().name, Seq(t))
-              usedSymbols = usedSymbols + mkNegPropNegLit_script()
+              val instRule = lpFunctionApp(mkNegLitNegProp_script().name, Seq(t))
+              usedSymbols = usedSymbols + mkNegLitNegProp_script()
               rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, instRule)
-              val transformedLit = mkNegPropNegLit_script().transformLit(t)
+              val transformedLit = mkNegLitNegProp_script().origLit(t)
               litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit._1)
               transformations.update(lit, transformedLit)
 
@@ -1793,18 +1794,18 @@ object calculusEncoding {
           case _ =>
             if (desiredPolarity == true) {
               //throw new Exception("3")
-              val instRule = lpFunctionApp(mkPosPropPos_script().name, Seq(lit))
-              usedSymbols = usedSymbols + mkPosPropPos_script()
+              val instRule = lpFunctionApp(mkPosLitPosProp_script().name, Seq(lit))
+              usedSymbols = usedSymbols + mkPosLitPosProp_script()
               rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, instRule)
-              val transformedLit = mkPosPropPos_script().transformLit(lit)
+              val transformedLit = mkPosLitPosProp_script().origLit(lit)
               litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit._1)
               transformations.update(lit, transformedLit)
 
             } else {
-              val instRule = lpFunctionApp(mkPosPropNegLit_script().name, Seq(lit))
-              usedSymbols = usedSymbols + mkPosPropNegLit_script()
+              val instRule = lpFunctionApp(mkNegLitPosProp_script().name, Seq(lit))
+              usedSymbols = usedSymbols + mkNegLitPosProp_script()
               rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, instRule)
-              val transformedLit = mkPosPropNegLit_script().transformLit(lit)
+              val transformedLit = mkNegLitPosProp_script().origLit(lit)
               litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit._1)
               transformations.update(lit, transformedLit)
             }
@@ -1816,9 +1817,9 @@ object calculusEncoding {
             lhs match {
               case lpOlUnaryConnectiveTerm(lpNot, t) =>
                 //val instRule = mkPosLitNegProp_script().instanciate(t)
-                usedSymbols = usedSymbols + mkPosLitNegProp_script()
-                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosLitNegProp_script().name)
-                val transformedLit = mkPosLitNegProp_script().transformLit(t)
+                usedSymbols = usedSymbols + mkNegPropPosLit_script()
+                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropPosLit_script().name)
+                val transformedLit = mkNegPropPosLit_script().origLit(t)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
 
@@ -1829,16 +1830,16 @@ object calculusEncoding {
             lhs match {
               case lpOlUnaryConnectiveTerm(lpNot, t) =>
                 //val instRule = mkNegLitPosProp_script().instanciate(t)
-                usedSymbols = usedSymbols + mkNegLitPosProp_script()
-                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegLitPosProp_script().name)
-                val transformedLit = mkNegLitPosProp_script().transformLit(t)
+                usedSymbols = usedSymbols + mkPosPropNegLit_script()
+                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosPropNegLit_script().name)
+                val transformedLit = mkPosPropNegLit_script().origLit(t)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
               case _ =>
                 //val instRule = mkNegLitNegProp_script().instanciate(lhs)
-                usedSymbols = usedSymbols + mkNegLitNegProp_script()
-                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegLitNegProp_script().name)
-                val transformedLit = mkNegLitNegProp_script().transformLit(lhs)
+                usedSymbols = usedSymbols + mkNegPropNegLit_script()
+                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropNegLit_script().name)
+                val transformedLit = mkNegPropNegLit_script().origLit(lhs)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit,lpOlNothing,lpOlNothing))
             }
@@ -1853,7 +1854,8 @@ object calculusEncoding {
     }
     // Combine into a have step
     val clauseAfter = lpClause(origClause.impBoundVars, litsAfter)
-    val haveStep = wholeHaveRewriteStep(rewriteSteps, nameStept.name, "hjhjlk", origClause.withoutQuant, sourceBefore, clauseAfter.withoutQuant)
+    //val haveStep = wholeHaveRewriteStep(rewriteSteps, nameStept.name, "hjhjlk", origClause.withoutQuant, sourceBefore, clauseAfter.withoutQuant)
+    val haveStep = lpHave(nameStept.name,clauseAfter.withoutQuant.prf,lpProofScript(rewriteSteps :+ lpRefine(lpFunctionApp(sourceBefore,Seq()))))
     (haveStep, transformations.toMap, clauseAfter.lits, usedSymbols)
   }
 
@@ -2403,7 +2405,7 @@ object calculusEncoding {
     lpHave(nameStep,after.prf,stepProof)
   }
 
-  def removeUnificationConstraint(uniC: Literal, parent: Clause, sig: Signature): (Seq[lpProofScriptStep], Set[lpStatement])={
+  def removeUnificationConstraint(uniC: Literal, parent: Clause, lastLit0: lpOlTerm, sig: Signature): (Seq[lpProofScriptStep], Set[lpStatement])={
     // prove that unification literal can be removed from a clause when they either have the form ¬⊤ or x≠x (modulo unification)
 
     var usedSymbols: Set[lpStatement] = Set.empty
@@ -2416,14 +2418,28 @@ object calculusEncoding {
 
     var rewriteSteps: Seq[lpProofScriptStep] = Seq.empty
 
+    // in both cases, the second step is the removal of ⊥ from the clause. This can be done using Simp7:
+    val rewritePattern_step2 = generateClausePatternTerm(positionInClause - 1, parent.lits.length - 1, None, patternVar)
+    val rewriteStep_step2 = lpRewrite(rewritePattern_step2, SimplificationEncoding.Simp7_eq.name)
+    rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Remove ⊥ from clause")
+    rewriteSteps = rewriteSteps :+ rewriteStep_step2
+    usedSymbols = usedSymbols + SimplificationEncoding.Simp7_eq
+
     // proof the first transformation depending on the form of the unification constraint
-    val rewritePattern_step1 = generateClausePatternTerm(positionInClause, parent.lits.length, Some(1), patternVar)
+    val rewritePattern_step1 = generateClausePatternTerm(positionInClause, parent.lits.length, None, patternVar)
     if (uniC.equational){
       if (!uniC.polarity){
         // in this case, we need to first show that both sides are equal modulo simplification and then apply a Simp Rule that postulates that x≠x = ⊥
         // the rewrite rule used here needs to explicitly instanciate the used type, therefore we first need to find that type out:
-        //val ty = type2LP(uniC.left.ty, sig, Set.empty)._1
-        val rewriteStep_step1 = lpRewrite(rewritePattern_step1, SimplificationEncoding.Simp10_eq.name)
+        var ty = type2LP(uniC.left.ty, sig, Set.empty)._1
+        val lastLit = lastLit0 match {
+          case lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, ty0, lhs, _)) =>
+            ty = ty0
+            lhs
+          case _ =>
+            throw new Exception("attempting to instanciate Simp10 inappropriateley")
+        }
+        val rewriteStep_step1 = lpRewrite(rewritePattern_step1, lpFunctionApp(SimplificationEncoding.Simp10_eq.name,Seq(ty, lastLit)))
         rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Simplify unification constraint of form x≠x to ⊥")
         rewriteSteps = rewriteSteps :+ lpSimplify(Set.empty)
         rewriteSteps = rewriteSteps :+ rewriteStep_step1
@@ -2441,12 +2457,6 @@ object calculusEncoding {
       }
     }
 
-    // in both cases, the second step is the removal of ⊥ from the clause. This can be done using Simp7:
-    val rewritePattern_step2 = generateClausePatternTerm(positionInClause - 1, parent.lits.length - 1, Some(1), patternVar)
-    val rewriteStep_step2 = lpRewrite(rewritePattern_step2, SimplificationEncoding.Simp7_eq.name)
-    rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Remove ⊥ from clause")
-    rewriteSteps = rewriteSteps :+ rewriteStep_step2
-    usedSymbols = usedSymbols + SimplificationEncoding.Simp7_eq
 
     (rewriteSteps,usedSymbols)
   }
@@ -2522,18 +2532,20 @@ object calculusEncoding {
         val uniC1 = addInfoUniRule._2._1
         if (parent.cl.lits.last != uniC1) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 1 in unexpected position")
         val nameStep1Removal = "RemoveUC1"
-        val (removeUniC1, usedSymbolsUc1) = removeUnificationConstraint(uniC1, parent.cl,sig)
+        val (removeUniC1, usedSymbolsUc1) = removeUnificationConstraint(uniC1, parent.cl, encSubstLits.last,sig)
         usedSymbols = usedSymbols ++ usedSymbolsUc1
-        val proofStepUc1 = wholeHaveRewriteStep(removeUniC1, nameStep1Removal, "H1", lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits), lpConstantTerm(substitutionStepName), lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init))
+        //val proofStepUc1 = wholeHaveRewriteStep(removeUniC1, nameStep1Removal, "H1", lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits), lpConstantTerm(substitutionStepName), lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init))
+        val proofStepUc1 = lpHave(nameStep1Removal,lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init).prf,lpProofScript(removeUniC1 :+ lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName),Seq()))))
         allSteps = allSteps :+ proofStepUc1
         // Remove the second unification constraint
         val uniC2 = addInfoUniRule._2._2
         if (parent.cl.lits.init.last != uniC2) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 2 in unexpected position")
         val nameStep2Removal = "RemoveUC2"
-        val (removeUniC2, usedSymbolsUc2) = removeUnificationConstraint(uniC2, Clause(parent.cl.lits.init),sig)
-        usedSymbols = usedSymbols ++ usedSymbolsUc2
         val clauseWighoutUC = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init.init)
-        val proofStepUc2 = wholeHaveRewriteStep(removeUniC2, nameStep2Removal, "H1", lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init), lpConstantTerm(nameStep1Removal), clauseWighoutUC)
+        val (removeUniC2, usedSymbolsUc2) = removeUnificationConstraint(uniC2, Clause(parent.cl.lits.init), encSubstLits.init.last,sig)
+        usedSymbols = usedSymbols ++ usedSymbolsUc2
+        //val proofStepUc2 = wholeHaveRewriteStep(removeUniC2, nameStep2Removal, "H1", lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init), lpConstantTerm(nameStep1Removal), clauseWighoutUC)
+        val proofStepUc2 = lpHave(nameStep2Removal, clauseWighoutUC.prf, lpProofScript(removeUniC2 :+ lpRefine(lpFunctionApp(lpConstantTerm(nameStep1Removal), Seq()))))
         allSteps = allSteps :+ proofStepUc2
         //print(s"\nproof step remove 1: \n${proofStepUc1.pretty}\n")
         //print(s"\nproof step remove 2: \n${proofStepUc2.pretty}\n")

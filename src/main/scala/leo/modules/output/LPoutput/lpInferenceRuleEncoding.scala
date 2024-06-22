@@ -76,7 +76,7 @@ object lpInferenceRuleEncoding {
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq,S,lpOlFunctionApp(f,Seq(x)),lpOlFunctionApp(g,Seq(x))),lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g)).prf
 
     // todo: encode properly and generate variably
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptCommentLine("this is statically encoded, change that...\n    assume T S f g x;\n\n    have H1: Prf(= [mono S] (f x) (g x)) → Prf(= [mono (T ⤳ S)] f g)\n        {refine (funExt [T] [S] f g) x};\n\n    have H2: Prf((= [mono (T ⤳ S)] f g)) → Prf(= [mono S] (f x) (g x))\n        {assume h;\n        refine =def [mono (T ⤳ S)] f g h (λ y, = [mono S] (y x) (g x)) (=ref [mono S] (g x))};\n\n    refine (propExt (= [mono S] (f x) (g x)) (= [mono (T ⤳ S)] f g)) H1 H2;\n"))) //todo: generate depending on number of args
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptCommentLine("this is statically encoded, change that...\n    assume T S f g x;\n\n    have H1: Prf(= [S] (f x) (g x)) → Prf(= [(T ⤳ S)] f g)\n        {refine (funExt [T] [S] f g) x};\n\n    have H2: Prf((= [(T ⤳ S)] f g)) → Prf(= [S] (f x) (g x))\n        {assume h;\n        refine =def [(T ⤳ S)] f g h (λ y, = [S] (y x) (g x)) (=ref [S] (g x))};\n\n    refine (propExt (= [S] (f x) (g x)) (= [(T ⤳ S)] f g)) H1 H2;\n"))) //todo: generate depending on number of args
 
     override def usedBasicRules: Set[lpStatement] = Set(eqRef(),eqDef())
 
@@ -169,26 +169,26 @@ object lpInferenceRuleEncoding {
         // a b : Prf(eq [↑ o] a b) → Prf(a ∨ (¬ b))
         lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x,y).prf,lpOlUntypedBinaryConnectiveTerm(lpOr,x,lpOlUnaryConnectiveTerm(lpNot,y)).prf))
       }else if (!polarity & lhsNeg){
-        // x y: Prf(¬(= [mono o] x y)) → Prf(x ∨ y)
+        // x y: Prf(¬(= [o] x y)) → Prf(x ∨ y)
         lpMlFunctionType(Seq(lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x,y)).prf,lpOlUntypedBinaryConnectiveTerm(lpOr,x,y).prf))
       }else{
-        // x y: Prf(¬(= [mono o] x y)) → Prf(¬ x ∨ ¬ y)
+        // x y: Prf(¬(= [o] x y)) → Prf(¬ x ∨ ¬ y)
         lpMlFunctionType(Seq(lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x,y)).prf,lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlUnaryConnectiveTerm(lpNot,x),lpOlUnaryConnectiveTerm(lpNot,y)).prf))
       }
     }
 
     override def proof: lpProofScript = {
       if (polarity & !lhsNeg) {
-        lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet, change that\n    assume x y h;\n    refine =def [mono o] x y h (λ z, z ∨ ¬ y) (em y);")))
+        lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet, change that\n    assume x y h;\n    refine =def [o] x y h (λ z, z ∨ ¬ y) (em y);")))
       } else if (polarity & lhsNeg) {
         // a b : Prf(eq [↑ o] a b) → Prf(a ∨ (¬ b))
-        lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet, change that\n    assume x y h1;\n    have em_sym: Prf(¬ y ∨ y)\n        {refine ∨E y (¬ y) (¬ y ∨ y) _ _ (em y)\n            {assume h2;\n            refine ∨Ir (¬ y) y h2}\n            {assume h2;\n            refine ∨Il (¬ y) y h2}};\n    refine =def [mono o] x y h1 (λ z, ¬ z ∨ y) em_sym;")))
+        lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet, change that\n    assume x y h1;\n    have em_sym: Prf(¬ y ∨ y)\n        {refine ∨E y (¬ y) (¬ y ∨ y) _ _ (em y)\n            {assume h2;\n            refine ∨Ir (¬ y) y h2}\n            {assume h2;\n            refine ∨Il (¬ y) y h2}};\n    refine =def [o] x y h1 (λ z, ¬ z ∨ y) em_sym;")))
       } else if (!polarity & lhsNeg) {
-        // x y: Prf(¬(= [mono o] x y)) → Prf(x ∨ y)
-        lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet, change that\n    assume x y h1;\n   \n    refine ∨E x (¬ x) (x ∨ y) _ _ (em x)\n        {assume h2;\n        refine ∨Il x y h2}\n        {assume h2;\n        have yPrf: Prf y\n            {have notNotYprf: Prf (¬ y) → Prf ⊥\n                {assume h3;\n                have xImpY: Prf x → Prf y\n                    {assume h4;\n                    refine ⊥I y (¬E x h4 h2)};\n                have yImpX: Prf y → Prf x\n                    {assume h4;\n                    refine ⊥I x (¬E y h4 h3)};\n                refine (λ u, ¬E (= [mono o] x y) u h1) (propExt x y xImpY yImpX)};\n            refine npp (y) (¬I (¬ y) notNotYprf)};\n        refine ∨Ir x y yPrf};")))
+        // x y: Prf(¬(= [o] x y)) → Prf(x ∨ y)
+        lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet, change that\n    assume x y h1;\n   \n    refine ∨E x (¬ x) (x ∨ y) _ _ (em x)\n        {assume h2;\n        refine ∨Il x y h2}\n        {assume h2;\n        have yPrf: Prf y\n            {have notNotYprf: Prf (¬ y) → Prf ⊥\n                {assume h3;\n                have xImpY: Prf x → Prf y\n                    {assume h4;\n                    refine ⊥I y (¬E x h4 h2)};\n                have yImpX: Prf y → Prf x\n                    {assume h4;\n                    refine ⊥I x (¬E y h4 h3)};\n                refine (λ u, ¬E (= [o] x y) u h1) (propExt x y xImpY yImpX)};\n            refine npp (y) (¬I (¬ y) notNotYprf)};\n        refine ∨Ir x y yPrf};")))
       } else {
-        // x y: Prf(¬(= [mono o] x y)) → Prf(¬ x ∨ ¬ y)
-        lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet, change that\n    assume x y h1;\n   \n    refine ∨E x (¬ x) (¬ x ∨ ¬ y) _ _ (em x)\n        {assume h2;\n        have notNotYprf: Prf (y) → Prf ⊥\n            {assume h3;\n            have xImpY: Prf(x) → Prf(y)\n                {assume h4;\n                refine h3};\n            have yImpX: Prf(y) → Prf(x)\n                {assume h4;\n                refine h2};\n            refine (λ u, ¬E (= [mono o] x y) u h1) (propExt x y xImpY yImpX)};\n        refine ∨Ir (¬ x) (¬ y) (¬I y notNotYprf)}\n        {assume h2;\n        refine ∨Il (¬ x) (¬ y) h2}")))
+        // x y: Prf(¬(= [o] x y)) → Prf(¬ x ∨ ¬ y)
+        lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet, change that\n    assume x y h1;\n   \n    refine ∨E x (¬ x) (¬ x ∨ ¬ y) _ _ (em x)\n        {assume h2;\n        have notNotYprf: Prf (y) → Prf ⊥\n            {assume h3;\n            have xImpY: Prf(x) → Prf(y)\n                {assume h4;\n                refine h3};\n            have yImpX: Prf(y) → Prf(x)\n                {assume h4;\n                refine h2};\n            refine (λ u, ¬E (= [o] x y) u h1) (propExt x y xImpY yImpX)};\n        refine ∨Ir (¬ x) (¬ y) (¬I y notNotYprf)}\n        {assume h2;\n        refine ∨Il (¬ x) (¬ y) h2}")))
       }
     }
 

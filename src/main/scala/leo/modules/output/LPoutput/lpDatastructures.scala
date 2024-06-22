@@ -7,6 +7,7 @@ object lpDatastructures {
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   val reducedLogic = true
+  val monomorphic = true
 
   abstract class lpStatement{
     def pretty: String
@@ -217,7 +218,8 @@ object lpDatastructures {
   }
   case class lpliftedMonoType(ty: lpOlMonoType) extends lpOlPolyType {
     def pretty: String = {
-      s"(${lpSet2Schme.pretty} ${ty.pretty})"
+      if (monomorphic) s"${ty.pretty}"
+      else s"(${lpSet2Schme.pretty} ${ty.pretty})"
     }
     override def lift2Meta: lpMlType = {
       lpliftedObjectType(lpliftedMonoType(ty))

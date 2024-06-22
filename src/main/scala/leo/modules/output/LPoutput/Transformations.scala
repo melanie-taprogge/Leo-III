@@ -234,7 +234,7 @@ object Transformations {
   }
 
   case class mkNegPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(¬ a) → Prf(= [mono o] (¬ a) ⊤)
+    // Provide a proof of the type Prf(¬ a) → Prf(= [o] (¬ a) ⊤)
 
     override def name: lpConstantTerm = lpConstantTerm("mkNegPropPosEq")
 
@@ -248,10 +248,12 @@ object Transformations {
 
     def transformLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
 
+    def origLit(x0: lpOlTerm): (lpOlTerm) =  lpOlUnaryConnectiveTerm(lpNot, x0)
+
   }
 
   case class mkNegPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [mono o] (¬ a) (¬ (= [mono o] a ⊤)))
+    // Provide a proof of the type Prf(= [o] (¬ a) (¬ (= [o] a ⊤)))
 
     override def name: lpConstantTerm = lpConstantTerm("mkNegPropNegEq")
 
@@ -265,10 +267,12 @@ object Transformations {
 
     def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop)), x0, lpOlTop)
 
+    def origLit(x0: lpOlTerm): (lpOlTerm) = lpOlUnaryConnectiveTerm(lpNot, x0)
+
   }
 
   case class mkNegLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [mono o] (¬ (= [mono o] (¬ a) ⊤)) a)
+    // Provide a proof of the type Prf(= [o] (¬ (= [o] (¬ a) ⊤)) a)
 
     override def name: lpConstantTerm = lpConstantTerm("mkNegLitPosPropEq")
 
@@ -284,10 +288,12 @@ object Transformations {
 
     def transformLit(x0: lpOlTerm): (lpOlTerm) = x0
 
+    def origLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
+
   }
 
   case class mkNegLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [mono o] (¬ (= [mono o] a ⊤)) (¬ a))
+    // Provide a proof of the type Prf(= [o] (¬ (= [o] a ⊤)) (¬ a))
 
     override def name: lpConstantTerm = lpConstantTerm("mkNegLitNegPropEq")
 
@@ -303,10 +309,13 @@ object Transformations {
 
     def transformLit(x0: lpOlTerm): (lpOlTerm) = lpOlUnaryConnectiveTerm(lpNot, x0)
 
+    def origLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop)), x0, lpOlTop)
+
+
   }
 
   case class mkPosLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [mono o] (= [mono o] (¬ a) ⊤) (¬ a))
+    // Provide a proof of the type Prf(= [o] (= [o] (¬ a) ⊤) (¬ a))
 
     override def name: lpConstantTerm = lpConstantTerm("mkPosLitNegPropEq")
 
@@ -321,6 +330,31 @@ object Transformations {
     def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
 
     def transformLit(x0: lpOlTerm): (lpOlTerm) =  lpOlUnaryConnectiveTerm(lpNot, x0)
+
+    def origLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
+
+
+  }
+
+  case class mkPosLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(= [o] (= [o] (a) ⊤) (a))
+
+    override def name: lpConstantTerm = lpConstantTerm("mkPosLitPosPropEq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly,lpOlConstantTerm(patternVarName), lpOlTop), lpOlConstantTerm(patternVarName)).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkPosLitPosPropEq not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+    def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
+
+    def transformLit(x0: lpOlTerm): (lpOlTerm) = x0
+
+    def origLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop), x0, lpOlTop)
+
 
   }
 
@@ -366,7 +400,7 @@ object Transformations {
   }
 
   case class mkPosPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [mono o] a (¬(= [mono o] (¬ a) ⊤)))
+    // Provide a proof of the type Prf(= [o] a (¬(= [o] (¬ a) ⊤)))
 
     override def name: lpConstantTerm = lpConstantTerm("mkPosPropNegEq")
 
@@ -380,10 +414,12 @@ object Transformations {
 
     //def instanciate():lpFunctionApp =
     def transformLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
+
+    def origLit(x0: lpOlTerm): (lpOlTerm) = x0
   }
 
-  case class mkPosPropPos_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [mono o] a (= [mono o] a ⊤))
+  case class mkPosPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Provide a proof of the type Prf(= [o] a (= [o] a ⊤))
 
     override def name: lpConstantTerm = lpConstantTerm("mkPosPropPosEq")
 
@@ -397,6 +433,8 @@ object Transformations {
 
     //def instanciate():lpFunctionApp =
     def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop), x0, lpOlTop)
+
+    def origLit(x0: lpOlTerm): (lpOlTerm) = x0
   }
 
   def mkPosPropPosLit(a: lpTerm, parameters: (Int, Int, Int, Int)): (lpTerm, (Int, Int, Int, Int), Set[lpStatement]) = {
@@ -424,7 +462,7 @@ object Transformations {
 
   }
 
-  case class mkPosPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
+  case class mkPosPropPos_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(a) → Prf(eq [↑ o] a ⊤)
 
     override def name: lpConstantTerm = lpConstantTerm("mkPosPropPosEq")

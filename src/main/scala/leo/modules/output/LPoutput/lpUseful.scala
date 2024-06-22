@@ -57,8 +57,8 @@ object lpUseful {
       else lpConstantTerm("flipNegLiteral")
     }
 
-    // flipLiteralPosEq [T] x y: Prf(= [mono o] (= [T] x y) (= [T] y x))
-    // flipLiteralNegEq [T] x y: Prf(= [mono o] (¬ (= [T] x y)) (¬ (= [T] y x)))
+    // flipLiteralPosEq [T] x y: Prf(= [o] (= [T] x y) (= [T] y x))
+    // flipLiteralNegEq [T] x y: Prf(= [o] (¬ (= [T] x y)) (¬ (= [T] y x)))
 
     override def ty: lpMlType = {
       if (polarity) lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,x,y),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,y,x)).prf
@@ -98,7 +98,7 @@ object lpUseful {
 
   case class eqDef() extends lpBasicRules {
 
-    val T = lpOlUserDefinedPolyType("T")
+    val T = lpOlUserDefinedMonoType("T")
     val x = lpOlConstantTerm("x")
     val y = lpOlConstantTerm("y")
     val p = lpOlConstantTerm("p")

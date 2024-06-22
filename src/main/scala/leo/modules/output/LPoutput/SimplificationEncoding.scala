@@ -92,7 +92,7 @@ object SimplificationEncoding {
     override def name: lpConstantTerm = lpConstantTerm("Simp7_eq")
 
     // Prf(eq [↑ o] (x ∨ ⊥) x)
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,lpOlBot),x1).prf
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x1,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,lpOlBot)).prf
 
     override def proof: lpTerm = {
       throw new Exception("proofs for simplificationRules not encoded yet")
@@ -138,7 +138,7 @@ object SimplificationEncoding {
     override def name: lpConstantTerm = lpConstantTerm("Simp10_eq")
 
     // Simp10_eq [T] x : Prf (inEq [↑ o] (inEq [T] x x) ⊥)
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpInEq, T, x1, x1), lpOlBot).prf
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlTypedBinaryConnectiveTerm(lpInEq, T, x1, x1)).prf
 
     override def proof: lpTerm = {
       throw new Exception("proofs for simplificationRules not encoded yet")
@@ -158,7 +158,7 @@ object SimplificationEncoding {
     override def name: lpConstantTerm = lpConstantTerm("Simp16_eq")
 
     // Simp16_eq : Prf (eq [↑ o] (¬ ⊤) ⊥)
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlUnaryConnectiveTerm(lpNot,lpOlTop),lpOlBot).prf
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype, lpOlBot, lpOlUnaryConnectiveTerm(lpNot,lpOlTop)).prf
 
     override def proof: lpTerm = {
       throw new Exception("proofs for simplificationRules not encoded yet")
