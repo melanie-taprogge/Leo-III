@@ -28,18 +28,18 @@ object lpUseful {
   ////////////////////////// APPLY DEDUCTION RULES /////////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  def applyToEqualityTerm(ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm, eqTermName: lpTerm, p: lpOlTerm, prfPlhsName: Option[lpTerm]): lpFunctionApp = {
-    // todo: I think I can remove this whole funciton and instead directly instanciate terms...
-    if (reducedLogic) {
-      val args = if (prfPlhsName.isDefined) Seq(lhs,rhs,eqTermName,p,prfPlhsName.get) else Seq(lhs,rhs,eqTermName,p)
-      //lpFunctionApp(lpConstantTerm("=def"),args)
-      eqDef().instanciate(ty.lift2Poly,lhs,rhs,Some(eqTermName),Some(p),prfPlhsName)
-    }
-    else {
-      val args = if (prfPlhsName.isDefined) Seq(p,prfPlhsName.get) else Seq(p)
-      lpFunctionApp(eqTermName,args)
-    }
-  }
+  //ef applyToEqualityTerm(ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm, eqTermName: lpTerm, p: lpOlTerm, prfPlhsName: Option[lpTerm]): lpFunctionApp = {
+  // // todo: I think I can remove this whole funciton and instead directly instanciate terms...
+  // if (reducedLogic) {
+  //   val args = if (prfPlhsName.isDefined) Seq(lhs,rhs,eqTermName,p,prfPlhsName.get) else Seq(lhs,rhs,eqTermName,p)
+  //   //lpFunctionApp(lpConstantTerm("=def"),args)
+  //   eqDef().instanciate(ty.lift2Poly,lhs,rhs,Some(eqTermName),Some(p),prfPlhsName)
+  // }
+  // else {
+  //   val args = if (prfPlhsName.isDefined) Seq(p,prfPlhsName.get) else Seq(p)
+  //   lpFunctionApp(eqTermName,args)
+  // }
+  //
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   ////////////////////////// TRANSFORMATIONS ///////////////////////////////////////////////////////////////////////////////////////
@@ -52,10 +52,9 @@ object lpUseful {
     val x = lpOlConstantTerm("x")
     val y = lpOlConstantTerm("y")
 
-    override def name: lpConstantTerm = {
-      if (polarity) lpConstantTerm("flipPosLiteral")
-      else lpConstantTerm("flipNegLiteral")
-    }
+    override def name: lpConstantTerm = lpConstantTerm("eqSym_eq") // {
+      // if (polarity) lpConstantTerm("eqSym_p_eq")
+      // else lpConstantTerm("eqSym_n_eq")}
 
     // flipLiteralPosEq [T] x y: Prf(= [o] (= [T] x y) (= [T] y x))
     // flipLiteralNegEq [T] x y: Prf(= [o] (¬ (= [T] x y)) (¬ (= [T] y x)))

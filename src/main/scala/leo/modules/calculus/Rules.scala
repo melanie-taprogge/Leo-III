@@ -161,8 +161,6 @@ object BoolExt extends CalculusRule {
     while (extIt.hasNext) {
       val extLit = extIt.next()
       val nu = apply(extLit)
-      print(s"ext lit: ${extLit.pretty}\n")
-      print(s"nu 1: ${nu._1.length}\n")
       transformed = transformed.map(tr => (tr._1 ++ nu._1, tr._2 ++ Set((extLit,nu._1)))) union transformed.map(tr => (tr._1 ++ nu._2, tr._2 ++ Set((extLit,nu._2))))
       //transformed = transformed.map(tr => (tr._1 ++ nu._1, tr._2)) union transformed.map(tr => (tr._1 ++ nu._2, tr._2))
     }

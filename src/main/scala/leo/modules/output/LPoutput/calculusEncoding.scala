@@ -8,10 +8,11 @@ import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term}
 import leo.modules.HOLSignature._
 import leo.modules.calculus.{BoolExt, Unification}
 import leo.modules.output.intToName
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.lpDatastructures.{lpEq, lpOtype, lpOlTerm, _}
 import leo.modules.output.LPoutput.Transformations._
 import leo.modules.output.LPoutput.SimplificationEncoding
-import leo.modules.output.LPoutput.lpInferenceRuleEncoding.{funextPosEq_rev, polaritySwitchEqLit, polaritySwitchNonEqLit}
+import leo.modules.output.LPoutput.lpInferenceRuleEncoding.{funextPosEq_rev, polaritySwitchEqLit}
+import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.output.LPoutput.lpUseful
 import leo.modules.output.ToTPTP.clauseImplicitsToTPTPQuantifierList
 
@@ -365,7 +366,7 @@ object calculusEncoding {
             // prove the equality between the lit before and after transformation
             val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,encLeft,encRight),term2LP(asTerm(origLit),bVarMap,sig)._1)
             val polaritySwitchStep = lpRefine(polaritySwitchEqLit.instanciate(encLeft,encRight))
-            val polaritySwitchName = s"PolaritySwitch$polaritySwitchCount"
+            val polaritySwitchName = s"PolaritySwitch_$polaritySwitchCount"
             polaritySwitchCount = polaritySwitchCount + 1
             val havepolaritySwitchStep = lpHave(polaritySwitchName,equalityToProve.prf,lpProofScript(Seq(polaritySwitchStep)))
             allSteps = allSteps :+ havepolaritySwitchStep
@@ -375,7 +376,7 @@ object calculusEncoding {
             val posInClause = findLitInClause(transfLit,child.cl)
             val patternVar = lpOlUntypedVar(lpOlConstantTerm("x"))
             val patternTerm = if (origLit.polarity) patternVar else lpOlUnaryConnectiveTerm(lpNot,patternVar)
-            val rewritePattern = generateClausePatternTerm(posInClause,child.cl.lits.length,None,patternVar,patternTerm)
+            val rewritePattern = generateClausePatternTerm(posInClause,child.cl.lits.length,None,patternVar)
             val rewriteStep = lpRewrite(rewritePattern,lpConstantTerm(polaritySwitchName))
             allRewriteSteps = allRewriteSteps :+ rewriteStep
           case _ => // nothing happens in this case
@@ -389,12 +390,12 @@ object calculusEncoding {
 
           // prove the equality between the lit before and after transformation
           val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encLeft, lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,encLeft)))
-          val polaritySwitchStep = lpRefine(polaritySwitchNonEqLit.instanciate(encLeft))
+          val polaritySwitchStep = lpRefine(Simp17_eq.instanciate(encLeft))
           val polaritySwitchName = s"PolaritySwitch$polaritySwitchCount"
           polaritySwitchCount = polaritySwitchCount + 1
           val havepolaritySwitchStep = lpHave(polaritySwitchName, equalityToProve.prf, lpProofScript(Seq(polaritySwitchStep)))
           allSteps = allSteps :+ havepolaritySwitchStep
-          usedSymbols = usedSymbols + polaritySwitchNonEqLit
+          usedSymbols = usedSymbols + Simp17_eq
 
           // apply this as a rewrite rule to the clause
           val posInClause = findLitInClause(transfLit, child.cl)
@@ -467,7 +468,6 @@ object calculusEncoding {
           val T2 = nameType(2)
           // λ T S f g (h1 : Prf (eq [↑ (T ⤳ S)] f g)) a (p : Els (↑ S) → Prop), h1 (λ x, p (x a))
           val lambdaTerm = lpLambdaTerm(Seq(lpTypedVar(h1, lpOlTypedBinaryConnectiveTerm(lpEq, lpOlFunctionType(Seq(T1,T2)), x3, x4).prf), lpTypedVar(x1, lpOlFunctionType(Seq(T2, lpOtype)).lift2Meta)), lpFunctionApp(h1, Seq(lpLambdaTerm(Seq(lpUntypedVar(x2)), lpFunctionApp(x1, Seq(lpFunctionApp(x2, Seq(x5))))))))
-          print(s"\n\nFUNEXT:\n${lambdaTerm.pretty}\n\n")
 
           (true, lambdaTerm, parameters, Set.empty)
         }
@@ -589,7 +589,7 @@ object calculusEncoding {
       parent.cl.lits foreach { origLit =>
         val edLit = editedLiteralsMap.getOrElse(origLit, origLit)
         if (edLit != origLit) {
-          val namefunExtStep = s"funExt$editLitCount"
+          val namefunExtStep = s"FunExt_$editLitCount"
           editLitCount = editLitCount + 1
           val encOrigLitLhs = term2LP(origLit.left, bVarMap, sig)._1
           val encOrigLitRhs = term2LP(origLit.right, bVarMap, sig)._1
@@ -1192,15 +1192,20 @@ object calculusEncoding {
     positionInClause
   }
 
-  def generateClausePatternTerm(varPos: Int, clauseLen: Int, eqPos: Option[Int] = None, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpOlConstantTerm("x")),wrapperTerm: lpOlTerm = lpOlUntypedVar(lpOlConstantTerm("x"))): Option[lpRewritePattern] = {
+  def generateClausePatternTerm(varPos: Int, clauseLen: Int, eqPos: Option[Int] = None, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpOlConstantTerm("x")), polarity: Boolean = true): Option[lpRewritePattern] = {
     // given the position of the literal that a rule should be applied to in a clause and weather or not this clause in embedded in an equality to be proven,
     // generate a rewrite pattern
 
+    val maybeNegatedPatternVar = {
+      if (polarity) patternVar
+      else lpOlUnaryConnectiveTerm(lpNot, patternVar)
+    }
+
     val clausePattern = if (clauseLen > 1) {
-      val args = Seq.fill(clauseLen)(lpOlWildcard).updated(varPos, patternVar)
+      val args = Seq.fill(clauseLen)(lpOlWildcard).updated(varPos, maybeNegatedPatternVar)
       lpOlUntypedBinaryConnectiveTerm_multi(lpOr, args)
     } else {
-      patternVar
+      maybeNegatedPatternVar
     }
 
     eqPos match {
@@ -1212,7 +1217,7 @@ object calculusEncoding {
         }
         Some(lpRewritePattern(patternEq, patternVar))
       case None =>
-        if (clausePattern == patternVar) None
+        if (clausePattern == maybeNegatedPatternVar) None
         else Some(lpRewritePattern(clausePattern, patternVar))
     }
   }
@@ -1608,20 +1613,22 @@ object calculusEncoding {
     positionInClause
   }
 
-  def flipEqLiteralsProofScript(lits: Seq[lpOlTerm], origClause: lpClause, sourceBefore: lpTerm, nameStept: lpConstantTerm): (lpProofScriptStep, Seq[lpOlTerm], Set[lpStatement]) = {
+  def flipEqLiteralsProofScript(lits: Seq[(lpOlTerm,lpOlType)], origClause: lpClause, sourceBefore: lpTerm, nameStept: lpConstantTerm): (lpProofScriptStep, Seq[lpOlTerm], Set[lpStatement]) = {
 
     var usedSymbols: Set[lpStatement] = Set.empty
+
+    val litsTypeMap = lits.toMap
 
     if (lits.isEmpty) throw new Exception(s"Function flipEqLiteralsProofScript called but no literals to flip were provided.")
 
     // order the literals according to their occourence in the clause
-    var orderedLits: Seq[lpOlTerm] = Seq.empty
+    var orderedLits: Seq[(lpOlTerm,lpOlType)] = Seq.empty
     var litsToFind = origClause.lits
     val positionsInClause: mutable.HashMap[lpOlTerm, Int] = mutable.HashMap.empty
     var litsAfter: Seq[lpOlTerm] = Seq.empty
     litsToFind foreach { lit =>
-      if (lits.contains(lit)) {
-        orderedLits = orderedLits :+ lit
+      if (lits.map(pair => pair._1).contains(lit)) {
+        orderedLits = orderedLits :+ (lit,litsTypeMap(lit))
         positionsInClause.update(lit, origClause.lits.indexOf(lit))
         litsAfter = litsAfter :+ lpOlNothing
       } else litsAfter = litsAfter :+ lit
@@ -1631,9 +1638,11 @@ object calculusEncoding {
 
     var rewriteSteps: Seq[lpRewrite] = Seq.empty
 
-    orderedLits foreach { lit =>
+    orderedLits foreach { pair =>
 
-      val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None)
+      val lit = pair._1
+      val litType = pair._2
+
 
       val (lhs0, rhs0, ty0, ispos) = lit match { //todo: summarize
 
@@ -1646,9 +1655,12 @@ object calculusEncoding {
         case _ => throw new Exception(s"ERRRRRROOOOOORRRR")
 
       }
+
+      val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None, lpOlUntypedVar(lpConstantTerm("x")),ispos)
+
       //val instRule = lpUseful.flipLiteral(ispos).instanciate(ty0.lift2Poly, lhs0, rhs0, None)
       usedSymbols = usedSymbols + lpUseful.flipLiteral(ispos)
-      rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, lpUseful.flipLiteral(ispos).name)
+      rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, lpFunctionApp(lpUseful.flipLiteral(ispos).name,Seq(),Seq(litType)))
       val transformedLit = lpUseful.flipLiteral(ispos).res(ty0.lift2Poly, lhs0, rhs0)
       litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
 
@@ -1954,7 +1966,7 @@ object calculusEncoding {
 
       // the actual transformation
       if (literalsToTransform.nonEmpty) {
-        val nameTransfStep = lpConstantTerm("TransformLiteralsToEquationalForm")
+        val nameTransfStep = lpConstantTerm("TransformToEqLits")
         val (transformationStep,litMap,_,usedSymbolsNew) = makeLiteralEquational_proofSkript(literalsToTransform,parentEnc,lastStepName,true,polarityOfRule,nameTransfStep)
         allSteps = allSteps :+ transformationStep
         lastStepName = nameTransfStep
@@ -2006,7 +2018,7 @@ object calculusEncoding {
     lastStepLits = lpInferenceRuleEncoding.eqFactoring_script(polarityOfRule).result(otherLit_l, otherLit_r, maxLit_l, maxLit_r,encType.lift2Poly)
     val afterEqFacAp : lpMlType = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,lastStepLits).prf
     usedSymbols = usedSymbols + lpInferenceRuleEncoding.eqFactoring_script(polarityOfRule)
-    val nameEqFactoringStep = lpConstantTerm("equalFactoring")
+    val nameEqFactoringStep = lpConstantTerm("EqFact")
     val eqFactStep = lpHave(nameEqFactoringStep.name,afterEqFacAp,lpProofScript(Seq(lpRefine(lpFunctionApp(encStep2,Seq(lastStepName))))))
     allSteps = allSteps :+ eqFactStep
     lastStepName = nameEqFactoringStep
@@ -2034,8 +2046,8 @@ object calculusEncoding {
       // apply the two sides of the literal to the proof of equational commutativity
       uc1 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, otherLit_l, maxLit_l))
       uc1Final = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, maxLit_l, otherLit_l))
-      val flipLitsName = lpConstantTerm("flipLits")
-      val (flipLitsProofScript, flippedLits, usedSymbolsNew) = flipEqLiteralsProofScript(Seq(uc1), lpClause(Seq(), lastStepLits), lastStepName, flipLitsName)
+      val flipLitsName = lpConstantTerm("EqSymmetry")
+      val (flipLitsProofScript, flippedLits, usedSymbolsNew) = flipEqLiteralsProofScript(Seq((uc1,lpOtype)), lpClause(Seq(), lastStepLits), lastStepName, flipLitsName)
       lastStepName = flipLitsName
       lastStepLits = flippedLits
       usedSymbols = usedSymbols ++ usedSymbolsNew
@@ -2071,7 +2083,7 @@ object calculusEncoding {
 
     // combine into one rule for the backwards encoding:
     if (literalsToTransform2.nonEmpty) {
-      val nameTransfStep2 = lpConstantTerm("TransformLiteralsBackFromEquationalForm")
+      val nameTransfStep2 = lpConstantTerm("TransformToNonEqLits")
       val (backTransformationStep, backLitMap, litsAfter, usedSymbolsNew) = makeLiteralEquational_proofSkript(literalsToTransform2, lpClause(Seq(), lastStepLits), lastStepName, false, true, nameTransfStep2)
       usedSymbols = usedSymbols ++ usedSymbolsNew
       lastStepName = nameTransfStep2
@@ -2117,7 +2129,7 @@ object calculusEncoding {
 
     var lastStep: lpTerm = lpFunctionApp(parentNameLpEnc, applySymbolsToParent)
 
-    val factStepName = lpOlConstantTerm("wholeEqFactStep")
+    val factStepName = lpOlConstantTerm("WholeEqFactStep")
 
     // encode the equal factoring step
     if (parent.cl.lits.length == 2) {
@@ -2399,7 +2411,8 @@ object calculusEncoding {
 
     // 2. Proof the "after" given the equality
     //val stepProof = lpProofScript(Seq(subStep,lpRefine(lpFunctionApp(lpConstantTerm(nameSubStep),Seq(lpUseful.Identity,sourceBefore)))))
-    val stepProof = lpProofScript(Seq(subStep,lpRefine(lpUseful.applyToEqualityTerm(lpOtype,after,before,lpOlConstantTerm(nameSubStep),lpOlLambdaTerm(Seq(lpOlTypedVar(lpOlConstantTerm("x"),lpOtype)),lpOlConstantTerm("x")),Some(sourceBefore)))))
+    //val stepProof = lpProofScript(Seq(subStep,lpRefine(lpUseful.applyToEqualityTerm(lpOtype,after,before,lpOlConstantTerm(nameSubStep),lpOlLambdaTerm(Seq(lpOlTypedVar(lpOlConstantTerm("x"),lpOtype)),lpOlConstantTerm("x")),Some(sourceBefore)))))
+    val stepProof = lpProofScript(Seq(subStep,lpRefine(lpUseful.eqDef().instanciate(lpOtype.lift2Poly,after,before,Some(lpOlConstantTerm(nameSubStep)),Some(lpOlLambdaTerm(Seq(lpOlTypedVar(lpOlConstantTerm("x"),lpOtype)),lpOlConstantTerm("x"))),Some(sourceBefore)))))
 
     // the whole Have step:
     lpHave(nameStep,after.prf,stepProof)
@@ -2421,7 +2434,7 @@ object calculusEncoding {
     // in both cases, the second step is the removal of ⊥ from the clause. This can be done using Simp7:
     val rewritePattern_step2 = generateClausePatternTerm(positionInClause - 1, parent.lits.length - 1, None, patternVar)
     val rewriteStep_step2 = lpRewrite(rewritePattern_step2, SimplificationEncoding.Simp7_eq.name)
-    rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Remove ⊥ from clause")
+    //rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Remove ⊥ from clause")
     rewriteSteps = rewriteSteps :+ rewriteStep_step2
     usedSymbols = usedSymbols + SimplificationEncoding.Simp7_eq
 
@@ -2440,8 +2453,8 @@ object calculusEncoding {
             throw new Exception("attempting to instanciate Simp10 inappropriateley")
         }
         val rewriteStep_step1 = lpRewrite(rewritePattern_step1, lpFunctionApp(SimplificationEncoding.Simp10_eq.name,Seq(ty, lastLit)))
-        rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Simplify unification constraint of form x≠x to ⊥")
-        rewriteSteps = rewriteSteps :+ lpSimplify(Set.empty)
+        //rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Simplify unification constraint of form x≠x to ⊥")
+        //rewriteSteps = rewriteSteps :+ lpSimplify(Set.empty)
         rewriteSteps = rewriteSteps :+ rewriteStep_step1
         usedSymbols = usedSymbols + SimplificationEncoding.Simp10_eq
       } else throw new Exception(s"Equational positive unification constratint passed on to lambdapi post eqFact encoding?")
@@ -2449,7 +2462,7 @@ object calculusEncoding {
       // in this case simply we need to prove that 1. ¬⊤ = ⊥
       if (!uniC.polarity){
         val rewriteStep_step1 = lpRewrite(rewritePattern_step1, SimplificationEncoding.Simp16_eq.name)
-        rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Simplify unification constraint of form ¬⊤ to ⊥")
+        //rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Simplify unification constraint of form ¬⊤ to ⊥")
         rewriteSteps = rewriteSteps :+ rewriteStep_step1
         usedSymbols = usedSymbols + SimplificationEncoding.Simp16_eq
       }else{
@@ -2536,7 +2549,7 @@ object calculusEncoding {
         usedSymbols = usedSymbols ++ usedSymbolsUc1
         //val proofStepUc1 = wholeHaveRewriteStep(removeUniC1, nameStep1Removal, "H1", lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits), lpConstantTerm(substitutionStepName), lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init))
         val proofStepUc1 = lpHave(nameStep1Removal,lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init).prf,lpProofScript(removeUniC1 :+ lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName),Seq()))))
-        allSteps = allSteps :+ proofStepUc1
+        //allSteps = allSteps :+ proofStepUc1
         // Remove the second unification constraint
         val uniC2 = addInfoUniRule._2._2
         if (parent.cl.lits.init.last != uniC2) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 2 in unexpected position")
@@ -2546,12 +2559,15 @@ object calculusEncoding {
         usedSymbols = usedSymbols ++ usedSymbolsUc2
         //val proofStepUc2 = wholeHaveRewriteStep(removeUniC2, nameStep2Removal, "H1", lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init), lpConstantTerm(nameStep1Removal), clauseWighoutUC)
         val proofStepUc2 = lpHave(nameStep2Removal, clauseWighoutUC.prf, lpProofScript(removeUniC2 :+ lpRefine(lpFunctionApp(lpConstantTerm(nameStep1Removal), Seq()))))
-        allSteps = allSteps :+ proofStepUc2
+        //allSteps = allSteps :+ proofStepUc2
         //print(s"\nproof step remove 1: \n${proofStepUc1.pretty}\n")
         //print(s"\nproof step remove 2: \n${proofStepUc2.pretty}\n")
 
+        // only add the rewrite steps, this is less complicated but should have the same result
+        allSteps = allSteps ++ removeUniC2 ++ removeUniC1
+
         // Now the last step is refining with the last proven term after removal of the last unification constraint
-        val refineStep = lpRefine(lpFunctionApp(lpConstantTerm(nameStep2Removal),Seq()))
+        val refineStep = lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName),Seq()))//lpRefine(lpFunctionApp(lpConstantTerm(nameStep2Removal),Seq()))
 
         allSteps = allSteps :+ refineStep
       }
@@ -2573,6 +2589,16 @@ object calculusEncoding {
     val bVarsRewriteEq = clauseVars2LP(rewriteEqClause.implicitlyBound, sig, Set.empty)._2
     val (rewriteEqImpVars,encRewriteEq0,_) = clause2LP_unquantified(rewriteEqClause,Set.empty,sig)
     var encRewriteEq = encRewriteEq0.args.head
+    // I will need this in case the literal is equational:
+    /*
+    var flippedEncRewriteEq = encRewriteEq match {
+      case lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lhs, rhs) =>
+        lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, rhs, lhs)
+      case _ =>
+        throw new Exception(s"trying to verify rewriting with a non-equational term: \n${encRewriteEq.pretty}")
+    }
+
+     */
     if (rewriteEqImpVars.nonEmpty) throw new Exception(s"encRewrite for non grounded rules is not encoded yet")
     val (parentImpVars,encParent,_) = clause2LP_unquantified(parent,Set.empty,sig)
     val (childImpVars,encChild,_) = clause2LP_unquantified(cl.cl,Set.empty,sig)
@@ -2604,15 +2630,24 @@ object calculusEncoding {
       // todo: can simplification be necessary here?
       val (transformStep, transformedRewriteEq) = if (rewriteEq.polarity){
         // transform positive non equational literal to positive equational one
-        usedSymbols = usedSymbols + mkPosPropPosLit_script()
+        //usedSymbols = usedSymbols + mkPosPropPosLit_script()
         (lpRewrite(None,mkPosPropPosLit_script().name),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,term2LP(rewriteEq.left,bVarsRewriteEq,sig)._1,lpOlTop))
       }else{
         // transform negative non equational literal to positive equational one with bottom on the lhs
-        usedSymbols = usedSymbols + mkNegPropEqBot_script()
+        //usedSymbols = usedSymbols + mkNegPropEqBot_script()
         (lpRewrite(None,mkNegPropEqBot_script().name),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,term2LP(rewriteEq.left,bVarsRewriteEq,sig)._1,lpOlBot))
       }
-      val transformationStepName = "TransformRewriteRuleClause"
-      val haveTransformStep = wholeHaveRewriteStep(Seq(transformStep),transformationStepName,"H1",encRewriteEq,sourceBeforeEq,transformedRewriteEq)
+      val transformationStepName = "TransformToEqLits"
+      //val haveTransformStep = wholeHaveRewriteStep(Seq(transformStep),transformationStepName,"H1",encRewriteEq,sourceBeforeEq,transformedRewriteEq)
+      //allSteps = allSteps :+ haveTransformStep
+      val rewriteEqTransformed = encRewriteEq match {
+        case lpOlUnaryConnectiveTerm(lpNeg,body) =>
+          lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlBot,body)
+        case _ =>
+          throw new Exception("trying to transform term of wrong format to rewriting equality")
+      }
+      val haveTransformStep = lpHave(transformationStepName,rewriteEqTransformed.prf,lpProofScript(Seq(lpRewrite(None,mkBotEqNegProp_script(sourceBeforeEq.pretty).name),lpRefine(lpFunctionApp(sourceBeforeEq,Seq())))))
+      usedSymbols = usedSymbols + mkBotEqNegProp_script()
       allSteps = allSteps :+ haveTransformStep
       encRewriteEq = transformedRewriteEq
       sourceBeforeEq = lpConstantTerm(transformationStepName)
@@ -2634,9 +2669,12 @@ object calculusEncoding {
     }
 
     // 5. Combine the steps and refine the goal with the rewriting step
-    val haveRewriteStep = wholeHaveRewriteStep(rewriteSkript,nameRewriteStep,"H2",encParent,sourceBeforeParent,encChild)
-    allSteps = allSteps :+ haveRewriteStep
-    allSteps = allSteps :+ lpRefine(lpFunctionApp(lpConstantTerm(nameRewriteStep),Seq()))
+    //val haveRewriteStep = wholeHaveRewriteStep(rewriteSkript,nameRewriteStep,"H2",encParent,sourceBeforeParent,encChild)
+    //allSteps = allSteps :+ haveRewriteStep
+    //allSteps = allSteps :+ lpRefine(lpFunctionApp(lpConstantTerm(nameRewriteStep),Seq()))
+
+    allSteps = allSteps :+ lpRewrite(None,lpConstantTerm(sourceBeforeEq.pretty))
+    allSteps = allSteps :+ lpRefine(lpFunctionApp(sourceBeforeParent,Seq()))
     val finishedProof = lpProofScript(allSteps)
 
     (finishedProof,usedSymbols)

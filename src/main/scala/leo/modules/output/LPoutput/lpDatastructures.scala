@@ -6,7 +6,6 @@ object lpDatastructures {
   ////////////////////////// KINDS OF STATEMENTS ///////////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  val reducedLogic = true
   val monomorphic = true
 
   abstract class lpStatement{
@@ -36,7 +35,13 @@ object lpDatastructures {
     }
   }
 
-  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], typing: lpMlType, proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpStatement {
+  abstract class lpKeyword extends lpStatement
+
+  case object lpOpaque extends lpKeyword{
+    override def pretty: String = "opaque"
+  }
+
+  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], typing: lpMlType, proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier: Seq[lpKeyword]= Seq.empty) extends lpStatement {
     override def pretty: String = {
 
       val proofEnc = proof match {
@@ -45,10 +50,9 @@ object lpDatastructures {
         case proofScript : lpProofScript =>
           s"begin\n${proofScript.addTab(1).pretty}\nend"
       }
-
       val gap1 = if (implicitArgs.isEmpty) "" else " "
       val gap2 = if (variables.isEmpty) "" else " "
-      s"symbol ${name.pretty}$gap1${implicitArgs.map(var0 => s"[${var0.pretty}]").mkString(" ")}$gap2${variables.map(var0 => var0.pretty).mkString(" ")}: ${typing.pretty} ≔\n${proofEnc};\n"
+      s"${modifier.map(mod => s"${mod.pretty} ").mkString("")}symbol ${name.pretty}$gap1${implicitArgs.map(var0 => s"[${var0.pretty}]").mkString(" ")}$gap2${variables.map(var0 => var0.pretty).mkString(" ")}: ${typing.pretty} ≔\n${proofEnc};\n"
     }
   }
 
@@ -300,12 +304,8 @@ object lpDatastructures {
   final case object lpAnd extends lpOlBinaryConnective {override def pretty: String = "∧"}
   final case object lpImp extends lpOlBinaryConnective {override def pretty: String = "⇒"}
   final case object lpEq extends lpOlBinaryConnective {
-    override def pretty: String = if (reducedLogic) "=" else "eq"
-    def definitionName(): lpConstantTerm = {
-      if (reducedLogic) (lpConstantTerm(s"=def"))
-
-      else throw new Exception(s"trying to use =def in non-reduced logic")
-    }
+    override def pretty: String = "="
+    def definitionName(): lpConstantTerm = lpConstantTerm("=def")
   }
   final case object lpInEq extends lpOlBinaryConnective {override def pretty: String = "inEq"}
 
@@ -402,9 +402,9 @@ object lpDatastructures {
   }
   case class lpOlTypedBinaryConnectiveTerm(connective: lpOlBinaryConnective, ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
     override def pretty: String = {
-      if (reducedLogic) {
+      if (monomorphic) {
         if (connective == lpInEq) lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,ty, lhs, rhs)).pretty
-        else s"( ${connective.pretty} [${ty.lift2Poly.pretty}] ${lhs.pretty} ${rhs.pretty})"
+        else s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
       }
       else {
         val encodedType = ty match {

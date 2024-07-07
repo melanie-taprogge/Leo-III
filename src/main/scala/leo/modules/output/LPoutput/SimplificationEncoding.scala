@@ -1,14 +1,6 @@
 package leo.modules.output.LPoutput
 
-import leo.datastructures.Literal.{asTerm, vars}
-import leo.modules.output.LPoutput.LPSignature._
-import leo.modules.output.LPoutput.Encodings._
-import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term}
-import leo.modules.HOLSignature._
-import leo.modules.calculus.BoolExt
-import leo.modules.output.intToName
 import leo.modules.output.LPoutput.lpDatastructures._
-import leo.modules.output.LPoutput.Transformations._
 
 object SimplificationEncoding {
 
@@ -89,7 +81,7 @@ object SimplificationEncoding {
 
     val x1 = lpOlConstantTerm("x")
 
-    override def name: lpConstantTerm = lpConstantTerm("Simp7_eq")
+    override def name: lpConstantTerm = lpConstantTerm("simp7_eq")
 
     // Prf(eq [↑ o] (x ∨ ⊥) x)
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x1,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,lpOlBot)).prf
@@ -135,7 +127,7 @@ object SimplificationEncoding {
     val T = lpOlUserDefinedType("T")
     val x1 = lpOlConstantTerm("x")
 
-    override def name: lpConstantTerm = lpConstantTerm("Simp10_eq")
+    override def name: lpConstantTerm = lpConstantTerm("simp10_eq")
 
     // Simp10_eq [T] x : Prf (inEq [↑ o] (inEq [T] x x) ⊥)
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlTypedBinaryConnectiveTerm(lpInEq, T, x1, x1)).prf
@@ -155,7 +147,7 @@ object SimplificationEncoding {
 
   case object Simp16_eq extends simplificationRules {
 
-    override def name: lpConstantTerm = lpConstantTerm("Simp16_eq")
+    override def name: lpConstantTerm = lpConstantTerm("simp16_eq")
 
     // Simp16_eq : Prf (eq [↑ o] (¬ ⊤) ⊥)
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype, lpOlBot, lpOlUnaryConnectiveTerm(lpNot,lpOlTop)).prf
@@ -167,6 +159,29 @@ object SimplificationEncoding {
     override def dec: lpDeclaration = lpDeclaration(Simp16_eq.name,Seq.empty,ty)
 
     override def pretty: String = lpDefinition(Simp16_eq.name, Seq.empty, ty, proof).pretty
+  }
+
+  case object Simp17_eq extends simplificationRules {
+
+    // a : Prf(= a (¬ ¬ a))
+    val a = lpOlConstantTerm("a")
+
+    override def name: lpConstantTerm = lpConstantTerm("simp17_eq")
+
+    // Simp16_eq : Prf (eq [↑ o] (¬ ⊤) ⊥)
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, a, lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,a))).prf
+
+    override def proof: lpTerm = {
+      throw new Exception("proofs for simplificationRules not encoded yet")
+    }
+
+    override def dec: lpDeclaration = lpDeclaration(Simp16_eq.name, Seq.empty, ty)
+
+    override def pretty: String = lpDefinition(Simp16_eq.name, Seq.empty, ty, proof).pretty
+
+    def instanciate(a: lpOlTerm): lpFunctionApp = {
+      lpFunctionApp(name, Seq(a))
+    }
   }
 
 }

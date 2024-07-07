@@ -19,8 +19,8 @@ object lpInferenceRuleEncoding {
     // pos: [T] x y z v : Prf((eq [T] x y) ∨ (eq [T] z v)) → Prf((eq [T] x y) ∨ ¬ (eq [T] x z) ∨ ¬ (eq [T] y v))
     // neg: [T] x y z v : Prf(¬ (eq [T] x y) ∨ ¬ (eq [T] z v)) → Prf(¬ (eq [T] x y) ∨ ¬ (eq [T] x z) ∨ ¬ (eq [T] y v))
     override def name: lpConstantTerm = {
-      val pol = if (polarity) "Pos" else "Neg"
-      lpConstantTerm(s"eqFact$pol")
+      val pol = if (polarity) "_p" else "_n"
+      lpConstantTerm(s"EqFact$pol")
     }
 
     //def res(T0, x0, y0, z0, v0):lpOlTerm = {}
@@ -65,7 +65,7 @@ object lpInferenceRuleEncoding {
     override val proofIsDefined = true
 
     if (n > 1) throw new Exception(s"error encoding funcExt: trying to instanciate rule for more than one arg not encoded yet")
-    override def name: lpConstantTerm = lpConstantTerm(s"funextPos$n")
+    override def name: lpConstantTerm = lpConstantTerm(s"PFE")
 
     // [T S] f g x : Prf(= (= [S] (f x) (g x)) (= [T ⤳ S] f g))
     val T = lpOlUserDefinedMonoType("T")
@@ -150,12 +150,12 @@ object lpInferenceRuleEncoding {
     override def name: lpConstantTerm = {
       val pol = if (polarity) "P" else "N"
       val category = {
-        if (polarity & lhsNeg) "L"
-        else if (polarity & !lhsNeg) "R"
-        else if (!polarity & lhsNeg) "P"
-        else "N"
+        if (polarity & lhsNeg) "_l"
+        else if (polarity & !lhsNeg) "_r"
+        else if (!polarity & lhsNeg) "_p"
+        else "_n"
       }
-      lpConstantTerm(s"boolExt$pol$category")
+      lpConstantTerm(s"${pol}BE$category")
     }
 
     val x = lpOlConstantTerm("x")
@@ -233,6 +233,7 @@ object lpInferenceRuleEncoding {
     }
   }
 
+  /*
   case object polaritySwitchNonEqLit extends inferenceRules {
 
     override def name: lpConstantTerm = lpConstantTerm(s"polaritySwitchNonEqLit")
@@ -252,5 +253,6 @@ object lpInferenceRuleEncoding {
       lpFunctionApp(name, Seq(a))
     }
   }
+   */
 
 }

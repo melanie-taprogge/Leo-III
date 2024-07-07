@@ -236,7 +236,7 @@ object Transformations {
   case class mkNegPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(¬ a) → Prf(= [o] (¬ a) ⊤)
 
-    override def name: lpConstantTerm = lpConstantTerm("mkNegPropPosEq")
+    override def name: lpConstantTerm = lpConstantTerm("negPropPosEq_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTop)).prf
 
@@ -255,7 +255,7 @@ object Transformations {
   case class mkNegPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(= [o] (¬ a) (¬ (= [o] a ⊤)))
 
-    override def name: lpConstantTerm = lpConstantTerm("mkNegPropNegEq")
+    override def name: lpConstantTerm = lpConstantTerm("negPropNegEq_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop))).prf
 
@@ -274,7 +274,7 @@ object Transformations {
   case class mkNegLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(= [o] (¬ (= [o] (¬ a) ⊤)) a)
 
-    override def name: lpConstantTerm = lpConstantTerm("mkNegLitPosPropEq")
+    override def name: lpConstantTerm = lpConstantTerm("negEqPosProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)),lpOlTop)),lpOlConstantTerm(patternVarName)).prf
 
@@ -295,7 +295,7 @@ object Transformations {
   case class mkNegLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(= [o] (¬ (= [o] a ⊤)) (¬ a))
 
-    override def name: lpConstantTerm = lpConstantTerm("mkNegLitNegPropEq")
+    override def name: lpConstantTerm = lpConstantTerm("negEqNegProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlConstantTerm(patternVarName), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
@@ -317,7 +317,7 @@ object Transformations {
   case class mkPosLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(= [o] (= [o] (¬ a) ⊤) (¬ a))
 
-    override def name: lpConstantTerm = lpConstantTerm("mkPosLitNegPropEq")
+    override def name: lpConstantTerm = lpConstantTerm("posEqNegProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTop), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
@@ -339,7 +339,7 @@ object Transformations {
   case class mkPosLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(= [o] (= [o] (a) ⊤) (a))
 
-    override def name: lpConstantTerm = lpConstantTerm("mkPosLitPosPropEq")
+    override def name: lpConstantTerm = lpConstantTerm("posEqPosProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly,lpOlConstantTerm(patternVarName), lpOlTop), lpOlConstantTerm(patternVarName)).prf
 
@@ -360,11 +360,24 @@ object Transformations {
 
   case class mkNegPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
 
-    override def name: lpConstantTerm = lpConstantTerm("mkNegPropEqBot")
+    override def name: lpConstantTerm = lpConstantTerm("PropBotNeg_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlBot)).prf
 
     override def proof: lpProofScript = throw new Exception("proof for mkNegPropEqBot_script not encoded yet")
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+  }
+
+  case class mkBotEqNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
+
+    override def name: lpConstantTerm = lpConstantTerm("botNegProp_eq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
+
+    override def proof: lpProofScript = throw new Exception("proof for mkBotEqNegProp not encoded yet")
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -402,7 +415,7 @@ object Transformations {
   case class mkPosPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // Provide a proof of the type Prf(= [o] a (¬(= [o] (¬ a) ⊤)))
 
-    override def name: lpConstantTerm = lpConstantTerm("mkPosPropNegEq")
+    override def name: lpConstantTerm = lpConstantTerm("posPropNegEq_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTop))).prf
 

@@ -39,8 +39,6 @@ object LPoutput {
     val rulesFileSB: mutable.StringBuilder = new StringBuilder()
     rulesFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameNaturalDeductionFile};\n\n")
 
-    print(s"used symbols: ${usedSymbols.map(symb => (symb))}")
-
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
     var infRules: Set[lpInferenceRuleEncoding.inferenceRules] = Set.empty
@@ -117,8 +115,7 @@ object LPoutput {
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
     proofFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameNaturalDeductionFile} ${nameLpOutputFolder}.${nameRulesFile};\n\n")
 
-
-    print(s"\n\nLP-ENCODING\n\n")
+    val proofStepsSB: mutable.StringBuilder = new StringBuilder()
 
     def extractNecessaryFormulas(state:LocalState):Unit={
 
@@ -134,7 +131,7 @@ object LPoutput {
       // encode the typing and definition formulas:
       val keysToTypeDecsAndDefs = sig.allUserConstants.intersect(symbolsInProof(proof).union(sig.typeSymbols))
 
-      proofFileSB.append("// PROBLEM ENCODING ///////////////////////////\n")
+      proofFileSB.append("// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
 
       keysToTypeDecsAndDefs.foreach {key =>
         val symbol = sig.apply(key)
@@ -216,7 +213,7 @@ object LPoutput {
         var conjCounter = 0
         var axCounter = 0
 
-        proofFileSB.append("// PROOF ENCODING ///////////////////////////\n")
+      proofFileSB.append("\n\n// PROBLEM ENCODING //////////////////////////////////////\n\n")
 
         compressedProof foreach { step =>
           val stepId = step.id
@@ -288,14 +285,14 @@ object LPoutput {
               // if the step is actually new, we want to add it to the output
               if (proofTerm == lpOlNothing) {
                 // todo: encode these rules! :)
-                proofFileSB.append(s"\n// The rule ${step.annotation.fromRule} is not encoded yet\n")
-                proofFileSB.append(s"symbol step${step.id} : ${encStep.pretty};\n")
+                proofStepsSB.append(s"// The rule ${step.annotation.fromRule} is not encoded yet\n")
+                proofStepsSB.append(s"symbol step${step.id} : ${encStep.pretty};\n\n")
               } else {
                 // otherwise we provide it as an axiom
                 //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
                 // and encode the proof based on its parent clauses
                 //encodedProblem.append(s"$proofTerm;\n")
-                proofFileSB.append(s"\n// $ruleName\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm).pretty}\n")
+                proofStepsSB.append(s"// $ruleName\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm, Seq.empty, Seq(lpOpaque)).pretty}\n")
                 // and we will add the necessary symbols to the generated Signature
                 usedSymbols = usedSymbols ++ updatedUsedSymbols
                 parameters = updatedParameters
@@ -323,6 +320,10 @@ object LPoutput {
           print(s"${step.annotation}\n\n")
            */
       }
+
+      proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
+
+      proofFileSB.append(proofStepsSB)
 
       // generate the signature
 
