@@ -1,92 +1,10 @@
 package leo.modules.output.LPoutput
 
-import leo.datastructures.Literal.{asTerm, vars}
-import leo.modules.output.LPoutput.LPSignature._
-import leo.modules.output.LPoutput.Encodings._
-import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term}
-import leo.modules.HOLSignature._
-import leo.modules.calculus.BoolExt
-import leo.modules.output.intToName
 import leo.modules.output.LPoutput.lpDatastructures._
-import leo.modules.output.LPoutput.Transformations._
 
 
-object lpUseful {
 
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  ////////////////////////// USEFUL TERMS //////////////////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-  object Identity extends lpTerm{
-    val x1 = lpUntypedVar(lpConstantTerm("x"))
-    val definition = lpLambdaTerm(Seq(x1),x1)
-
-    override def pretty: String = definition.pretty
-  }
-
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  ////////////////////////// APPLY DEDUCTION RULES /////////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-  //ef applyToEqualityTerm(ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm, eqTermName: lpTerm, p: lpOlTerm, prfPlhsName: Option[lpTerm]): lpFunctionApp = {
-  // // todo: I think I can remove this whole funciton and instead directly instanciate terms...
-  // if (reducedLogic) {
-  //   val args = if (prfPlhsName.isDefined) Seq(lhs,rhs,eqTermName,p,prfPlhsName.get) else Seq(lhs,rhs,eqTermName,p)
-  //   //lpFunctionApp(lpConstantTerm("=def"),args)
-  //   eqDef().instanciate(ty.lift2Poly,lhs,rhs,Some(eqTermName),Some(p),prfPlhsName)
-  // }
-  // else {
-  //   val args = if (prfPlhsName.isDefined) Seq(p,prfPlhsName.get) else Seq(p)
-  //   lpFunctionApp(eqTermName,args)
-  // }
-  //
-
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  ////////////////////////// TRANSFORMATIONS ///////////////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-  abstract class transformations extends lpDefinedRules
-
-  case class flipLiteral(polarity: Boolean) extends transformations {
-
-    val x = lpOlConstantTerm("x")
-    val y = lpOlConstantTerm("y")
-
-    override def name: lpConstantTerm = lpConstantTerm("eqSym_eq") // {
-      // if (polarity) lpConstantTerm("eqSym_p_eq")
-      // else lpConstantTerm("eqSym_n_eq")}
-
-    // flipLiteralPosEq [T] x y: Prf(= [o] (= [T] x y) (= [T] y x))
-    // flipLiteralNegEq [T] x y: Prf(= [o] (¬ (= [T] x y)) (¬ (= [T] y x)))
-
-    override def ty: lpMlType = {
-      if (polarity) lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,x,y),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,y,x)).prf
-      else lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,x,y)),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,y,x))).prf
-    }
-
-    override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y), ty)
-
-    // todo: encode properly
-    override def proof: lpProofScript = {
-      if (polarity) lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet\n    assume T x y;\n    have H1: Prf(= [T] x y) → Prf(= [T] y x)\n        {assume h;\n        symmetry;\n        refine h};\n    have H2: Prf(= [T] y x) → Prf(= [T] x y)\n        {assume h;\n        symmetry;\n        refine h};\n    refine propExt (= [T] x y) (= [T] y x) H1 H2")))
-      else lpProofScript(Seq(lpProofScriptCommentLine("this is not properly encoded yet\n    assume T x y;\n    have H1: Prf ¬(= [T] x y) → Prf ¬(= [T] y x)\n        {assume h;\n        have H1_1: Prf(= [T] y x) → Prf(= [T] x y)\n            {assume h1;\n            symmetry;\n            refine h1};\n        have H1_2: Prf(= [T] y x) → Prf(⊥)\n            {assume h1;\n            refine ¬E (= [T] x y) (H1_1 h1) h};\n        refine ¬I (= [T] y x) H1_2};\n\n    have H2: Prf ¬(= [T] y x) → Prf ¬(= [T] x y)\n        {assume h;\n        have H2_1: Prf(= [T] x y) → Prf(= [T] y x)\n            {assume h1;\n            symmetry;\n            refine h1};\n        have H2_2: Prf(= [T] x y) → Prf(⊥)\n            {assume h1;\n            refine ¬E (= [T] y x) (H2_1 h1) h};\n\n        refine ¬I (= [T] x y) H2_2};\n\n    refine propExt (¬(= [T] x y)) (¬(= [T] y x)) H1 H2")))
-    }
-
-    override def pretty: String = lpDefinition(name, Seq(x, y), ty, proof).pretty
-
-    def instanciate(x0: lpOlTerm, y0: lpOlTerm, prfXeqY0: Option[lpTerm]): lpFunctionApp = {
-      val prfXeqY = prfXeqY0 match {
-        case Some(prfTerm) => Seq(prfTerm)
-        case None => Seq()
-      }
-      lpFunctionApp(name, Seq(x0, y0) ++ prfXeqY)
-    }
-
-    def res(T0: lpOlPolyType, x0: lpOlTerm, y0: lpOlTerm)= { // todo unite encoding with type
-      if (polarity) lpOlTypedBinaryConnectiveTerm(lpEq, T0, y0, x0)
-      else lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, T0, y0, x0))
-    }
-  }
+object NaturalDeductionRules {
 
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

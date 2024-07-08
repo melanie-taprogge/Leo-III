@@ -1,33 +1,82 @@
 package leo.modules.output.LPoutput
 
-import leo.datastructures.Literal.{asTerm, symbols, vars}
 import leo.datastructures.Term.{Integer, Rational, Real}
-import leo.datastructures.{Clause, ClauseAnnotation, ClauseProxy, Kind, Literal, Role, Signature, Term, Type}
+import leo.datastructures.{Clause, ClauseProxy, Signature, Term, Type}
 import leo.datastructures.Type._
 import leo.datastructures.Term._
 import leo.modules.HOLSignature._
-import leo.modules.control._
-import leo.modules.control.Control
-import leo.modules.calculus._
 import leo.modules.output._
-import leo.modules.output.LPoutput.LPSignature._
-import leo.modules.output.LPoutput.calculusEncoding._
-import leo.modules.output.ToTPTP.{collectExists, collectForall, typeToTHF}
+import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.lpDatastructures._
 
 import scala.collection.mutable
 
 ////////////// ENCODING OF TYPES, TERMS, CLAUSES, DEFINITIONS AND PROOF STEPS
 
-object Encodings {
-/*
-  def kind2LP(kind:Kind, sig: Signature)={
+/**
+  *
+  * @author Melanie Taprogge
+  */
 
-    // todo: what cases can we have here? is it really only possible to have pure kind declarations?
-    print(s"\nkind = ${kind.pretty}")
+object Encodings {
+
+  ////////////////////////////////////////////////////////////////
+  ////////// Leo Functinality
+  ////////////////////////////////////////////////////////////////
+
+  // shamelessly stolen from ToTPTP (... for now, I will have to change to a different one/ change permissions)
+  final private def collectLambdasLP(t: Term): (Seq[Type], Term) = {
+    collectLambdasLP0(Seq.empty, t)
   }
 
- */
+  @inline final private def collectLambdasLP0(vars: Seq[Type], t: Term): (Seq[Type], Term) = {
+    t match {
+      case ty :::> b => collectLambdasLP0(vars :+ ty, b)
+      case _ => (vars, t)
+    }
+  }
+
+  private final def collectTyLambdas(count: Int, t: Term): (Int, Term) = {
+    t match {
+      case TypeLambda(body) => collectTyLambdas(count + 1, body)
+      case _ => (count, t)
+    }
+  }
+
+  final private def collectExists(t: Term): (Seq[Type], Term) = {
+    collectExists0(Seq.empty, t)
+  }
+
+  @inline final private def collectExists0(vars: Seq[Type], t: Term): (Seq[Type], Term) = {
+    t match {
+      case Exists(ty :::> b) => collectExists0(vars :+ ty, b)
+      case Exists(_) => collectExists0(vars, t.etaExpand)
+      case _ => (vars, t)
+    }
+  }
+
+  final private def collectForall(t: Term): (Seq[Type], Term) = {
+    collectForall0(Seq.empty, t)
+  }
+
+  @inline final private def collectForall0(vars: Seq[Type], t: Term): (Seq[Type], Term) = {
+    t match {
+      case Forall(ty :::> b) => collectForall0(vars :+ ty, b)
+      case Forall(_) => collectForall0(vars, t.etaExpand)
+      case _ => (vars, t)
+    }
+  }
+
+  // ?
+  protected[output] final def makeDefBVarList(tys: Seq[Type], offset: Int): Seq[(String, Type)] = {
+    // Is this Leo code?
+    // we calculate the indizes of the variables to name and assign names accordningly
+    tys.zipWithIndex.map { case (ty, idx) => (s"$$${intToName(offset + idx)}", ty) }
+  }
+
+  ////////////////////////////////////////////////////////////////
+  ////////// Automated Encoding
+  ////////////////////////////////////////////////////////////////
 
   def type2LP (ty: Type, sig: Signature):(lpOlType,Set[lpStatement])={
     type2LP(ty, sig, Set.empty)
@@ -67,68 +116,6 @@ object Encodings {
         //original:val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
         //s"!> [${(1 to tyAbsCount).map(i => s"T${intToName(i - 1)}: $$tType").mkString(",")}]: ${typeToTHF1(bodyTy)(sig)}"
     }
-  }
-
-  protected[output] final def makeDefBVarList(tys: Seq[Type], offset: Int): Seq[(String, Type)] = {
-    // we calculate the indizes of the variables to name and assign names accordningly
-    tys.zipWithIndex.map { case (ty, idx) => (s"$$${intToName(offset + idx)}", ty) }
-  }
-
-
-
-  // shamelessly stolen from ToTPTP (... for now, I will have to change to a different one/ change permissions)
-  final private def collectLambdasLP(t: Term): (Seq[Type], Term) = {
-    collectLambdasLP0(Seq.empty, t)
-  }
-  @inline final private def collectLambdasLP0(vars: Seq[Type], t: Term): (Seq[Type], Term) = {
-    t match {
-      case ty :::> b => collectLambdasLP0(vars :+ ty, b)
-      case _ => (vars, t)
-    }
-  }
-  private final def collectTyLambdas(count: Int, t: Term): (Int, Term) = {
-    t match {
-      case TypeLambda(body) => collectTyLambdas(count + 1, body)
-      case _ => (count, t)
-    }
-  }
-  final private def collectExists(t: Term): (Seq[Type], Term) = {
-    collectExists0(Seq.empty, t)
-  }
-  @inline final private def collectExists0(vars: Seq[Type], t: Term): (Seq[Type], Term) = {
-    t match {
-      case Exists(ty :::> b) => collectExists0(vars :+ ty, b)
-      case Exists(_) => collectExists0(vars, t.etaExpand)
-      case _ => (vars, t)
-    }
-  }
-  final private def collectForall(t: Term): (Seq[Type], Term) = {
-    collectForall0(Seq.empty, t)
-  }
-  @inline final private def collectForall0(vars: Seq[Type], t: Term): (Seq[Type], Term) = {
-    t match {
-      case Forall(ty :::> b) => collectForall0(vars :+ ty, b)
-      case Forall(_) => collectForall0(vars, t.etaExpand)
-      case _ => (vars, t)
-    }
-  }
-
-  final def clauseImplicitsToTPTPQuantifierList_map(implicitlyQuantified: Seq[(Int, Type)])(sig: Signature): Map[Int, String] = {
-    // shoretened version to only consruct the map
-    //todo either incorporate somewhere or make it a proper function
-    val count = implicitlyQuantified.size
-    var resultBindingMap: Map[Int, String] = Map()
-
-    var curImplicitlyQuantified = implicitlyQuantified
-    var i = 0
-    while (i < count) {
-      val (scope, _) = curImplicitlyQuantified.head
-      curImplicitlyQuantified = curImplicitlyQuantified.tail
-      val name = intToName(count - i - 1)
-      resultBindingMap = resultBindingMap + (scope -> name)
-      i = i + 1
-    }
-    resultBindingMap
   }
 
 
@@ -395,89 +382,4 @@ object Encodings {
       case _ => throw new IllegalArgumentException("Unexpected term format during conversion to LP")
     }
   }
-
-
-  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long,ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0:(Int,Int,Int,Int)): (String,lpStatement,(Int,Int,Int,Int),Set[lpStatement]) = {
-
-    val skripts = true
-
-    val rule = cl.annotation.fromRule
-
-    val continuousNumbers = true
-
-    val parameters = if (continuousNumbers) parameters0 else (0,0,0,0)
-
-    if (!Seq(leo.datastructures.Role_Conjecture).contains(cl.role)){ // we start our proof with the negated conjecture
-
-      rule match {
-        case leo.modules.calculus.PolaritySwitch =>
-          //todo: dont forget to map to the correct formula! make special case for negated conjecture
-          //val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head,parentInLpEncID.head,sig,parameters) //¿polarity switch always only has one parent, right?
-          //encoding
-          if (skripts) {
-            val encoding = encPolaritySwitchClause_proofScript(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
-            ("PolaritySwitch",encoding._1,(0,0,0,0),encoding._2)
-          } else {
-            val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head, parentInLpEncID.head, sig, parameters) //¿polarity switch always only has one parent, right?
-            ("PolaritySwitch",encoding._1,encoding._2, encoding._3)
-          }
-
-        case leo.modules.calculus.FuncExt =>
-          if (skripts) {
-            val encoding = encFuncExtPosClause_script(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig, parameters)
-            ("FuncExt", encoding._1, parameters, encoding._2) // no new symbols this time
-          } else {
-            val encoding = encFuncExtPosClause(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig, parameters0)
-            ("FuncExt", encoding._1, encoding._2, encoding._3)
-          }
-
-        case leo.modules.calculus.BoolExt =>
-          //throw new Exception(s"${cl.furtherInfo.addInfoBoolExt}")
-          //val encoding = encBoolExtClause(cl, cl.annotation.parents.head, parentInLpEncID.head, sig,parameters)
-          if (skripts) {
-            val encoding = encBoolExtClause_proofScript(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
-            ("BoolExt", encoding._1, (0, 0, 0, 0), encoding._2)
-          } else {
-            val encoding = encBoolExtClause(cl, cl.annotation.parents.head, parentInLpEncID.head, sig, parameters0)
-            ("BoolExt", encoding._1, encoding._2, encoding._3)
-          }
-
-        case leo.modules.calculus.OrderedEqFac =>
-          //val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig)
-          //(encodings._1,(0,0,0,0),encodings._2)
-          if (skripts) {
-            val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac,parentInLpEncID.head, sig)
-            ("OrderedEqFac",encodings._1,parameters,encodings._2)
-          } else {
-            val encodings = encEqFactClause(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig, parameters0)
-            //throw new Exception(s"Eq factoring info: ${cl.furtherInfo.addInfoEqFac}")
-            ("OrderedEqFac",encodings._1, encodings._2, encodings._3)
-          }
-
-        case leo.modules.calculus.DefExpSimp =>
-          //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
-          // todo: eta expansion
-          val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoSimp,cl.furtherInfo.addInfoDefExp,parentInLpEncID.head,sig)
-          ("DexExpand",encodingsSimp._1,(0,0,0,0),encodingsSimp._2)
-        case leo.modules.calculus.Simp =>
-          throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
-          // todo: eta expansion
-          val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
-          ("?",encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
-        case leo.modules.calculus.PreUni =>
-          val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
-          ("PreUni",encodingPreUni._1,parameters,encodingPreUni._2)
-          //throw new Exception(s"${cl.furtherInfo.addInfoUni}")
-        case leo.modules.calculus.RewriteSimp =>
-          //throw new Exception(s"add info rewriting: ${cl.furtherInfo.addInfoRewriting}")
-          val encodingRewrite = encRewrite(cl,cl.annotation.parents,cl.furtherInfo.addInfoSimp,cl.furtherInfo.addInfoRewriting,parentInLpEncID,sig)
-          ("RewriteSimp",encodingRewrite._1,parameters,encodingRewrite._2)
-        case _ =>
-          //print(s"\n $rule not encoded yet \n\n")
-          (s"Rule ${rule.name} not encoded yet",lpOlNothing,parameters,Set.empty)
-      }
-    }//todo: either introduce else or filter out conj before!
-    else ("no role or conjecture?",lpOlNothing,parameters,Set.empty)
-  }
-
 }

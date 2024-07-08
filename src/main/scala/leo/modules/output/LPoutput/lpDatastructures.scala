@@ -1,5 +1,10 @@
 package leo.modules.output.LPoutput
 
+/**
+  *
+  * @author Melanie Taprogge
+  */
+
 object lpDatastructures {
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -570,21 +575,5 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpAssume(vars, tab)))
   }
 
-
-
-
-
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-  ////////////////////////// TEST TEST TEST  ///////////////////////////////////////////////////////////////////////////////////////
-  //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-
-  def main(args: Array[String]):Unit = {
-    print(s"${lpOlFunctionApp(lpOlConstantTerm("test"), Seq.empty).pretty}\n")
-    print(s"${lpOlFunctionType(Seq(lpOtype,lpItype,lpOlUserDefinedType("h"))).pretty}\n")
-    print(s"${lpOlMonoQuantifiedTerm(lpOlForAll, Seq(lpOlTypedVar(lpOlConstantTerm("a"), lpOtype), lpOlTypedVar(lpOlConstantTerm("b"), lpItype)), lpOlBot).pretty}\n")
-    print(s"${lpLambdaTerm(Seq(lpTypedVar(lpConstantTerm("a"),lpliftedObjectType(lpOtype)),lpTypedVar(lpConstantTerm("b"),lpliftedObjectType(lpItype))),lpOlBot).pretty}\n")
-
-    print(s"${lpOlUntypedBinaryConnectiveTerm_multi(lpOr,Seq(lpOlConstantTerm("a"),lpOlConstantTerm("a"),lpOlConstantTerm("a"))).pretty}")
-  }
 
 }

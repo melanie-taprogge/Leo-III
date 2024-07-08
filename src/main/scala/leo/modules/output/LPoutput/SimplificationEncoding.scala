@@ -14,6 +14,7 @@ object SimplificationEncoding {
         Simp16_eq -> false,
         )
 
+  // map the names of the simplification rules to the names of the functions encoding them and a boolean indicating weather or not they need to be instanciated
   val SimpRuleMap: Map[String,(simplificationRules,Boolean)] =
     Map("Simp1" -> (Simp1_eq, SimpNeedsTyping(Simp1_eq)),
         "Simp9" -> (Simp9_eq, SimpNeedsTyping(Simp9_eq)),
@@ -31,6 +32,7 @@ object SimplificationEncoding {
   }
 
   case object Simp1 extends simplificationRules{
+    // the implemented encoding of simplification verification still relies on proof-terms
 
     val x1 = lpOlConstantTerm("x")
     val h1 = lpOlConstantTerm("h")
@@ -56,12 +58,12 @@ object SimplificationEncoding {
   }
 
   case object Simp1_eq extends simplificationRules {
+    // Prf (eq [↑ o] (x ∨ x) x)
 
     val x1 = lpOlConstantTerm("x")
 
     override def name: lpConstantTerm = lpConstantTerm("Simp1_eq")
 
-    // Prf (eq [↑ o] (x ∨ x) x)
     override def ty: lpMlType = lpMlDependType(Seq(lpUntypedVar(x1)),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,x1),x1).prf)
 
     override def proof: lpTerm = {

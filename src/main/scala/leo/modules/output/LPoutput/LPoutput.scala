@@ -1,24 +1,22 @@
 package leo.modules.output.LPoutput
 
-import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture}
-import leo.modules.embeddings.DHOLEmbedding.constants
+import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature}
 import leo.modules.output.{ToTPTP, tptpEscapeName}
 import leo.modules.prover.LocalState
 import leo.modules.{axiomsInProof, compressedProofOf, symbolsInProof, userSignatureToTPTP}
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature._
-import leo.modules.output.ToTPTP.toTPTP
-import leo.modules.proof_object.CompressProof
-import leo.modules.output.LPoutput.lpDatastructures.{lpDefinedRules, _}
-import leo.modules.output.LPoutput.calculusEncoding._
-import leo.modules.output.LPoutput.lpUseful._
-import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
-import leo.modules.output.LPoutput.SimplificationEncoding
-import leo.modules.output.LPoutput.Transformations._
+import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.ModularProofEncoding._
+import leo.modules.output.LPoutput.NaturalDeductionRules._
+
 import java.nio.file.{Files, Paths}
 import java.nio.charset.StandardCharsets
-
 import scala.collection.mutable
+
+/**
+  *
+  * @author Melanie Taprogge
+  */
 
 object LPoutput {
 
@@ -109,6 +107,67 @@ object LPoutput {
 
     (correctnessFileSB, naturalDeductionFileSB,rulesFileSB)
   }
+
+  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long, ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0: (Int, Int, Int, Int)): (String, lpStatement, (Int, Int, Int, Int), Set[lpStatement]) = {
+
+    val skripts = true
+
+    val rule = cl.annotation.fromRule
+
+    val continuousNumbers = true
+
+    val parameters = if (continuousNumbers) parameters0 else (0, 0, 0, 0)
+
+    if (!Seq(leo.datastructures.Role_Conjecture).contains(cl.role)) { // we start our proof with the negated conjecture
+
+      rule match {
+        case leo.modules.calculus.PolaritySwitch =>
+          //todo: dont forget to map to the correct formula! make special case for negated conjecture
+          //val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head,parentInLpEncID.head,sig,parameters) //¿polarity switch always only has one parent, right?
+          //encoding
+          val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
+          ("PolaritySwitch", encoding._1, (0, 0, 0, 0), encoding._2)
+
+        case leo.modules.calculus.FuncExt =>
+          val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig)
+          ("FuncExt", encoding._1, parameters, encoding._2)
+
+        case leo.modules.calculus.BoolExt =>
+          val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
+          ("BoolExt", encoding._1, (0, 0, 0, 0), encoding._2)
+
+        case leo.modules.calculus.OrderedEqFac =>
+          //val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig)
+          //(encodings._1,(0,0,0,0),encodings._2)
+          val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
+          ("OrderedEqFac", encodings._1, parameters, encodings._2)
+
+        case leo.modules.calculus.DefExpSimp =>
+          //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
+          // todo: eta expansion
+          val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
+          ("DexExpand", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
+        case leo.modules.calculus.Simp =>
+          throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
+          // todo: eta expansion
+          val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
+          ("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
+        case leo.modules.calculus.PreUni =>
+          val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
+          ("PreUni", encodingPreUni._1, parameters, encodingPreUni._2)
+        //throw new Exception(s"${cl.furtherInfo.addInfoUni}")
+        case leo.modules.calculus.RewriteSimp =>
+          //throw new Exception(s"add info rewriting: ${cl.furtherInfo.addInfoRewriting}")
+          val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
+          ("RewriteSimp", encodingRewrite._1, parameters, encodingRewrite._2)
+        case _ =>
+          //print(s"\n $rule not encoded yet \n\n")
+          (s"Rule ${rule.name} not encoded yet", lpOlNothing, parameters, Set.empty)
+      }
+    } //todo: either introduce else or filter out conj before!
+    else ("no role or conjecture?", lpOlNothing, parameters, Set.empty)
+  }
+
 
   def outputLPFiles(state: LocalState, lpOutputPath: String):Unit={
 
