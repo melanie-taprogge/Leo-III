@@ -8,6 +8,7 @@ import leo.modules.control.Control
 import leo.modules.input.ProblemStatistics
 import leo.modules.output._
 import leo.modules.output.LPoutput.LPoutput._
+import java.nio.file.Paths
 
 /**
   * Sequential proof procedure.
@@ -481,10 +482,17 @@ object SeqLoop {
     }
 
     if (Configuration.LPOUTPUTPATH.isDefined){
-      val lpOutputPath = if(Configuration.LPOUTPUTPATH.get.endsWith("/")) Configuration.LPOUTPUTPATH.get else s"${Configuration.LPOUTPUTPATH.get}/"
-      print(s"saving Lambdapi output files to $lpOutputPath")
+      val problemFileName = Paths.get(Configuration.PROBLEMFILE).getFileName.toString
+      val problemFileNameWithoutExtension = problemFileName.lastIndexOf('.') match {
+        case -1 => problemFileName
+        case i => problemFileName.substring(0, i)
+      }
+      val lpFolderName = "lpProof"
+      val lpOutputPath = if(Configuration.LPOUTPUTPATH.get.endsWith("/")) s"${Configuration.LPOUTPUTPATH.get}/" else s"${Configuration.LPOUTPUTPATH.get}/"
 
-      outputLPFiles(state,lpOutputPath)
+      print(s"saving Lambdapi output files to ${lpOutputPath}${lpFolderName}_$problemFileNameWithoutExtension\n")
+
+      outputLPFiles(state,lpOutputPath,s"${lpFolderName}_$problemFileNameWithoutExtension")
     }
   }
 

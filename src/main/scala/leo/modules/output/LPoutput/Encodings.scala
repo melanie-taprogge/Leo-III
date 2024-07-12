@@ -13,7 +13,7 @@ import scala.collection.mutable
 
 ////////////// ENCODING OF TYPES, TERMS, CLAUSES, DEFINITIONS AND PROOF STEPS
 
-/**
+/** Automated translation of types and terms
   *
   * @author Melanie Taprogge
   */
@@ -24,7 +24,8 @@ object Encodings {
   ////////// Leo Functinality
   ////////////////////////////////////////////////////////////////
 
-  // shamelessly stolen from ToTPTP (... for now, I will have to change to a different one/ change permissions)
+  // adapted from ToTPTP (... for now, I will have to change to a different one/ change permissions)
+  // todo: combine with the original functions
   final private def collectLambdasLP(t: Term): (Seq[Type], Term) = {
     collectLambdasLP0(Seq.empty, t)
   }
@@ -102,7 +103,7 @@ object Encodings {
         (lpOlMonoComposedType(lpConstantTerm(tptpEscapeExpression(sig(id).name)),encArgs),usedSymbols)
       case BoundType(scope) =>
         throw new Error(s"BoundType not yet encoded, unable to do ${ty.pretty}")
-        //original: "T" + intToName(scope - 1) todo
+        //todo
       case tl -> tr =>
         val (encodeTl,updatedSymbolsL) = type2LP(tl,sig,usedSymbols)
         val (encodeTr,updatedSymbolsR) = type2LP(tr,sig,usedSymbols)
@@ -110,11 +111,10 @@ object Encodings {
         (lpOlFunctionType(Seq(encodeTl,encodeTr)),usedSymbols)
       case ProductType(tys) =>
         throw new Error(s"ProductType not yet encoded, unable to do ${ty.pretty}")
-        //original: tys.map(tyDec2LP(_,sig)).mkString("[", ",", "]") todo
+        //todo
       case ∀(_) =>
         throw new Error(s"Poly Type not yet encoded, unable to do ${ty.pretty}")
-        //original:val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
-        //s"!> [${(1 to tyAbsCount).map(i => s"T${intToName(i - 1)}: $$tType").mkString(",")}]: ${typeToTHF1(bodyTy)(sig)}"
+        //todo
     }
   }
 
@@ -130,7 +130,7 @@ object Encodings {
           val (bVarTys, body) = collectLambdasLP(t)
           val newBVars = if (encAsRewriteRule) makeDefBVarList(bVarTys, 0) else makeBVarList(bVarTys,0)
           val (encbody, updatedUsedSymbols0) = term2LP(body, fusebVarListwithMap(newBVars, Map()), sig, usedSymbols)
-          var updatedUsedSymbols = updatedUsedSymbols0
+          val updatedUsedSymbols = updatedUsedSymbols0
           (encbody, updatedUsedSymbols, newBVars)
         case _ => throw new Exception(s"encountered unexpected definition format when trying to encode ${t.pretty} in LP")
       }
@@ -138,7 +138,6 @@ object Encodings {
 
   final def clauseVars2LP(fvs: Seq[(Int, Type)], sig: Signature, usedSymbols0: Set[lpStatement]): (Seq[lpOlTypedVar], Map[Int, String],Set[lpStatement]) = {
     val fvCount = fvs.size
-    //val boundVars: StringBuffer = new StringBuffer()
     var boundVars: Seq[lpOlTypedVar] = Seq.empty
     var usedSymbols = usedSymbols0
 
@@ -151,7 +150,6 @@ object Encodings {
       val name = intToName(fvCount - i - 1)
       val (encType, usedSymbolsUpdated) = type2LP(ty,sig,usedSymbols)
       usedSymbols = usedSymbolsUpdated
-      //boundVars.append(s"$Pi $name : $Els($uparrow $encType) , ")// todo: cases where we embed sth of type scheme?
       boundVars = boundVars :+ lpOlTypedVar(lpOlConstantTerm(name),encType)
       resultBindingMap = resultBindingMap + (scope -> name)
 
@@ -188,9 +186,7 @@ object Encodings {
             encLit = lpOlTypedBinaryConnectiveTerm(lpInEq,encTyTl,lefEnc,rigEnc)
           }
         } else {
-          //print(s"here is the problem 1\n")
           val (termEnc, usedSymbolsUpdated) = term2LP(lit.left, bVarMap, sig, usedSymbols)
-          //print(s"encoded term: ${termEnc.pretty}\n")
           usedSymbols = usedSymbolsUpdated
           if (lit.polarity){
             encLit = termEnc
@@ -207,7 +203,6 @@ object Encodings {
     }
 
   final def clause2LP_unquantified(cl: Clause, usedSymbols0: Set[lpStatement], sig: Signature): (Seq[lpOlTypedVar],lpOlUntypedBinaryConnectiveTerm_multi, Set[lpStatement]) = {
-    //print(s"\nencoding ${cl.pretty}\n")
     val freeVarsExist = cl.implicitlyBound.nonEmpty || cl.typeVars.nonEmpty
     var usedSymbols = usedSymbols0
     if (freeVarsExist) {
@@ -222,16 +217,12 @@ object Encodings {
       quantifiedVars = quantifiedVars ++ namedFVEnumerationLP
       // With this we now encode the actual clause
       val (encClause, usedSymbolsClause) = clause2LP0(cl, bVarMap, sig, usedSymbolsUpdated)
-      //print(s"done ! ${encClause.pretty}\n")
       usedSymbols = usedSymbolsClause
-      //(lpMlDependType(quantifiedVars,encClause.prf), usedSymbols)
       (quantifiedVars,encClause,usedSymbols)
     } else {
       // otherwise we just encode the clause and lift it to a proof term
       val (encClause, usedSymbolsClause) = clause2LP0(cl, Map.empty, sig, usedSymbols)
-      //print(s"done ! ${encClause.pretty}\n")
       usedSymbols = usedSymbolsClause
-      //(encClause.prf,usedSymbols)
       (Seq.empty,encClause,usedSymbols)
     }
   }
@@ -246,8 +237,6 @@ object Encodings {
   }
   def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpStatement]): (lpOlTerm,Set[lpStatement]) = {
     //todo: dont i need the offset? was it an oversight not to use it in term2lp?
-    //print(s"encoding a term: ${t.pretty}\n")
-    // modelled after toTPTP0
 
     t match {
       // Constant symbols
@@ -279,7 +268,6 @@ object Encodings {
           quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType)
         }
         (lpOlMonoQuantifiedTerm(lpOlForAll,quantifiedVars,encBody), usedSymbolsQuant+lpOlForAll)
-        //throw new Error(s"quantifiers are not encoded yet 1 ${t.pretty}")
       case Exists(_) =>
         // todo: Add explicit types for quantifiers?
         val (bVarTys, body) = collectExists(t)
@@ -293,7 +281,6 @@ object Encodings {
           quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1), encType)
         }
         (lpOlMonoQuantifiedTerm(lpOlExists, quantifiedVars, encBody), usedSymbolsQuant + lpOlExists)
-        //throw new Error(s"quantifiers are not encoded yet 2 ${t.pretty}")
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet 3 ${t.pretty}")
       case leo.modules.HOLSignature.Choice(_) => throw new Error(s"choice not encoded yet ${t.pretty}")
 
@@ -337,7 +324,6 @@ object Encodings {
           val newBVars = makeBVarList(bVarTys, bVars.size)
           val (encBody, updatedUsedSymbols0) = term2LP(body,fusebVarListwithMap(newBVars, bVars),sig,usedSymbols)
           var updatedUsedSymbols = updatedUsedSymbols0
-          //val abstractions: StringBuffer = new StringBuffer()
           var abstractions: Seq[lpOlTypedVar] = Seq.empty
           newBVars foreach { s_ty =>
             val (encType, updatedUsedSymbols0) = type2LP(s_ty._2, sig, updatedUsedSymbols)
@@ -350,7 +336,6 @@ object Encodings {
 
       case TypeLambda(_) =>
         val (tyAbsCount, body) = collectTyLambdas(0, t)
-        //s"^ [${(1 to tyAbsCount).map(i => "T" + intToName(i - 1) + ": $tType").mkString(",")}]: (${toTPTP0(body, tyVarCount + tyAbsCount, bVars)(sig)})"
         // todo: not really sure how this should be encoded, check with examples
         throw new Error(s"encountered typeLambda, this is not encoded yet ${t.pretty}")
 
@@ -362,7 +347,6 @@ object Encodings {
       case f ∙ args =>
         val (translatedF, updatedUsedSymbols0) = term2LP(f, bVars, sig, usedSymbols)
         var updatedUsedSymbols = updatedUsedSymbols0
-        //val arguments: StringBuffer = new StringBuffer()
         var arguments:Seq[lpTerm] = Seq.empty
         args foreach { arg =>
           arg match {

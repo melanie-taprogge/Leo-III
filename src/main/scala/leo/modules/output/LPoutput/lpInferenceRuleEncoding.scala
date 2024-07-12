@@ -9,6 +9,8 @@ import leo.modules.output.LPoutput.NaturalDeductionRules._
   * @author Melanie Taprogge
   */
 
+// todo: encode proofs properly
+
 object lpInferenceRuleEncoding {
 
   abstract class inferenceRules extends lpDefinedRules{
@@ -31,10 +33,10 @@ object lpInferenceRuleEncoding {
     }
 
     val T = lpOlUserDefinedPolyType("T")
-    val x = lpOlConstantTerm("x")
-    val y = lpOlConstantTerm("y")
-    val z = lpOlConstantTerm("z")
-    val v = lpOlConstantTerm("v")
+    val x = lpOlTypedVar(lpOlConstantTerm("x"),T)
+    val y = lpOlTypedVar(lpOlConstantTerm("y"),T)
+    val z = lpOlTypedVar(lpOlConstantTerm("z"),T)
+    val v = lpOlTypedVar(lpOlConstantTerm("v"),T)
 
     override def ty: lpMlType = {
       if (polarity) {
@@ -77,13 +79,13 @@ object lpInferenceRuleEncoding {
 
     val T = lpOlUserDefinedMonoType("T")
     val S = lpOlUserDefinedMonoType("S")
-    val f = lpOlConstantTerm("f")
-    val g = lpOlConstantTerm("g")
-    val x = lpOlConstantTerm("x")
+    val f = lpOlTypedVar(lpOlConstantTerm("f"),lpOlFunctionType(Seq(S,T)))
+    val g = lpOlTypedVar(lpOlConstantTerm("g"),lpOlFunctionType(Seq(S,T)))
+    val x = lpOlTypedVar(lpOlConstantTerm("x"),S)
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq,S,lpOlFunctionApp(f,Seq(x)),lpOlFunctionApp(g,Seq(x))),lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g)).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptCommentLine("    assume T S f g x;\n\n    have H1: Prf(= [S] (f x) (g x)) → Prf(= [(T ⤳ S)] f g)\n        {refine (funExt [T] [S] f g) x};\n\n    have H2: Prf((= [(T ⤳ S)] f g)) → Prf(= [S] (f x) (g x))\n        {assume h;\n        refine =def [(T ⤳ S)] f g h (λ y, = [S] (y x) (g x)) (=ref [S] (g x))};\n\n    refine (propExt (= [S] (f x) (g x)) (= [(T ⤳ S)] f g)) H1 H2;\n"))) //todo: generate depending on number of args
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T S f g x;\n\n    have H1: Prf((f x) = (g x)) → Prf(f = g)\n        {refine (funExt [S] [T] f g) x};\n\n    have H2: Prf((f = g)) → Prf((f x) = (g x))\n        {assume h;\n        refine =def [(S ⤳ T)] f g h (λ y,(y x) = (g x)) (=ref [T] (g x))};\n\n    refine (propExt ((f x) = (g x)) (f = g)) H1 H2;"))) //todo: generate depending on number of args
 
     override def usedBasicRules: Set[lpStatement] = Set(eqRef(),eqDef())
 
@@ -138,16 +140,16 @@ object lpInferenceRuleEncoding {
 
     override def proof: lpProofScript = {
       if (polarity & !lhsNeg) {
-        lpProofScript(Seq(lpProofScriptCommentLine("    assume x y h;\n    refine =def [o] x y h (λ z, z ∨ ¬ y) (em y);")))
+        lpProofScript(Seq(lpProofScriptStringProof("assume x y h;\n    refine =def [o] x y h (λ z, z ∨ ¬ y) (em y);")))
       } else if (polarity & lhsNeg) {
         // a b : Prf(eq [↑ o] a b) → Prf(a ∨ (¬ b))
-        lpProofScript(Seq(lpProofScriptCommentLine("    assume x y h1;\n    have em_sym: Prf(¬ y ∨ y)\n        {refine ∨E y (¬ y) (¬ y ∨ y) _ _ (em y)\n            {assume h2;\n            refine ∨Ir (¬ y) y h2}\n            {assume h2;\n            refine ∨Il (¬ y) y h2}};\n    refine =def [o] x y h1 (λ z, ¬ z ∨ y) em_sym;")))
+        lpProofScript(Seq(lpProofScriptStringProof("assume x y h1;\n    have em_sym: Prf(¬ y ∨ y)\n        {refine ∨E y (¬ y) (¬ y ∨ y) _ _ (em y)\n            {assume h2;\n            refine ∨Ir (¬ y) y h2}\n            {assume h2;\n            refine ∨Il (¬ y) y h2}};\n    refine =def [o] x y h1 (λ z, ¬ z ∨ y) em_sym;")))
       } else if (!polarity & lhsNeg) {
         // x y: Prf(¬(= [o] x y)) → Prf(x ∨ y)
-        lpProofScript(Seq(lpProofScriptCommentLine("    assume x y h1;\n   \n    refine ∨E x (¬ x) (x ∨ y) _ _ (em x)\n        {assume h2;\n        refine ∨Il x y h2}\n        {assume h2;\n        have yPrf: Prf y\n            {have notNotYprf: Prf (¬ y) → Prf ⊥\n                {assume h3;\n                have xImpY: Prf x → Prf y\n                    {assume h4;\n                    refine ⊥I y (¬E x h4 h2)};\n                have yImpX: Prf y → Prf x\n                    {assume h4;\n                    refine ⊥I x (¬E y h4 h3)};\n                refine (λ u, ¬E (= [o] x y) u h1) (propExt x y xImpY yImpX)};\n            refine npp (y) (¬I (¬ y) notNotYprf)};\n        refine ∨Ir x y yPrf};")))
+        lpProofScript(Seq(lpProofScriptStringProof("assume x y h1;\n   \n    refine ∨E x (¬ x) (x ∨ y) _ _ (em x)\n        {assume h2;\n        refine ∨Il x y h2}\n        {assume h2;\n        have yPrf: Prf y\n            {have notNotYprf: Prf (¬ y) → Prf ⊥\n                {assume h3;\n                have xImpY: Prf x → Prf y\n                    {assume h4;\n                    refine ⊥I y (¬E x h4 h2)};\n                have yImpX: Prf y → Prf x\n                    {assume h4;\n                    refine ⊥I x (¬E y h4 h3)};\n                refine (λ u, ¬E (= [o] x y) u h1) (propExt x y xImpY yImpX)};\n            refine npp (y) (¬I (¬ y) notNotYprf)};\n        refine ∨Ir x y yPrf};")))
       } else {
         // x y: Prf(¬(= [o] x y)) → Prf(¬ x ∨ ¬ y)
-        lpProofScript(Seq(lpProofScriptCommentLine("    assume x y h1;\n   \n    refine ∨E x (¬ x) (¬ x ∨ ¬ y) _ _ (em x)\n        {assume h2;\n        have notNotYprf: Prf (y) → Prf ⊥\n            {assume h3;\n            have xImpY: Prf(x) → Prf(y)\n                {assume h4;\n                refine h3};\n            have yImpX: Prf(y) → Prf(x)\n                {assume h4;\n                refine h2};\n            refine (λ u, ¬E (= [o] x y) u h1) (propExt x y xImpY yImpX)};\n        refine ∨Ir (¬ x) (¬ y) (¬I y notNotYprf)}\n        {assume h2;\n        refine ∨Il (¬ x) (¬ y) h2}")))
+        lpProofScript(Seq(lpProofScriptStringProof("assume x y h1;\n   \n    refine ∨E x (¬ x) (¬ x ∨ ¬ y) _ _ (em x)\n        {assume h2;\n        have notNotYprf: Prf (y) → Prf ⊥\n            {assume h3;\n            have xImpY: Prf(x) → Prf(y)\n                {assume h4;\n                refine h3};\n            have yImpX: Prf(y) → Prf(x)\n                {assume h4;\n                refine h2};\n            refine (λ u, ¬E (= [o] x y) u h1) (propExt x y xImpY yImpX)};\n        refine ∨Ir (¬ x) (¬ y) (¬I y notNotYprf)}\n        {assume h2;\n        refine ∨Il (¬ x) (¬ y) h2}")))
       }
     }
 

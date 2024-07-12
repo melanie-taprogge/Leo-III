@@ -1,10 +1,11 @@
 package leo.modules.output.LPoutput
 
-import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature}
-import leo.modules.output.{ToTPTP, tptpEscapeName}
+import leo.datastructures.{ClauseProxy, Role_Axiom, Role_NegConjecture, Signature}
+import leo.modules.output.tptpEscapeName
 import leo.modules.prover.LocalState
-import leo.modules.{axiomsInProof, compressedProofOf, symbolsInProof, userSignatureToTPTP}
+import leo.modules.symbolsInProof
 import leo.modules.output.LPoutput.Encodings._
+import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.NaturalDeductionRules._
@@ -12,15 +13,17 @@ import leo.modules.output.LPoutput.NaturalDeductionRules._
 import java.nio.file.{Files, Paths}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
+import scala.sys.process._
+import scala.util.{Try, Success, Failure}
 
 /**
+  * Generation of the various files making up the Lambdapi encoding
   *
   * @author Melanie Taprogge
   */
 
 object LPoutput {
 
-  val nameLpOutputFolder = "testOutput"
   val nameLogicFile = "extt"
   val nameRewriteRuleFile = "rwr"
   val nameCorrectnessFile = "correctness"
@@ -28,12 +31,15 @@ object LPoutput {
   val nameRulesFile = "rules"
   val nameProofFile = "encodedProof"
 
-  def generateSignature(usedSymbols: Set[lpStatement]): (mutable.StringBuilder,mutable.StringBuilder,mutable.StringBuilder) = {
+  def generateSignature(usedSymbols: Set[lpStatement], nameLpOutputFolder: String): (mutable.StringBuilder,mutable.StringBuilder,mutable.StringBuilder) = {
 
     val correctnessFileSB: mutable.StringBuilder = new StringBuilder()
     correctnessFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRewriteRuleFile};\n\n")
+    // todo: encode the remaining rules and change back to automated selection of necessary rules
+    correctnessFileSB.append(allNDDefs)
     val naturalDeductionFileSB: mutable.StringBuilder = new StringBuilder()
     naturalDeductionFileSB.append(s"require open ${nameLpOutputFolder}.${nameLogicFile};\n\n")
+    naturalDeductionFileSB.append(allNDDecs)
     val rulesFileSB: mutable.StringBuilder = new StringBuilder()
     rulesFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameNaturalDeductionFile};\n\n")
 
@@ -68,17 +74,19 @@ object LPoutput {
     // add basic rules to output and to correctness
     // todo: make sure that things like the basic rules that can depend on each other are given in the right order
     if (basicRules.nonEmpty) output.append("////// Basic Rules \n\n")
+    /*
     basicRules foreach { basicRule =>
       correctnessFileSB.append(basicRule.pretty)
       correctnessFileSB.append("\n")
       naturalDeductionFileSB.append(basicRule.dec.pretty)
       naturalDeductionFileSB.append("\n")
     }
+     */
 
     // add simplification rules
     if (simplificationRules.nonEmpty) output.append("////// Simplification Rules \n\n")
     simplificationRules foreach { simpRrule =>
-      rulesFileSB.append(simpRrule.dec.pretty)
+      rulesFileSB.append(simpRrule.pretty)
       rulesFileSB.append("\n")
     }
 
@@ -101,7 +109,7 @@ object LPoutput {
     // add other Rules
     if (otherRules.nonEmpty) rulesFileSB.append("////// Other Rules \n\n")
     otherRules foreach { otherRule =>
-      rulesFileSB.append(otherRule.dec.pretty)
+      rulesFileSB.append(otherRule.pretty)
       rulesFileSB.append("\n")
     }
 
@@ -169,7 +177,9 @@ object LPoutput {
   }
 
 
-  def outputLPFiles(state: LocalState, lpOutputPath: String):Unit={
+  def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String):Unit={
+
+    val lpOutputPath = s"${lpOutputPath0}${nameLpOutputFolder}/"
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
     proofFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameNaturalDeductionFile} ${nameLpOutputFolder}.${nameRulesFile};\n\n")
@@ -181,8 +191,6 @@ object LPoutput {
       val sig = state.signature
       val proof = state.proof
 
-      //val encodedProblem: StringBuffer = new StringBuffer()
-      //val encodedProof: StringBuffer = new StringBuffer()
       var usedSymbols:Set[lpStatement] = Set(eqDef(),eqRef()) // always add them because they are necessary for equality tactics. Todo: handle differently
       var parameters: (Int,Int,Int,Int) = (0,0,0,0)
 
@@ -215,7 +223,6 @@ object LPoutput {
 
             val (definition, updatedUsedSymbols,boundVars) = def2LP(symbol._defn, sig, usedSymbols, encAsRewriteRule)
             usedSymbols = updatedUsedSymbols
-            //val variables: StringBuffer = new StringBuffer()
             var variables: Seq[lpVariable] = Seq.empty
             boundVars foreach { v_t =>
               // todo: for poylmorphic types this might have to be extended
@@ -231,41 +238,13 @@ object LPoutput {
                 lpDeclaration(lpConstantTerm(s"${sName}_def"),variables,defAsEq.prf)
               }
             }
-            //val encodedDef = s"rule $Prf($sName$variables) $ruleArrow $Prf($definition);\n"
             proofFileSB.append(encodedDef.pretty)
           }
         }
       }
 
-      // encode the used axioms
-      /*
-      var axCounter = 0
-      axiomsInProof(proof) foreach {ax =>
-        val (encClause, usedSymbolsNew) = clause2LP(ax.cl,usedSymbols,sig)
-        usedSymbols = usedSymbolsNew
-        //encodedProblem.append(s"symbol axiom$axCounter : $encClause")
-        encodedProblem.append(lpDeclaration(lpConstantTerm(s"axiom$axCounter"),Seq.empty,encClause).pretty)
-        axCounter = axCounter +1
-      }
-       */
-
-      // encode the conjecture
-      /*
-      var conjCounter = 0
-      state.negConjecture foreach{conj =>
-        val (encConj, usedSymbolsNew) = clause2LP(conj.cl, usedSymbols, sig)
-        usedSymbols = usedSymbolsNew
-        //encodedProblem.append(s"symbol negatedConjecture$conjCounter : $encConj;\n")
-        val conjName = lpConstantTerm(s"negatedConjecture$conjCounter")
-        encodedProblem.append(lpDeclaration(conjName,Seq.empty,encConj).pretty)
-        conjCounter = conjCounter + 1
-      }
-       */
-
-      //print(s"\n\nPROBLEM SO FAR:\n\n${encodedProblem.toString}\n\nNow we do the steps\n\n")
       // encode the clauses representing the steps
       // todo: Also make it possible to just output one long lambda-term
-        //val compressedProof = compressedProofOf(CompressProof.stdImportantInferences)(state.derivationClause.get)
         val compressedProof = proof
         var idClauseMap: mutable.HashMap[Long,ClauseProxy] = mutable.HashMap.empty
         val identicalSteps: mutable.HashMap[Long,lpConstantTerm] = mutable.HashMap.empty
@@ -278,17 +257,13 @@ object LPoutput {
           val stepId = step.id
           idClauseMap = idClauseMap + (stepId -> step)
 
-          //print(s"step num: $stepId\n")
-
           if (step.role == Role_NegConjecture) {
             val (encConj, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
             usedSymbols = usedSymbolsNew
-            //encodedProblem.append(s"symbol negatedConjecture$conjCounter : $encConj;\n")
             val conjName = lpConstantTerm(s"negatedConjecture$conjCounter")
             proofFileSB.append(lpDeclaration(conjName, Seq.empty, encConj).pretty)
             // let the corresponding step number point to "negated_conjecture"
             identicalSteps += (stepId -> conjName)
-            //print(s"identical steps: $identicalSteps\n")
             conjCounter = conjCounter + 1
           } else if (step.role == Role_Axiom){ //todo: what about other roles like lamme etc. ?
             val (encClause, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
@@ -307,9 +282,7 @@ object LPoutput {
             step.annotation.parents foreach { parent =>
               if (!Seq().contains(parent.role)) { //Role_NegConjecture Role_Conjecture
                 val encParent = clause2LP(parent.cl, usedSymbols, sig)._1
-                //print(s"\nstep number ${parent.id} endoing ${encParent.pretty}, role ${parent.role}\n\n")
                 if (encParent == encStep) {
-                  // update the dictionary keeping track of eqivalent steps
                   val existingValue: lpConstantTerm = {
                     if (identicalSteps.contains(stepId)) {
                       if (identicalSteps(stepId) != nameStep(parent.id.toInt)) {
@@ -328,7 +301,6 @@ object LPoutput {
                       exVal
                     }
                   }
-                  //val existingValue = identicalSteps.getOrElseUpdate(stepId, nameStep(parent.id.toInt))
                 } else encodeStep = true
               }
             }
@@ -358,26 +330,6 @@ object LPoutput {
               }
             }
           }
-
-          //print(encodedProblem.toString)
-
-          //encodedProblem.append(s"symbol Step${step.id} : $encStep;\n")
-
-          /*
-          print(s"step ${step.id}: $encStep\n")
-          print(s"parents: ${step.annotation.parents}\n")
-          if (step.annotation.parents.length == 1) {
-            print(s"parents: only one\n")
-            val parent = step.annotation.parents.head
-            if (encStep == clause2LP(parent.cl,usedSymbols,sig)._1){
-              print(s"nothing changed\n")
-            }else{
-              //print(s"${parent.cl}\n${step.cl}\n")
-              print(s"${encStep}\n${clause2LP(parent.cl,usedSymbols,sig)._1}\n")
-            }
-          }
-          print(s"${step.annotation}\n\n")
-           */
       }
 
       proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
@@ -386,17 +338,38 @@ object LPoutput {
 
       // generate the signature
 
-      val (correctnessFileSB, naturalDeductionFileSB,rulesFileSB) = generateSignature(usedSymbols)
+      val (correctnessFileSB, naturalDeductionFileSB,rulesFileSB) = generateSignature(usedSymbols, nameLpOutputFolder)
 
-      //print(encodedProblem)
-      //print(encodedProof)
+      // initiate a lambdapi package
 
-      //print(s"change order proof:\n ${changePositions(Seq(0,2,1),"fdsafda")._1.pretty}")
-      //print(s"apply only to some literals:\n${generateClorRule(Seq(false,true,true),"jaaaaas")._1.pretty}")
+      var lpInitSuccess = true
 
-      val content = "This is the new content to write into the file."
+      val command = Seq("/bin/sh", "-c", s"cd $lpOutputPath0 && lambdapi init $nameLpOutputFolder")
+
+      val initLP = Try(command.!)
+
+      initLP match {
+        case Success(exitCode) => {
+          if (exitCode != 0) {
+            println(s"\nFailed to initiate Lambdapi package (exit code $exitCode).\nFiles are saved to the output directory.")
+            lpInitSuccess = false
+            Files.createDirectories(Paths.get(lpOutputPath))
+          }
+        }
+        case Failure(exception) => {
+          println(s"\nFailed to initiate Lambdapi package ($exception).\nFiles are saved to the output directory.")
+          lpInitSuccess = false
+          Files.createDirectories(Paths.get(lpOutputPath))
+        }
+      }
 
       // write the files
+
+      val exttFilePath = Paths.get(s"${lpOutputPath}${nameLogicFile}.lp")
+      Files.write(exttFilePath, ExTTenc.getBytes(StandardCharsets.UTF_8))
+
+      val rwrFilePath = Paths.get(s"${lpOutputPath}${nameRewriteRuleFile}.lp")
+      Files.write(rwrFilePath, s"require open ${nameLpOutputFolder}.$nameLogicFile; \n\n${RwRenc}".getBytes(StandardCharsets.UTF_8))
 
       val correctnessFilePath = Paths.get(s"${lpOutputPath}${nameCorrectnessFile}.lp")
       Files.write(correctnessFilePath, correctnessFileSB.toString.getBytes(StandardCharsets.UTF_8))
@@ -412,18 +385,20 @@ object LPoutput {
       val proofFilePath = Paths.get(s"${lpOutputPath}${nameProofFile}.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
+      /*
+      if (lpInitSuccess) {
+        val commandCheck = Seq("/bin/sh", "-c", s"cd $lpOutputPath0 && make && lambdapi check ${nameProofFile}.lp")
+
+        val checkLpFiles = commandCheck.!
+
+        if (checkLpFiles == 1) {
+          println(s"\nFailed to check Lambdapi files (exit code $initLP).")
+          lpInitSuccess = false
+          Files.createDirectories(Paths.get(lpOutputPath))
+        }
+      }
+       */
     }
-
     extractNecessaryFormulas(state)
-
-
-
-
-
-
-
-
-
   }
-
 }

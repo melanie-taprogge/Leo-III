@@ -3,8 +3,15 @@ package leo.modules.output.LPoutput
 import leo.modules.output.LPoutput.lpDatastructures._
 import scala.collection.mutable
 
-object AccessoryRules {
+/**
+  * Representations of the accessory rules
+  *
+  * @author Melanie Taprogge
+  */
 
+//todo: encode proofs properly
+
+object AccessoryRules {
 
   ////////////////////////////////////////////////////////////////
   ////////// Transform from non-eauational to equational literals and back
@@ -17,7 +24,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTop)).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (¬ x) ((¬ x) = ⊤) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊤ _ _ \n            {assume h2;\n            refine ⊤I}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        have H1: Prf((¬ x) = ⊤) → Prf(¬ x)\n            {assume h2;\n            refine (=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I};\n        refine H1 h1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -36,7 +43,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop))).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (¬ x) (¬ (x = ⊤)) _ _\n        {assume h1;\n        have H1: Prf(x = ⊤) → Prf ⊥\n            {assume h2;\n            refine ¬E x (=def [o] x ⊤ h2 (λ z, z) ⊤I) h1};\n        refine ¬I  (x = ⊤) H1}\n        {assume h1;\n        refine ¬I x _;\n        assume h2;\n        have H1: Prf(x = ⊤)\n            {refine propExt x ⊤ _ _\n                {assume h3;\n                refine ⊤I}\n                {assume h3;\n                refine h2}};\n        refine ¬E (x = ⊤) H1 h1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -55,7 +62,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTop))).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt x (¬ ((¬ x) = ⊤)) _ _\n    {assume h1;\n    have H1: Prf((¬ x) = ⊤) → Prf ⊥\n        {assume h2;\n        refine ¬E x h1 ((=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I)};\n    refine ¬I ((¬ x) = ⊤) H1}\n    {assume h1;\n        refine ∨E x (¬ x) x _ _ (em x)\n            {assume h2;\n            refine h2}\n            {assume h2;\n            have H1: Prf((¬ x) = ⊤)\n                {refine propExt (¬ x) ⊤ _ _\n                    {assume h3;\n                    refine ⊤I}\n                    {assume h3;\n                    refine h2}};\n            refine ⊥E x (¬E ((¬ x) = ⊤) H1 h1)}}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -93,7 +100,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)),lpOlTop)),lpOlConstantTerm(patternVarName)).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkNegLitPosProp_script not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt x (¬ ((¬ x) = ⊤)) _ _\n    {assume h1;\n    have H1: Prf((¬ x) = ⊤) → Prf ⊥\n        {assume h2;\n        refine ¬E x h1 ((=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I)};\n    refine ¬I ((¬ x) = ⊤) H1}\n    {assume h1;\n        refine ∨E x (¬ x) x _ _ (em x)\n            {assume h2;\n            refine h2}\n            {assume h2;\n            have H1: Prf((¬ x) = ⊤)\n                {refine propExt (¬ x) ⊤ _ _\n                    {assume h3;\n                    refine ⊤I}\n                    {assume h3;\n                    refine h2}};\n            refine ⊥E x (¬E ((¬ x) = ⊤) H1 h1)}}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -114,7 +121,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlConstantTerm(patternVarName), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkNegLitPosProp_script not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt (¬ x) (¬ (x = ⊤)) _ _\n        {assume h1;\n        have H1: Prf(x = ⊤) → Prf ⊥\n            {assume h2;\n            refine ¬E x (=def [o] x ⊤ h2 (λ z, z) ⊤I) h1};\n        refine ¬I  (x = ⊤) H1}\n        {assume h1;\n        refine ¬I x _;\n        assume h2;\n        have H1: Prf(x = ⊤)\n            {refine propExt x ⊤ _ _\n                {assume h3;\n                refine ⊤I}\n                {assume h3;\n                refine h2}};\n        refine ¬E (x = ⊤) H1 h1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -136,7 +143,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTop), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkPosLitNegProp_script not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt (¬ x) ((¬ x) = ⊤) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊤ _ _ \n            {assume h2;\n            refine ⊤I}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        have H1: Prf((¬ x) = ⊤) → Prf(¬ x)\n            {assume h2;\n            refine (=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I};\n        refine H1 h1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -158,7 +165,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly,lpOlConstantTerm(patternVarName), lpOlTop), lpOlConstantTerm(patternVarName)).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkPosLitPosPropEq not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt x (x = ⊤) _ _\n        {assume h1;\n        refine propExt x ⊤ _ _ \n            {assume h2;\n            refine ⊤I}\n            {assume h2;\n            refine h1}}\n        {assume h2;\n        refine (=def [o] x ⊤ h2 (λ z, z)) ⊤I}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -192,7 +199,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkBotEqNegProp not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (⊥ = x) (¬ x) _ _\n        {assume h1;\n        have H1 : Prf x → Prf x\n            {assume h2;\n            refine h2};\n        refine  ¬I x (⇒E x ⊥ (=def ⊥ x h1 (λ z, x ⇒ z) (⇒I x x H1)))}\n        {assume h1;\n        refine propExt ⊥ x _ _\n            {assume h2;\n            refine ⊥E x h2}\n            {assume h2;\n            refine ¬E x h2 h1}}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -201,19 +208,15 @@ object AccessoryRules {
 
   def makeLiteralEquational_proofSkript(lits: Seq[lpOlTerm], origClause: lpClause, sourceBefore: lpTerm, desiredEquational: Boolean, desiredPolarity: Boolean, nameStept: lpConstantTerm): (lpProofScriptStep, Map[lpOlTerm, (lpOlTerm, lpOlTerm, lpOlTerm)], Seq[lpOlTerm], Set[lpStatement]) = {
 
-    // takes a literal and an desired polarity and returns:
-    // - the encoded version of the literal itself and the equational version
-    // - the lambda term of type Prf lit -> Prf eqLit as well as Prf eqLit -> Prf lit
-    // - the left and right side of the new equational literal
+    // Takes a literal and an desired polarity and returns the transformed versions
 
     var usedSymbols: Set[lpStatement] = Set.empty
 
-    // order the literals according to their occourence in the clause
+    // order the literals according to their occurence in the clause
     var orderedLits: Seq[lpOlTerm] = Seq.empty
     var litsToFind = origClause.lits
     val positionsInClause: mutable.HashMap[lpOlTerm, Int] = mutable.HashMap.empty
     var litsAfter: Seq[lpOlTerm] = Seq.empty
-    //if (!lits.forall(lit => litsToFind.contains(lit))) throw new Exception("not all lits were found in clause")
     litsToFind foreach { lit =>
       if (lits.contains(lit)) { //todo: check that each literal was actually found too.
         orderedLits = orderedLits :+ lit
@@ -235,9 +238,6 @@ object AccessoryRules {
         lit match {
           case lpOlUnaryConnectiveTerm(lpNot, t) =>
             if (desiredPolarity == true) {
-              //throw new Exception("1")
-              // hier müsste bestimmt z.t. statt lit t stehen^
-              //val instRule = lpFunctionApp(mkNegPropPosLit_script().name, Seq(t))
               usedSymbols = usedSymbols + mkPosLitNegProp_script()
               rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosLitNegProp_script().name)
               val transformedLit = mkPosLitNegProp_script().origLit(t)
@@ -254,14 +254,12 @@ object AccessoryRules {
             }
           case _ =>
             if (desiredPolarity == true) {
-              //throw new Exception("3")
               val instRule = lpFunctionApp(mkPosLitPosProp_script().name, Seq(lit))
               usedSymbols = usedSymbols + mkPosLitPosProp_script()
               rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, instRule)
               val transformedLit = mkPosLitPosProp_script().origLit(lit)
               litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit._1)
               transformations.update(lit, transformedLit)
-
             } else {
               val instRule = lpFunctionApp(mkNegLitPosProp_script().name, Seq(lit))
               usedSymbols = usedSymbols + mkNegLitPosProp_script()
@@ -271,13 +269,11 @@ object AccessoryRules {
               transformations.update(lit, transformedLit)
             }
         }
-
       } else {
         lit match {
           case lpOlTypedBinaryConnectiveTerm(lpotype, lpEq, lhs, lpTop) =>
             lhs match {
               case lpOlUnaryConnectiveTerm(lpNot, t) =>
-                //val instRule = mkPosLitNegProp_script().instanciate(t)
                 usedSymbols = usedSymbols + mkNegPropPosLit_script()
                 rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropPosLit_script().name)
                 val transformedLit = mkNegPropPosLit_script().origLit(t)
@@ -290,14 +286,12 @@ object AccessoryRules {
           case lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpotype, lpEq, lhs, lpTop)) =>
             lhs match {
               case lpOlUnaryConnectiveTerm(lpNot, t) =>
-                //val instRule = mkNegLitPosProp_script().instanciate(t)
                 usedSymbols = usedSymbols + mkPosPropNegLit_script()
                 rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosPropNegLit_script().name)
                 val transformedLit = mkPosPropNegLit_script().origLit(t)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
               case _ =>
-                //val instRule = mkNegLitNegProp_script().instanciate(lhs)
                 usedSymbols = usedSymbols + mkNegPropNegLit_script()
                 rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropNegLit_script().name)
                 val transformedLit = mkNegPropNegLit_script().origLit(lhs)
@@ -305,17 +299,12 @@ object AccessoryRules {
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
             }
 
-
           case _ => throw new Exception(s"trying to convert equational literal but wrong format was given: ${lit.pretty}")
-
         }
       }
-
-
     }
     // Combine into a have step
     val clauseAfter = lpClause(origClause.impBoundVars, litsAfter)
-    //val haveStep = wholeHaveRewriteStep(rewriteSteps, nameStept.name, "hjhjlk", origClause.withoutQuant, sourceBefore, clauseAfter.withoutQuant)
     val haveStep = lpHave(nameStept.name, clauseAfter.withoutQuant.prf, lpProofScript(rewriteSteps :+ lpRefine(lpFunctionApp(sourceBefore, Seq()))))
     (haveStep, transformations.toMap, clauseAfter.lits, usedSymbols)
   }
@@ -328,21 +317,21 @@ object AccessoryRules {
   case class flipLiteral(polarity: Boolean) extends lpDefinedRules {
     // Prf(= [o] (= [T] x y) (= [T] y x))
 
-    val x = lpOlConstantTerm("x")
-    val y = lpOlConstantTerm("y")
+    val T = lpOlUserDefinedMonoType("T")
+    val x = lpOlTypedVar(lpOlConstantTerm("x"),T)
+    val y = lpOlTypedVar(lpOlConstantTerm("y"),T)
 
     override def name: lpConstantTerm = lpConstantTerm("eqSym_eq")
 
     override def ty: lpMlType = {
-      if (polarity) lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x, y), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, y, x)).prf
-      else lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x, y)), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, y, x))).prf
-    }
+      lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x, y), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, y, x)).prf
+      }
 
-    override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y), ty)
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y), ty, Seq(T))
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptCommentLine("    assume T x y;\n    have H1: Prf(= [T] x y) → Prf(= [T] y x)\n        {assume h;\n        symmetry;\n        refine h};\n    have H2: Prf(= [T] y x) → Prf(= [T] x y)\n        {assume h;\n        symmetry;\n        refine h};\n    refine propExt (= [T] x y) (= [T] y x) H1 H2")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T x y;\n    have H1: Prf(x = y) → Prf(y = x)\n        {assume h;\n        symmetry;\n        refine h};\n    have H2: Prf(y = x) → Prf(x = y)\n        {assume h;\n        symmetry;\n        refine h};\n    refine propExt (x = y) (y = x) H1 H2")))
 
-    override def pretty: String = lpDefinition(name, Seq(x, y), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(x, y), ty, proof, Seq(T)).pretty
 
     def instanciate(x0: lpOlTerm, y0: lpOlTerm, prfXeqY0: Option[lpTerm]): lpFunctionApp = {
       val prfXeqY = prfXeqY0 match {
@@ -358,8 +347,9 @@ object AccessoryRules {
     }
   }
 
-
   def flipEqLiteralsProofScript(lits: Seq[(lpOlTerm, lpOlType)], origClause: lpClause, sourceBefore: lpTerm, nameStept: lpConstantTerm): (lpProofScriptStep, Seq[lpOlTerm], Set[lpStatement]) = {
+
+    // change order wighin literals of a given clause
 
     var usedSymbols: Set[lpStatement] = Set.empty
 
@@ -380,7 +370,6 @@ object AccessoryRules {
       } else litsAfter = litsAfter :+ lit
       litsToFind = litsToFind.filterNot(_ != lit)
     }
-    //if (litsToFind.nonEmpty) throw new Exception("not all literals could be found")
 
     var rewriteSteps: Seq[lpRewrite] = Seq.empty
 
@@ -388,7 +377,6 @@ object AccessoryRules {
 
       val lit = pair._1
       val litType = pair._2
-
 
       val (lhs0, rhs0, ty0, ispos) = lit match { //todo: summarize
 
@@ -398,25 +386,20 @@ object AccessoryRules {
         case lpOlTypedBinaryConnectiveTerm(lpeq, ty, rhs, lhs) =>
           (rhs, lhs, ty, true)
 
-        case _ => throw new Exception(s"ERRRRRROOOOOORRRR")
+        case _ => throw new Exception(s"unexpected literal form in Function flipEqLiteralsProofScript in Lambdapi encoding")
 
       }
 
       val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None, lpOlUntypedVar(lpConstantTerm("x")), ispos)
 
-      //val instRule = lpUseful.flipLiteral(ispos).instanciate(ty0.lift2Poly, lhs0, rhs0, None)
       usedSymbols = usedSymbols + flipLiteral(ispos)
       rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, lpFunctionApp(flipLiteral(ispos).name, Seq(), Seq(litType)))
       val transformedLit = flipLiteral(ispos).res(ty0.lift2Poly, lhs0, rhs0)
       litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
 
     }
-
-    val nameSubStep = if (nameStept.name == "H1") "H1_1" else "H1"
-
     // Combine into a have step
     val clauseAfter = lpClause(origClause.impBoundVars, litsAfter)
-    //val haveStep = wholeHaveRewriteStep(rewriteSteps, nameStept.name, nameSubStep, origClause.withoutQuant, sourceBefore, clauseAfter.withoutQuant)
     val haveStep = lpHave(nameStept.name, clauseAfter.withoutQuant.prf, lpProofScript(rewriteSteps :+ lpRefine(lpFunctionApp(sourceBefore, Seq()))))
     (haveStep, litsAfter, usedSymbols)
   }
@@ -430,6 +413,7 @@ object AccessoryRules {
     // given is a sequence of integers, this represent the position of the literal at the index of the integer in the positions sequence in the clause we want to prove
 
     //todo: check that the positions vector has the right format, otherwise just order the variables
+
     // the first step is the generation of the type representing the reordering we are trying to prove
     var clause0: Seq[lpOlUntypedVar] = Seq.empty
     var clause1: Seq[lpOlUntypedVar] = Seq.fill(positions.length)(lpOlUntypedVar(lpOlNothing))
@@ -457,7 +441,6 @@ object AccessoryRules {
     // we add these two as prf terms to the type we are trying to proof
     val typeOfRule = lpMlDependType(clause0.map(var0 => lpUntypedVar(var0.name)), lpMlFunctionType(Seq(clause0enc.prf, clause1enc.prf)))
 
-
     def generate(clause0Unprocessed0: Seq[lpOlUntypedVar], clause0Processed0: Seq[lpOlUntypedVar], clause1Gen: Seq[lpOlUntypedVar], hCountGen0: Int, currentAssumtion: lpUntypedVar, origPosMap: mutable.HashMap[lpOlUntypedVar, Int]): (lpProofScriptStep, Set[lpStatement]) = {
 
       var hCountGen = hCountGen0
@@ -468,7 +451,6 @@ object AccessoryRules {
         val posInNewCl = origPosMap(clause0Unprocessed0.head)
         val (lhs, rhs) = clause1Gen.splitAt(posInNewCl)
         val rhsPrf = if (rhs.length == 1) currentAssumtion else NaturalDeductionRules.orIl().instanciate(rhs.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, rhs.tail), Some(currentAssumtion))
-        //print(s"rhs proof: ${nestedLorIlApp(lhs, rhs, rhsPrf).pretty}\n")
         val prf = {
           if (lhs.nonEmpty) lpProofScript(Seq(lpRefine(nestedLorIlApp(lhs, rhs, rhsPrf))))
           else lpProofScript(Seq(lpRefine(lpFunctionApp(rhsPrf, Seq()))))
@@ -481,7 +463,7 @@ object AccessoryRules {
         val newAssumeStep = lpAssume(Seq(newHyp))
         hCountGen = hCountGen + 1
         val prfLhs = {
-          // first we need to find out where in the new clause the variable shall fo and find out what variables are left of it and what are right
+          // first we need to find out where in the new clause the variable shall go and find out what variables are left of it and what are right
           val posInNewCl = origPosMap(clause0Unprocessed0.head)
           val (lhsLhs, lhsRhs) = clause1Gen.splitAt(posInNewCl)
           if (lhsLhs.length == 0) lpProofScript(Seq(newAssumeStep, lpRefine(NaturalDeductionRules.orIl().instanciate(lhsRhs.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, lhsRhs.tail), Some(newHyp)))))
@@ -507,9 +489,6 @@ object AccessoryRules {
     val (proof, usedSymbols) = generate(clause0, Seq.empty, clause1, hypCount, hypothesis, origPosMap)
     val haveStep = lpHave(proofNames, typeOfRule, lpProofScript(Seq(assumeStep, proof)))
 
-
-    //print(haveStep.pretty)
-
     (haveStep, usedSymbols)
   }
 
@@ -522,8 +501,8 @@ object AccessoryRules {
     // generate a proof script to only transform single literals in clauses and still proof the entire clause
     // the positions vector then encodes how many literals the remaining clause has and for positions a clause application has to be proven
 
-    // first we generate a list of variables and stuff
-    // in this step we also construct the transformtion to be prooven and start assuming variables and hypothesis
+    // first we generate a list of variables
+    // in this step we also construct the transformation to be proven and start assuming variables and hypothesis
     var clause0: Seq[lpOlUntypedVar] = Seq.empty
     var clause1: Seq[lpOlUntypedVar] = Seq.empty
 
@@ -588,7 +567,6 @@ object AccessoryRules {
       if (positionsGen.length == 1) {
         val refLhs = if (positionsGen.head) lpFunctionApp(transHypName.getOrElse(clause0Gen.head, throw new Exception("key not found generateClorRule")), Seq(currentAssumtion)) else currentAssumtion
         // in this case the current hypothesis should be the proof for we are looking for //todo ?
-        //(lpProofScript(Seq(lpRefine(lpFunctionApp(refLhs, Seq())))), usedSymbols)
         val proofRhs = lpFunctionApp(refLhs, Seq())
         val completeProof = nestedLorIlApp(clause1Processed0, clause1Unprocessed0, proofRhs)
         ((lpProofScript(Seq(lpRefine(completeProof))), Set()))
@@ -626,10 +604,8 @@ object AccessoryRules {
             (lpProofScript(Seq(newAssumeStep, lhsRefineStep)), lpProofScript(Seq(newAssumeStep, rhsProof)))
           } else {
             // no transformations left to proof! So we can simply assume both sides and refine with the application of the assumption to the right lor-introduction
-            //val rhsRefineStep = lpRefine(lpUseful.orIr().instanciate(lpOlUntypedBinaryConnectiveTerm_multi(lpOr,clause1Processed), lpOlUntypedBinaryConnectiveTerm_multi(lpOr, clause1Unprocessed), Some(newHyp)))
             val completeProof = nestedLorIlApp(clause1Processed, clause1Unprocessed, newHyp)
             usedSymbols = usedSymbols + NaturalDeductionRules.orIr() + NaturalDeductionRules.orIr()
-            //(lpProofScript(Seq(newAssumeStep, lhsRefineStep)), lpProofScript(Seq(newAssumeStep, rhsRefineStep)))
             (lpProofScript(Seq(newAssumeStep, lhsRefineStep)), lpProofScript(Seq(newAssumeStep, lpRefine(completeProof))))
           }
         }

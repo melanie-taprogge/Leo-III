@@ -4,47 +4,9 @@ import leo.modules.output.LPoutput.lpDatastructures._
 
 object LPSignature {
 
-  // define the elements of the logic definition we will need to encode the problem
-
-  val Prf: String = "Prf"
-  val lor: String = "∨"
-  val land: String = "∧"
-  val HOLimpl: String = "⇒"
-  val uparrow: String = "↑"
-  val Els: String = "Els"
-  val Scheme: String = "Scheme"
-  val HOLtop: String = "⊤"
-  val HOLbot: String = "⊥"
-  val Prop: String = "Prop"
-  val lnot: String = "¬"                      //
-  val equ: String = "eq"
-  val inEqu: String = "inEq"
-  val oType: String = "o"
-  val iType: String = "ι"
-  val HOLarrow: String = "⤳"
-  val variableIdentifier: String = "$"
-  val ruleArrow: String = "↪"
-  val metaType: String = "TYPE"
-  val typeOfTptptTypes: String = "Set"
-  val rightarrow: String = "→"
-  val LPlambda: String = "λ"
-  val Pi: String = "Π"
-  val objectExists: String = "∃"
-  val objectForAll: String = "∀"
-  val colonEq: String = "≔"
-
-  // axioms
-  val npp_name: String = "npp"
-  val npp_ax: String = s"symbol $npp_name : $Pi x: $Els($uparrow $oType), $Prf ($lnot ($lnot x)) $rightarrow $Prf x;"
-  val propExt_name: String = "propExt"
   abstract class lpAxioms extends lpTerm{
     def name: lpConstantTerm
     def ty: lpMlType
-  }
-  case object lpNpp extends lpAxioms{
-    override def name: lpConstantTerm = lpConstantTerm("npp")
-    override def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"),lpOtype.lift2Meta)),lpMlFunctionType(Seq(lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm("x"))).prf,lpOlConstantTerm("x").prf)))
-    override def pretty: String = lpDeclaration(lpNpp.name,Seq.empty,lpNpp.ty).pretty
   }
 
   case object lpEm extends lpAxioms{
@@ -63,7 +25,10 @@ object LPSignature {
     override def pretty: String = lpDeclaration(lpPropExt.name, Seq.empty, lpPropExt.ty).pretty
   }
 
+  // todo: properly encode this using the datastructures
+  val ExTTenc = "// Definition of the logic and the assumed axioms\n\n///////////////////////////////////////////////////////////////////////////////////////\n////////////////////////////// ExTT AS A LAMBDAPI THEORY //////////////////////////////\n///////////////////////////////////////////////////////////////////////////////////////\n\n// System U definitions and declarations\n\nconstant symbol Prop : TYPE;\n\nsymbol Prf : Prop → TYPE;\n\nconstant symbol ⊤ : Prop;\n\nconstant symbol ⊥ : Prop;\n\nconstant symbol MonoSet : TYPE;\n\ninjective symbol El : MonoSet → TYPE;\n\nconstant symbol ι : MonoSet;\n\nconstant symbol o : MonoSet;\n\nrule El o ↪ Prop;\n\nconstant symbol ¬ : Prop → Prop; notation ¬ prefix 50;\n\nconstant symbol ∧ : Prop → Prop → Prop; notation ∧ infix right 30;\n\nconstant symbol ∨ : Prop → Prop → Prop; notation ∨ infix right 20;\n\nconstant symbol ⇒ : Prop → Prop → Prop; notation ⇒ infix right 10;\n\nconstant symbol ∀ [a : MonoSet] : (El a → Prop) → Prop; notation ∀ quantifier;\n\nconstant symbol ∃ [a : MonoSet] : (El a → Prop) → Prop; notation ∃ quantifier;\n\nconstant symbol ⤳ : MonoSet → MonoSet → MonoSet; notation ⤳ infix right 10;\n\nrule El ($x ⤳ $y) ↪ El $x → El $y;\n\n\n// Additional definitions and declarations\n\nsymbol em x : Prf((x ∨ ¬ x));\n\nsymbol = [T: MonoSet] : El T → El T → Prop; notation = infix right 40;\n\nsymbol propExt x y : (Prf x → Prf y) → (Prf y → Prf x) → Prf (x = y);\n\nsymbol funExt [T S] (f g : (El(T ⤳ S))) x : Prf((f x) = (g x)) → Prf(f = g);\n\n\n// Linking symbols to builtins (for the use of equality tactics)\n\nbuiltin \"P\"     ≔ Prf;\n\nbuiltin \"T\"     ≔ El;\n\nbuiltin \"eq\"    ≔ =;"
 
+  val RwRenc = "///////////////////////////////////////////////////////////////////////////////////////\n////////////////////////////// REWRITE RULES OF THE THEORY ////////////////////////////\n///////////////////////////////////////////////////////////////////////////////////////\n\nrule Prf ⊤ ↪ Π r, Prf r → Prf r;\n\nrule Prf ⊥ ↪ Π r, Prf r;\n\nrule Prf (¬ $p) ↪ Prf $p → Π r, Prf r;\n\nrule Prf ($p ∧ $q) ↪ Π r, (Prf $p → Prf $q → Prf r) → Prf r;\n\nrule Prf ($p ∨ $q) ↪ Π r, (Prf $p → Prf r) → (Prf $q → Prf r) → Prf r;\n\nrule Prf ($x ⇒ $y) ↪ Prf $x → Prf $y;\n\nrule Prf (∀ $p) ↪ Π x, Prf ($p x);\n\nrule Prf (∃ $p) ↪ Π r, (Π x, Prf ($p x) → Prf r) → Prf r;\n\nrule Prf ($x = $y) ↪  Π p , (Prf(p $x) → Prf(p $y));"
 
 
 }
