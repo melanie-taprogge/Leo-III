@@ -160,16 +160,15 @@ object ModularProofEncoding {
     if (editedLiterals.length > 0) {
 
       val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
-      var allRewriteSteps: Seq[lpProofScriptStep] = Seq.empty
 
       // The modular proof script can consist of the following steps:
       // 1. Abstract over free variables
       // For each affected literal:
       //    2. If the order within the literal was changed, apply eqSym_eq
-      //    3. Instantiate PFE and use it to define a new hypothesis
-      //    4. Use the proven hypothesis with rewrite to rewrite the equality literals to their corresponding versions without the newly applied variable(s)
+      //    3. Instantiate PFE and use it to define a new hypothesis (in the case of a nested application, use impTrans)
+      // 4. Use the proven hypothesis to apply the changes to the (instanciated) parent formula, using the appropriate transform rule
       // 5. If the order of literals was changed, generate a permute rule and apply it to permute the literals
-      // 6. Refine with the (instantiated) parent
+      // 6. Refine with the last step
 
       // 1. Abstract over free variables
       val freeVarsChild = child.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
@@ -177,22 +176,24 @@ object ModularProofEncoding {
 
       var editLitCount = 0
       val editedLiteralsMap = editedLiterals.toMap
+      var litsAfterFunext: Seq[lpOlTerm] = Seq.empty
       parent.cl.lits foreach { origLit =>
         val edLit = editedLiteralsMap.getOrElse(origLit, origLit)
+        val encEditLit = term2LP(asTerm(edLit), bVarMap, sig)._1
+        litsAfterFunext = litsAfterFunext :+ encEditLit
         if (edLit != origLit) {
 
           // 2. If the order within the literal was changed, apply eqSym_eq
           // todo
 
           // 3. Instantiate PFE and use it to define a new hypothesis
-          val namefunExtStep = s"FunExt_$editLitCount"
+          val namefunExtStep = s"${funExtPosEq_rev().name.pretty}_$editLitCount"
           editLitCount = editLitCount + 1
           // Construction the equality to be proved
           val encOrigLitLhs = term2LP(origLit.left, bVarMap, sig)._1
           val encOrigLitRhs = term2LP(origLit.right, bVarMap, sig)._1
           val encOrigLit = term2LP(asTerm(origLit), bVarMap, sig)._1
-          val encEditLit = term2LP(asTerm(edLit), bVarMap, sig)._1
-          val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encEditLit, encOrigLit)
+          val impToProve = lpMlFunctionType(Seq(encOrigLit.prf,encEditLit.prf))
           // Construction the proof
           // Track the newly applied variables and proof the application of funExt
           val freshVars = edLit.fv.diff(origLit.fv)
@@ -209,25 +210,31 @@ object ModularProofEncoding {
               lpRefine(funExtPosEq_rev().instanciate(None, encOrigLitLhs, encOrigLitRhs, appliedVars))
             }
           }
-          allSteps = allSteps :+ lpHave(namefunExtStep, equalityToProve.prf, lpProofScript(Seq(refineWithFunExt)))
-
-          // 4. Use the proven hypothesis with rewrite to rewrite the equality literals to their corresponding versions without the newly applied variable(s)
-          val posInClause = findLitInClause(edLit, child.cl)
-          val rewritePattern = generateClausePatternTerm(posInClause, child.cl.lits.length)
-          val rewriteStep = lpRewrite(rewritePattern, lpConstantTerm(namefunExtStep))
-          allRewriteSteps = allRewriteSteps :+ rewriteStep
+          allSteps = allSteps :+ lpHave(namefunExtStep, impToProve, lpProofScript(Seq(refineWithFunExt)))
         }
       }
-      allSteps = allSteps ++ allRewriteSteps
+
+      // 4. Use the proven hypothesis to apply the changes to the (instanciated) parent formula, using the appropriate transform rule
+      val applicationStepName = "FunExtApplication"
+      val impBoundParent = parent.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
+      if (editedLiterals.length > 1) {
+      throw new Exception("The LP encoding of FunExt (for positive literals) is not implemented for cases where multiple literals were edited yet")
+      //allSteps = allSteps :+ lpHave(applicationStepName,)
+      // combine the individual hypothesis with transform
+      }
+      else {
+        val refineWithFunExt0 = lpRefine(lpFunctionApp(lpConstantTerm(s"${funExtPosEq_rev().name.pretty}_0"),Seq(lpFunctionApp(parentNameLpEnc, impBoundParent))))
+        allSteps = allSteps :+ lpHave(applicationStepName,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,litsAfterFunext).prf,lpProofScript(Seq(refineWithFunExt0)))
+      }
 
       // 5. If the order of literals was changed, generate a permute rule and apply it to permute the literals
       // todo
+      val lastStep = applicationStepName
 
       // 6. Refine with the (instantiated) parent
       // We can not necessarily refine the parent with the assumed variables since we may have introduced new variables in the child
       // Instead we detect the unbound variables of the parent to refine with them
-      val impBoundParent = parent.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
-      allSteps = allSteps :+ lpRefine(lpFunctionApp(parentNameLpEnc, impBoundParent))
+      allSteps = allSteps :+ lpRefine(lpFunctionApp(lpConstantTerm(lastStep),Seq()))
     }
     (lpProofScript(allSteps),usedSymbols)
   }

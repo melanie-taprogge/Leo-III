@@ -640,5 +640,4 @@ object lpDatastructures {
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpAssume(vars, tab)))
   }
-  
 }

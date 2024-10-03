@@ -27,6 +27,8 @@ object lpInferenceRuleEncoding {
     // pos: [T] x y z v : Prf((eq [T] x y) ∨ (eq [T] z v)) → Prf((eq [T] x y) ∨ ¬ (eq [T] x z) ∨ ¬ (eq [T] y v))
     // neg: [T] x y z v : Prf(¬ (eq [T] x y) ∨ ¬ (eq [T] z v)) → Prf(¬ (eq [T] x y) ∨ ¬ (eq [T] x z) ∨ ¬ (eq [T] y v))
 
+    override val proofIsDefined = true
+
     override def name: lpConstantTerm = {
       val pol = if (polarity) "_p" else "_n"
       lpConstantTerm(s"EqFact$pol")
@@ -46,11 +48,21 @@ object lpInferenceRuleEncoding {
       }
     }
 
-    override def proof: lpProofScript = throw new Exception("proof for eqFactoring not encoded yet") //todo: generate depending on number of args
+    override def proof: lpProofScript = {
+      if (polarity) {
+        lpProofScript(Seq(lpProofScriptStringProof("assume T x y z v h1;\n    refine (∨E (x = y) ( ¬ (x = y)) ((x = y) ∨ (¬ (x = z)) ∨ (¬ (y = v))) _ _ ) (em (x = y))\n                {assume h2;\n                refine ∨Il (x = y) ((¬ (x = z)) ∨ (¬ (y = v))) h2}\n                {assume h3;\n                refine (∨E (x = z) ( ¬ (x = z)) ((x = y) ∨ (¬ (x = z)) ∨ (¬ (y = v))) _ _ ) (em (x = z))\n                    {assume h4;\n                    refine (∨E (y = v) ( ¬ (y = v)) ((x = y) ∨ (¬ (x = z)) ∨ (¬ (y = v))) _ _ ) (em (y = v))\n                        {assume h5;\n                        have H1: Prf (z = v)\n                            {refine ∨E (x = y) (z = v) (z = v) _ _ h1\n                                {assume h6;\n                                refine ⊥E (z = v) (¬E (x = y) h6 h3)}\n                                {assume h7;\n                                refine h7}};\n                        // transitivity 1\n                        have H2: Prf(x = v)\n                            {refine =def [T] x z h4 (λ a, (a = v)) H1};\n                        // commutativity\n                        have H3: Prf(v = y)\n                            {refine =def [T] y v h5 (λ a, (v = a)) (=ref [T] v)};\n                        // transitivity 2\n                        have H4: Prf(x = y)\n                            {refine =def [T] x v H2 (λ a, (a = y)) H3};\n                        refine ⊥E ((x = y) ∨ (¬ (x = z)) ∨ (¬ (y = v))) (¬E  (x = y) H4 h3)}\n                        {assume h8;\n                        refine ∨Ir (x = y) ((¬ (x = z)) ∨ (¬ (y = v))) (∨Ir (¬ (x = z)) (¬ (y = v)) h8)}}\n                    {assume h9;\n                    refine ∨Ir (x = y) ((¬ (x = z)) ∨ (¬ (y = v))) (∨Il (¬ (x = z)) (¬ (y = v)) h9)}}")))
+      } else {
+        lpProofScript(Seq(lpProofScriptStringProof("assume T x y z v h1;\n    refine (∨E (x = y) ( ¬ (x = y)) ((¬ (x = y)) ∨ (¬ (x = z)) ∨ (¬ (y = v))) _ _ ) (em (x = y))\n                {assume h3;\n                refine (∨E (x = z) ( ¬ (x = z)) ((¬ (x = y)) ∨ (¬ (x = z)) ∨ (¬ (y = v))) _ _ ) (em (x = z))\n                    {assume h4;\n                    refine (∨E (y = v) ( ¬ (y = v)) ((¬ (x = y)) ∨ (¬ (x = z)) ∨ (¬ (y = v))) _ _ ) (em (y = v))\n                        {assume h5;\n                        have H1: Prf(z = x)\n                            {refine =def [T] x z h4 (λ a, (z = a)) (=ref [T] z)};\n                        have H2: Prf(z = y)\n                            {refine =def [T] z x H1 (λ a, (a = y)) h3};\n                        have H3: Prf( ¬ (z = v))\n                            {refine ∨E (¬ (x = y)) (¬ (z = v)) (¬ (z = v)) _ _ h1\n                                {assume h6;\n                                refine ⊥E (¬ (z = v)) (¬E (x = y) h3 h6)}\n                                {assume h6;\n                                refine h6}};\n                        have H4: Prf(z = v)\n                            {refine =def [T] z y H2 (λ a, (a = v)) h5};\n                        refine ⊥E ((¬ (x = y)) ∨ (¬ (x = z)) ∨ (¬ (y = v))) (¬E  (z = v) H4 H3)}\n                        {assume h6;\n                        refine ∨Ir (¬ (x = y)) ((¬ (x = z)) ∨ (¬ (y = v))) (∨Ir (¬ (x = z)) (¬ (y = v)) h6)}}\n                    {assume h4;\n                    refine ∨Ir (¬ (x = y)) ((¬ (x = z)) ∨ (¬ (y = v))) (∨Il (¬ (x = z)) (¬ (y = v)) h4)}}\n                {assume h3;\n                refine ∨Il (¬ (x = y)) ((¬ (x = z)) ∨ (¬ (y = v))) h3}")))
+      }
+    }
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y, z, v), ty, Seq(T))
 
     override def pretty: String = lpDefinition(name, Seq(x, y, z, v), ty, proof, Seq(T)).pretty
+
+    override def usedBasicRules: Set[lpStatement] = {
+      Set(eqDef(), lpEm)
+    }
 
     def instanciate(x0: lpOlTerm, y0: lpOlTerm, z0: lpOlTerm, v0: lpOlTerm, T0: lpOlPolyType): lpFunctionApp = {
       lpFunctionApp(name, Seq(x0, y0, z0, v0), Seq(T0))
@@ -71,7 +83,7 @@ object lpInferenceRuleEncoding {
   ////////////////////////////////////////////////////////////////
 
   case class funExtPosEq_rev() extends inferenceRules {
-    // [T S] f g x : Prf(= (= [S] (f x) (g x)) (= [T ⤳ S] f g))
+    // [T] [S] (f g : El (T ⤳ S)) x: (Prf (f = g) → Prf (f x = g x))
 
     override val proofIsDefined = true
 
@@ -83,9 +95,9 @@ object lpInferenceRuleEncoding {
     val g = lpOlTypedVar(lpOlConstantTerm("g"),lpOlFunctionType(Seq(S,T)))
     val x = lpOlTypedVar(lpOlConstantTerm("x"),S)
 
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq,S,lpOlFunctionApp(f,Seq(x)),lpOlFunctionApp(g,Seq(x))),lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g)).prf
+    override def ty: lpMlType = lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g).prf,lpOlTypedBinaryConnectiveTerm(lpEq,S,lpOlFunctionApp(f,Seq(x)),lpOlFunctionApp(g,Seq(x))).prf))
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T S f g x;\n\n    have H1: Prf((f x) = (g x)) → Prf(f = g)\n        {refine (funExt [S] [T] f g) x};\n\n    have H2: Prf((f = g)) → Prf((f x) = (g x))\n        {assume h;\n        refine =def [(S ⤳ T)] f g h (λ y,(y x) = (g x)) (=ref [T] (g x))};\n\n    refine (propExt ((f x) = (g x)) (f = g)) H1 H2;"))) //todo: generate depending on number of args
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T S f g x h;\n    refine =def [(S ⤳ T)] f g h (λ y, (y x) = (g x)) (=ref [T] (g x))"))) //todo: generate depending on number of args
 
     override def usedBasicRules: Set[lpStatement] = Set(eqRef(),eqDef())
 

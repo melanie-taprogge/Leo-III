@@ -492,6 +492,28 @@ object AccessoryRules {
     (haveStep, usedSymbols)
   }
 
+  ////////////////////////////////////////////////////////////////
+  ////////// Transitivity of Implication
+  ////////////////////////////////////////////////////////////////
+
+  case class implicationTransitivity(patternVarName: String = "x") extends lpDefinedRules {
+    // (a b c : El o): (Prf a → Prf b) → (Prf b → Prf c) → (Prf a → Prf c)
+
+    val a = lpOlConstantTerm("a")
+    val b = lpOlConstantTerm("b")
+    val c = lpOlConstantTerm("c")
+
+    override def name: lpConstantTerm = lpConstantTerm("inpTrans")
+
+    override def ty: lpMlType = lpMlFunctionType(Seq(lpMlFunctionType(Seq(a.prf,b.prf)),lpMlFunctionType(Seq(b.prf,c.prf)),lpMlFunctionType(Seq(a.prf,c.prf))))
+
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (¬ x) ((¬ x) = ⊤) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊤ _ _ \n            {assume h2;\n            refine ⊤I}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        have H1: Prf((¬ x) = ⊤) → Prf(¬ x)\n            {assume h2;\n            refine (=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I};\n        refine H1 h1}")))
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+
+  }
 
   ////////////////////////////////////////////////////////////////
   ////////// Transform rule
