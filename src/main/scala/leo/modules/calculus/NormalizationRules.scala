@@ -1,6 +1,7 @@
 package leo.modules.calculus
 
 import leo._
+import leo.datastructures.Literal.asTerm
 import leo.datastructures.Term.{:::>, TypeLambda, mkReal}
 import leo.datastructures.{Clause, Subst, Type, _}
 import leo.modules.HOLSignature.{!===, &, ===, Exists, Forall, Impl, LitFalse, LitTrue, Not, TyForall, |||}
@@ -24,6 +25,13 @@ object DefExpSimp extends CalculusRule {
   final def apply(t: Term)(implicit sig: Signature): Term = {
     val symb: Set[Signature.Key] = Set(sig("?").key, sig("&").key, sig("=>").key)
     Simp.normalize(t.δ_expand_upTo(symb).betaNormalize.etaExpand)
+  }
+
+  final def apply_andTrack(t: Term)(implicit sig: Signature): (Term, Seq[(Seq[Int], String, Term, Term)], Seq[Signature.Key]) = {
+    val symb: Set[Signature.Key] = Set(sig("?").key, sig("&").key, sig("=>").key)
+    val (expandedTerm, expandedSymbols) = t.δ_expand_andTrack_upTo(symb)
+    val (simplifiedTerm, simpInfo) = Simp.normalize_andTrack(expandedTerm.betaNormalize.etaExpand)
+    (simplifiedTerm, simpInfo,expandedSymbols)
   }
 
   final def apply(cl: Clause)(implicit sig: Signature): Clause = {
@@ -727,6 +735,20 @@ object Simp extends CalculusRule {
     }
   }
 
+  final private def eqSimp_andTrack(l: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], String, Term, Term)]) = {
+    if (!l.equational) {
+      val (norm, addInfo) = normalize_andTrack(l.left)
+      (Literal(norm, l.polarity), addInfo)
+    } else {
+      val (normLeft, addInfoLeft) = normalize_andTrack(l.left)
+      val (normRight, addInfoRight) = normalize_andTrack(l.right)
+      (normLeft, normRight) match {
+        case (a, b) if a == b => (Literal(LitTrue(), l.polarity),addInfoLeft ++ addInfoRight :+ (Seq.empty,"Simp9",asTerm(l),LitTrue)) //todo: make sure this is right
+        case _ => (Literal.mkLit(normLeft, normRight, l.polarity, l.oriented),addInfoLeft ++ addInfoRight)
+      }
+    }
+  }
+
   private final val CANNOTAPPLY = 0
   private final val VARLEFT = 1
   private final val VARRIGHT = 2
@@ -747,6 +769,11 @@ object Simp extends CalculusRule {
   }
 
   final def apply(lit: Literal)(implicit sig: Signature): Literal = PolaritySwitch(eqSimp(lit))
+
+  final def apply_andTrack(lit: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], String, Term, Term)]) = {
+    val (simpTerm, addInfo) = eqSimp_andTrack(lit)
+    (PolaritySwitch(simpTerm), addInfo)
+  }
 
   /** Only directly use this method if you really know what you are doing.
     * It applies destructive equality resolution and thus needs to be applied to the clause as a whole.
@@ -837,8 +864,30 @@ object Simp extends CalculusRule {
     newLits
   }
 
+  final def shallowSimp_andTrack(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Seq[(Seq[Int], String, Term, Term)]) = {
+    var newLits: Seq[Literal] = Vector.empty
+    var addInfo:  Seq[(Seq[Int], String, Term, Term)] = Seq.empty
+    val litIt = lits.iterator
+    while (litIt.hasNext) {
+      val lit0 = litIt.next()
+      val (lit, addInfoLit) = apply_andTrack(lit0)(sig)
+      if (!Literal.isFalse(lit)) {
+        if (!newLits.contains(lit)) {
+          newLits = newLits :+ lit
+          addInfo = addInfo ++ addInfoLit
+        }
+      }
+    }
+    (newLits, addInfo)
+  }
+
   final def shallowSimp(cl: Clause)(implicit sig: Signature): Clause = {
     Clause(shallowSimp(cl.lits)(sig))
+  }
+
+  final def shallowSimp_andTrack(cl: Clause)(implicit sig: Signature): (Clause, Seq[(Seq[Int], String, Term, Term)]) = {
+    val (simpLits, addInfo) = shallowSimp_andTrack(cl.lits)(sig)
+    (Clause(simpLits), addInfo)
   }
 
   final def detUniInferences(cl: Clause)(implicit sig: Signature): Seq[Clause] = {
@@ -979,6 +1028,17 @@ object Simp extends CalculusRule {
     val result = simp
     if (t.sharing) Term.insert(result)
     else result
+  }
+
+  final def normalize_andTrack(t: Term): (Term, Seq[(Seq[Int], String, Term, Term)]) = {
+    // termSimp(t)
+    import leo.modules.procedures.{Simplification, GroundArithmeticEval}
+    val arith = GroundArithmeticEval.apply(t)
+    val (simp, addInfo) = Simplification.track(arith)
+
+    val result = simp
+    if (t.sharing) (Term.insert(result), addInfo)
+    else (result, addInfo)
   }
 
   /**

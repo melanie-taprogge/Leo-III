@@ -7,6 +7,8 @@ import leo.modules.{SZSOutput, SZSResult, myAssert}
 import leo.modules.control.Control
 import leo.modules.input.ProblemStatistics
 import leo.modules.output._
+import leo.modules.output.LPoutput.LPoutput._
+import java.nio.file.Paths
 
 /**
   * Sequential proof procedure.
@@ -370,6 +372,10 @@ object SeqLoop {
   }
 
   final def printResult(state: LocalState, startTime: Long, startTimeWOParsing: Long): Unit = {
+
+    // copy state so I can use it for experiments ¡remove!
+
+
     implicit val sig: Signature = state.signature
     /////////////////////////////////////////
     // All finished, print result
@@ -473,6 +479,20 @@ object SeqLoop {
         case e: Exception => Out.comment("Translation of proof object failed. See error logs for details.")
           Out.warn(e.toString)
       }
+    }
+
+    if (Configuration.LPOUTPUTPATH.isDefined){
+      val problemFileName = Paths.get(Configuration.PROBLEMFILE).getFileName.toString
+      val problemFileNameWithoutExtension = problemFileName.lastIndexOf('.') match {
+        case -1 => problemFileName
+        case i => problemFileName.substring(0, i)
+      }
+      val lpFolderName = "lpProof"
+      val lpOutputPath = if(Configuration.LPOUTPUTPATH.get.endsWith("/")) s"${Configuration.LPOUTPUTPATH.get}/" else s"${Configuration.LPOUTPUTPATH.get}/"
+
+      print(s"saving Lambdapi output files to ${lpOutputPath}${lpFolderName}_$problemFileNameWithoutExtension\n")
+
+      outputLPFiles(state,lpOutputPath,s"${lpFolderName}_$problemFileNameWithoutExtension")
     }
   }
 

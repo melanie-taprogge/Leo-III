@@ -9,5 +9,6 @@ package leo.modules.output
   * @since 07.11.14
   */
 trait Output extends Function0[String]{}
+trait Output_track extends Function0[(String,Any)]{}
 
 

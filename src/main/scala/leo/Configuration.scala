@@ -52,6 +52,7 @@ object Configuration extends DefaultConfiguration {
   private val PARAM_CONCURRENT_TRANSLATE = "encode-threaded"
   private val PARAM_GUIDED = "guided"
   private val PARAM_PASSTOEMBEDDING = "embedding-param"
+  private val PARAM_LPOUTPUTPATH = "lp-output"
 
   // Collect standard options for nice output: short-option -> (long option, argname, description)
   private val optionsMap : Map[Char, (String, String, String)] = {
@@ -99,7 +100,7 @@ object Configuration extends DefaultConfiguration {
   //////////////////////////
   def isInit: Boolean = configMap != null
 
-  final val VERSION: String = "1.7.10"
+  final val VERSION: String = "1.7.16"
   final val LEODIR_NAME: String = "leo3"
   final lazy val LEODIR: Path = {
     val dir = Files.createTempDirectory(LEODIR_NAME)
@@ -309,6 +310,28 @@ object Configuration extends DefaultConfiguration {
       case Some(params) => params
     }
   }
+
+  lazy val LPOUTPUTPATH: Option[String] = {
+    val path = configMap.get(PARAM_LPOUTPUTPATH) match {
+      case Some(Nil) => throw new IllegalArgumentException("No path for Lambdapi output files specified")
+      case Some(arg :: _) => Some(arg)
+      case _ => None
+    }
+
+    path
+  }
+
+  /*
+  val v = configMap.get(PARAM_VERBOSITY) match {
+    case None => DEFAULT_VERBOSITY
+    case Some(arg :: Nil) => processLevel(arg)
+    case Some(arg :: _) => Out.warn(multiDefOutput(PARAM_VERBOSITY))
+      processLevel(arg)
+    case Some(_) => Out.warn(intExpectedOutput(PARAM_VERBOSITY, "None"))
+      DEFAULT_VERBOSITY
+  }
+
+   */
 
   final val CAPS: String =
     """

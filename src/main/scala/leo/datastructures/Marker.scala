@@ -1,6 +1,8 @@
 package leo.datastructures
 
 import leo.datastructures.TPTP.AnnotatedFormula.FormulaType.FormulaType
+import leo.modules.HOLSignature.{LitFalse, LitTrue}
+import leo.modules.calculus.Unification
 import leo.modules.output.Output
 
 import scala.annotation.tailrec
@@ -121,12 +123,13 @@ trait ClauseProxy extends Pretty with Prettier {
   def role: Role
   def annotation: ClauseAnnotation
   def properties: ClauseAnnotation.ClauseProp
+  def furtherInfo: FurtherInfo
   override final def pretty: String = s"[$id]:\t${cl.pretty}\t(${annotation.pretty}) (Flags: ${ClauseAnnotation.prettyProp(properties)})"
   override final def pretty(sig: Signature): String = s"[$id]:\t${cl.pretty(sig)}\t(${annotation.pretty}) (Flags: ${ClauseAnnotation.prettyProp(properties)})"
 }
 
 case class AnnotatedClause(id: Long, cl: Clause, role: Role, annotation: ClauseAnnotation,
-                           var properties: ClauseAnnotation.ClauseProp) extends ClauseProxy {
+                           var properties: ClauseAnnotation.ClauseProp, var furtherInfo: FurtherInfo) extends ClauseProxy {
   override def equals(o: Any): Boolean = o match {
     case cw: ClauseProxy => cw.id == id // Equality is defined in term of id. This implies that the clauses of two
                                         // annotatedclauses may be equal while the annotatedclauses are not equal.
@@ -144,19 +147,39 @@ case class AnnotatedClause(id: Long, cl: Clause, role: Role, annotation: ClauseA
 object AnnotatedClause {
   @volatile private var counter: Long = 0
 
+  def apply(cl: Clause, r: Role, annotation: ClauseAnnotation, propFlag: ClauseAnnotation.ClauseProp, fI: FurtherInfo): AnnotatedClause = {
+    counter += 1 // lets try it without sync ... see what happens
+    AnnotatedClause(counter, cl, r, annotation, propFlag, fI)
+  }
+
   def apply(cl: Clause, r: Role, annotation: ClauseAnnotation, propFlag: ClauseAnnotation.ClauseProp): AnnotatedClause = {
     counter += 1 // lets try it without sync ... see what happens
-    AnnotatedClause(counter, cl, r, annotation, propFlag)
+    AnnotatedClause(counter, cl, r, annotation, propFlag, new FurtherInfo())
   }
 
   def apply(cl: Clause, annotation: ClauseAnnotation, propFlag: ClauseAnnotation.ClauseProp = ClauseAnnotation.PropNoProp): AnnotatedClause =
-    apply(cl, Role_Plain, annotation, propFlag)
+    apply(cl, Role_Plain, annotation, propFlag, new FurtherInfo())
 }
 
 abstract sealed class ClauseAnnotation extends Pretty {
   def fromRule: leo.modules.calculus.CalculusRule
   def parents: Seq[_ <: ClauseProxy]
 }
+
+class FurtherInfo (val literalsBeforeAfter0: Seq[Seq[Literal]] = Seq.empty, val test : String = ""){
+  val literalsBeforeAfter = literalsBeforeAfter0
+  var testInst:String = testInst + test
+  var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
+  var addInfoBoolExt: Set[(Literal,Seq[Literal])] = Set.empty
+  var addInfoSimp: Seq[(Seq[Int],String,Term,Term)] = Seq.empty
+  // unification of types and simplification are represented as booleans for now, eventually I can replace this with information necessary to also encode these steps
+  var addInfoEqFac: (Literal,Literal,Literal,Literal,Boolean,Boolean) = (Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),false,false)
+  var addInfoDefExp: Seq[Signature.Key] = Seq.empty
+  var addInfoUniRule: (String,(Literal,Literal)) = ("",(Literal(LitFalse(),false),Literal(LitFalse(),false))) // todo for now I am doing it this way but maybe if i do not need this for other rules as well it would be better to use tuples
+  var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
+  var addInfoRewriting: Option[Clause] = None
+}
+
 
 object ClauseAnnotation {
   import leo.modules.calculus.CalculusRule

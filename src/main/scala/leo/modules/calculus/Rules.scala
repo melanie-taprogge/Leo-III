@@ -1,11 +1,13 @@
 package leo.modules.calculus
 
 import leo.Out
-import leo.datastructures.Literal.Side
+import leo.datastructures.Literal.{Side, asTerm}
 import leo.datastructures._
 import leo.modules.HOLSignature.{LitTrue, o}
 import leo.modules.output.{SZS_CounterTheorem, SZS_EquiSatisfiable, SZS_Theorem}
+import leo.modules.output.LPoutput.Encodings.clause2LP
 
+import scala.:+
 import scala.annotation.tailrec
 
 ////////////////////////////////////////////////////////////////
@@ -150,6 +152,19 @@ object BoolExt extends CalculusRule {
       transformed = transformed.map(_ ++ nu._1) union transformed.map(_ ++ nu._2)
     }
     transformed.map(c => Clause.apply(c, cl.implicitlyBound, cl.typeVars)) //TODO CHECK THIS
+  }
+
+  final def apply_andTrack(cl: Clause, extLits: ExtLits, otherLits: OtherLits): Set[(Clause,Set[(Literal,Seq[Literal])])] = {
+    var transformed: Set[(Seq[Literal],Set[(Literal,Seq[Literal])])] = Set((otherLits,Set.empty))
+    // track what literals were transformed in what way
+    val extIt = extLits.iterator
+    while (extIt.hasNext) {
+      val extLit = extIt.next()
+      val nu = apply(extLit)
+      transformed = transformed.map(tr => (tr._1 ++ nu._1, tr._2 ++ Set((extLit,nu._1)))) union transformed.map(tr => (tr._1 ++ nu._2, tr._2 ++ Set((extLit,nu._2))))
+      //transformed = transformed.map(tr => (tr._1 ++ nu._1, tr._2)) union transformed.map(tr => (tr._1 ++ nu._2, tr._2))
+    }
+    (transformed.map(c => (Clause.apply(c._1, cl.implicitlyBound, cl.typeVars),c._2)) ) //TODO CHECK THIS
   }
 
   final def apply(l: Literal): (ExtLits, ExtLits) = {
@@ -523,6 +538,31 @@ object OrderedEqFac extends CalculusRule {
 
     val newlitsSimp = Simp.shallowSimp(lits_without_maxLit)(sig):+ unification_task1 :+ unification_task2
     Clause(newlitsSimp)
+  }
+
+  final def apply_LPenc (cl: Clause, maxLitIndex: Int, maxLitSide: Side,
+                  withLitIndex: Int, withLitSide: Side)(implicit sig: Signature): (Clause, Literal, Literal, Boolean) = {
+    // the only difference to the original is that I here return the unification constratings as well as the bool ture if they were simplified
+    assert(cl.lits.isDefinedAt(maxLitIndex))
+    assert(cl.lits.isDefinedAt(withLitIndex))
+    assert(maxLitIndex != withLitIndex)
+
+    val maxLit = cl.lits(maxLitIndex)
+    val withLit = cl.lits(withLitIndex)
+    assert(maxLit.polarity == withLit.polarity)
+
+    val (maxLitSide1, maxLitSide2) = Literal.getSidesOrdered(maxLit, maxLitSide)
+    val (withLitSide1, withLitSide2) = Literal.getSidesOrdered(withLit, withLitSide)
+
+    /* We cannot delete an element from the list, thats way we replace it by a trivially false literal,
+    * that is later eliminated using Simp. */
+    val lits_without_maxLit = cl.lits.updated(maxLitIndex, Literal.mkLit(LitTrue(), false))
+    val unification_task1: Literal = Literal.mkNegOrdered(maxLitSide1, withLitSide1)(sig)
+    val unification_task2: Literal = Literal.mkNegOrdered(maxLitSide2, withLitSide2)(sig)
+
+    val newlitsSimp = Simp.shallowSimp(lits_without_maxLit)(sig) :+ unification_task1 :+ unification_task2
+    val wasSimplified = (newlitsSimp == lits_without_maxLit)
+    (Clause(newlitsSimp),unification_task1,unification_task2,wasSimplified)
   }
 
 

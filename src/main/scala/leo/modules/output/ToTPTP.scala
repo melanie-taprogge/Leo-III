@@ -211,58 +211,76 @@ object ToTPTP {
     * @return
     */
 
-  final def apply(termsubst: Subst, typesubst: Subst, implicitlyBound: Seq[(Int, Type)], tyVars: Seq[Int])(implicit sig: Signature): Output = new Output {
-    override def apply(): String = {
-      var sb = new StringBuilder
-      if (termsubst.length > 0) {
-        val (_,varmap) = clauseImplicitsToTPTPQuantifierList(implicitlyBound)(sig)
-        val varmapMaxKey = if (varmap.nonEmpty) varmap.keySet.max else 0
-        val varmapSize = varmap.size
-        var i = 1
-        val max = termsubst.length
-        while (i <= max) { // TODO: Clean up this mess.
-          if (varmap.keySet.contains(i)) {
-            val erg = termsubst.substBndIdx(i)
-            try {
-              erg match {
-                case TermFront(t) =>
-                  val newVars = t.looseBounds.map(k => (k, intToName(varmapSize + k - varmapMaxKey - 1)))
-                  val varmap2 = varmap ++ newVars
-                  sb.append(s"bind(${varmap.apply(i)}, $$thf(${toTPTP0(t, tyVars.size, varmap2)(sig)}))")
-                case BoundFront(j) => sb.append(s"bind(${varmap.apply(i)}, $$thf(${intToName(varmapSize + j - varmapMaxKey - 1)}))")
-                case _ => throw new SZSException(SZS_Error, "Types in term substitution")
-              }
-            } catch {
-              case e: Exception => leo.Out.warn(s"Could not translate substitution entry to TPTP format, Exception raised:\n${e.toString}")
-                sb.append(s"bind($i, $$$$data(${erg.pretty}))")
-            }
-            sb.append(",")
-          }
-          i = i + 1
-        }
-        if (sb.nonEmpty) sb = sb.init
-      }
-      if (typesubst.length > 0) {
-        if (sb.nonEmpty) sb.append(",")
-        (1 to typesubst.length).foreach { i =>
-          val erg = typesubst.substBndIdx(i)
+  final def apply(termsubst: Subst, typesubst: Subst, implicitlyBound: Seq[(Int, Type)], tyVars: Seq[Int])(implicit sig: Signature): Output = {//new Output {
+    //override def apply(): String = apply_andTrack(termsubst, typesubst, implicitlyBound, tyVars)(sig)._1
+    apply_andTrack(termsubst, typesubst, implicitlyBound, tyVars)(sig)._1
+  }
+  final def apply_andTrack(termsubst: Subst, typesubst: Subst, implicitlyBound: Seq[(Int, Type)], tyVars: Seq[Int])(implicit sig: Signature): (Output, (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)])) = {
+    var sb = new StringBuilder
+    var addInfo: (Seq[(Int, Any, Int, Map[Int, String])], Seq[(Int, Any)]) = (Seq.empty, Seq.empty)
+    if (termsubst.length > 0) {
+      val (_, varmap) = clauseImplicitsToTPTPQuantifierList(implicitlyBound)(sig)
+      val varmapMaxKey = if (varmap.nonEmpty) varmap.keySet.max else 0
+      val varmapSize = varmap.size
+      var i = 1
+      val max = termsubst.length
+      while (i <= max) { // TODO: Clean up this mess.
+        if (varmap.keySet.contains(i)) {
+          val erg = termsubst.substBndIdx(i)
           try {
             erg match {
-              case BoundFront(n) => sb.append(s"bind_type(T${intToName(i-1)},$$thf(T${intToName(n-1)}))")
-              case TermFront(_) => throw new SZSException(SZS_Error, "Term in type substitution")
-              case TypeFront(typ) => sb.append(s"bind_type(T${intToName(i-1)},$$thf(${typeToTHF1(typ)(sig)}))")
+              case TermFront(t) =>
+                val newVars = t.looseBounds.map(k => (k, intToName(varmapSize + k - varmapMaxKey - 1)))
+                val varmap2 = varmap ++ newVars
+                addInfo = (addInfo._1 :+ (i, t, tyVars.size, varmap2), addInfo._2)
+                sb.append(s"bind(${varmap.apply(i)}, $$thf(${toTPTP0(t, tyVars.size, varmap2)(sig)}))")
+              case BoundFront(j) =>
+                addInfo = (addInfo._1 :+ (i, intToName(varmapSize + j - varmapMaxKey - 1), 0, Map.empty), addInfo._2)
+                sb.append(s"bind(${varmap.apply(i)}, $$thf(${intToName(varmapSize + j - varmapMaxKey - 1)}))")
+              case _ => throw new SZSException(SZS_Error, "Types in term substitution")
             }
           } catch {
             case e: Exception => leo.Out.warn(s"Could not translate substitution entry to TPTP format, Exception raised:\n${e.toString}")
-            sb.append(s"bind_type($i, $$$$data(${erg.pretty}))")
+              sb.append(s"bind($i, $$$$data(${erg.pretty}))")
           }
           sb.append(",")
         }
-        if (sb.nonEmpty) sb = sb.init
+        i = i + 1
       }
-      sb.toString()
+      if (sb.nonEmpty) sb = sb.init
     }
+    if (typesubst.length > 0) {
+      if (sb.nonEmpty) sb.append(",")
+      (1 to typesubst.length).foreach { i =>
+        val erg = typesubst.substBndIdx(i)
+        try {
+          erg match {
+            case BoundFront(n) =>
+              addInfo = (addInfo._1, addInfo._2 :+ (i - 1, n - 1))
+              sb.append(s"bind_type(T${intToName(i - 1)},$$thf(T${intToName(n - 1)}))")
+            case TermFront(_) => throw new SZSException(SZS_Error, "Term in type substitution")
+            case TypeFront(typ) =>
+              addInfo = (addInfo._1, addInfo._2 :+ (i - 1, typ))
+              sb.append(s"bind_type(T${intToName(i - 1)},$$thf(${typeToTHF1(typ)(sig)}))")
+          }
+        } catch {
+          case e: Exception => leo.Out.warn(s"Could not translate substitution entry to TPTP format, Exception raised:\n${e.toString}")
+            sb.append(s"bind_type($i, $$$$data(${erg.pretty}))")
+        }
+        sb.append(",")
+      }
+      if (sb.nonEmpty) sb = sb.init
+    }
+    //(sb.toString(), addInfo)
+
+    val toTPTPRes = new Output {
+      override def apply(): String = sb.toString()
+    }
+
+    (toTPTPRes, addInfo)
+
   }
+
 
   ///////////////////////////////
   // Translation of clause to THF formula
