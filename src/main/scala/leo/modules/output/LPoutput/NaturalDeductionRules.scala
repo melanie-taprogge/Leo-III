@@ -2,13 +2,13 @@ package leo.modules.output.LPoutput
 
 import leo.modules.output.LPoutput.lpDatastructures._
 
-/**
+/** No longer in Use
+  *
   * Representations of the rules of natural deduction and some additional fundamental rules
   *
   * @author Melanie Taprogge
   */
 
-//todo: add the remaining rules and encode proofs properly
 
 object NaturalDeductionRules {
 

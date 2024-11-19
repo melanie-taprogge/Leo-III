@@ -18,13 +18,13 @@ object AccessoryRules {
   ////////////////////////////////////////////////////////////////
 
   case class mkNegPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(¬ a) → Prf(= [o] (¬ a) ⊤)
+    // x: (π ((¬ x) = ((¬ x) = ⊤)))
 
     override def name: lpConstantTerm = lpConstantTerm("negPropPosEq_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTop)).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (¬ x) ((¬ x) = ⊤) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊤ _ _ \n            {assume h2;\n            refine ⊤I}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        have H1: Prf((¬ x) = ⊤) → Prf(¬ x)\n            {assume h2;\n            refine (=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I};\n        refine H1 h1}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (¬ x) ((¬ x) = ⊤) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊤ _ _ \n            {assume h2;\n            refine ⊤ᵢ}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        have H1: π((¬ x) = ⊤) → π(¬ x)\n            {assume h2;\n            refine (ind_eq h2 (λ z, z)) ⊤ᵢ};\n        refine H1 h1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -37,13 +37,13 @@ object AccessoryRules {
   }
 
   case class mkNegPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [o] (¬ a) (¬ (= [o] a ⊤)))
+    // x: (π ((¬ x) = (¬ (x = ⊤))))
 
     override def name: lpConstantTerm = lpConstantTerm("negPropNegEq_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop))).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (¬ x) (¬ (x = ⊤)) _ _\n        {assume h1;\n        have H1: Prf(x = ⊤) → Prf ⊥\n            {assume h2;\n            refine ¬E x (=def [o] x ⊤ h2 (λ z, z) ⊤I) h1};\n        refine ¬I  (x = ⊤) H1}\n        {assume h1;\n        refine ¬I x _;\n        assume h2;\n        have H1: Prf(x = ⊤)\n            {refine propExt x ⊤ _ _\n                {assume h3;\n                refine ⊤I}\n                {assume h3;\n                refine h2}};\n        refine ¬E (x = ⊤) H1 h1}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (¬ x) (¬ (x = ⊤)) _ _\n        {assume h1 h2;\n        refine h1 (ind_eq h2 (λ z, z) ⊤ᵢ)}\n        {assume h1 h2;\n        have H1: π(x = ⊤)\n            {refine propExt x ⊤ _ _\n                {assume h3;\n                refine ⊤ᵢ}\n                {assume h3;\n                refine h2}};\n        refine h1 H1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -56,13 +56,13 @@ object AccessoryRules {
   }
 
   case class mkPosPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [o] a (¬(= [o] (¬ a) ⊤)))
+    // x: (π (x = (¬ ((¬ x) = ⊤))))
 
     override def name: lpConstantTerm = lpConstantTerm("posPropNegEq_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTop))).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt x (¬ ((¬ x) = ⊤)) _ _\n    {assume h1;\n    have H1: Prf((¬ x) = ⊤) → Prf ⊥\n        {assume h2;\n        refine ¬E x h1 ((=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I)};\n    refine ¬I ((¬ x) = ⊤) H1}\n    {assume h1;\n        refine ∨E x (¬ x) x _ _ (em x)\n            {assume h2;\n            refine h2}\n            {assume h2;\n            have H1: Prf((¬ x) = ⊤)\n                {refine propExt (¬ x) ⊤ _ _\n                    {assume h3;\n                    refine ⊤I}\n                    {assume h3;\n                    refine h2}};\n            refine ⊥E x (¬E ((¬ x) = ⊤) H1 h1)}}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt x (¬ ((¬ x) = ⊤)) _ _\n    {assume h1 h2;\n    refine ((ind_eq h2 (λ z, z)) ⊤ᵢ) h1}\n    {assume h1;\n        // refine ∨E x (¬ x) x _ _ (em x)\n        refine ∨ₑ [x] [¬ x] [x] (em x) _ _\n            {assume h2;\n            refine h2}\n            {assume h2;\n            have H1: π((¬ x) = ⊤)\n                {refine propExt (¬ x) ⊤ _ _\n                    {assume h3;\n                    refine ⊤ᵢ}\n                    {assume h3;\n                    refine h2}};\n            refine ⊥ₑ (h1 H1)}}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -75,6 +75,7 @@ object AccessoryRules {
   }
 
   case class mkPosPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
+    // todo -> stdlib
     // Provide a proof of the type Prf(= [o] a (= [o] a ⊤))
 
     override def name: lpConstantTerm = lpConstantTerm("mkPosPropPosEq")
@@ -94,13 +95,13 @@ object AccessoryRules {
   }
 
   case class mkNegLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [o] (¬ (= [o] (¬ a) ⊤)) a)
+    // x: (π ((¬ ((¬ x) = ⊤)) = x))
 
     override def name: lpConstantTerm = lpConstantTerm("negEqPosProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)),lpOlTop)),lpOlConstantTerm(patternVarName)).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt x (¬ ((¬ x) = ⊤)) _ _\n    {assume h1;\n    have H1: Prf((¬ x) = ⊤) → Prf ⊥\n        {assume h2;\n        refine ¬E x h1 ((=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I)};\n    refine ¬I ((¬ x) = ⊤) H1}\n    {assume h1;\n        refine ∨E x (¬ x) x _ _ (em x)\n            {assume h2;\n            refine h2}\n            {assume h2;\n            have H1: Prf((¬ x) = ⊤)\n                {refine propExt (¬ x) ⊤ _ _\n                    {assume h3;\n                    refine ⊤I}\n                    {assume h3;\n                    refine h2}};\n            refine ⊥E x (¬E ((¬ x) = ⊤) H1 h1)}}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt x (¬ ((¬ x) = ⊤)) _ _\n    {assume h1 h2;\n    refine ((ind_eq h2 (λ z, z)) ⊤ᵢ) h1}\n    {assume h1;\n        refine ∨ₑ (em x) _ _ \n            {assume h2;\n            refine h2}\n            {assume h2;\n            have H1: π((¬ x) = ⊤)\n                {refine propExt (¬ x) ⊤ _ _\n                    {assume h3;\n                    refine ⊤ᵢ}\n                    {assume h3;\n                    refine h2}};\n            refine ⊥ₑ (h1 H1)}}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -115,13 +116,13 @@ object AccessoryRules {
   }
 
   case class mkNegLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [o] (¬ (= [o] a ⊤)) (¬ a))
+    // x: (π ((¬ (x = ⊤)) = (¬ x)))
 
     override def name: lpConstantTerm = lpConstantTerm("negEqNegProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlConstantTerm(patternVarName), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt (¬ x) (¬ (x = ⊤)) _ _\n        {assume h1;\n        have H1: Prf(x = ⊤) → Prf ⊥\n            {assume h2;\n            refine ¬E x (=def [o] x ⊤ h2 (λ z, z) ⊤I) h1};\n        refine ¬I  (x = ⊤) H1}\n        {assume h1;\n        refine ¬I x _;\n        assume h2;\n        have H1: Prf(x = ⊤)\n            {refine propExt x ⊤ _ _\n                {assume h3;\n                refine ⊤I}\n                {assume h3;\n                refine h2}};\n        refine ¬E (x = ⊤) H1 h1}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt (¬ x) (¬ (x = ⊤)) _ _\n        {assume h1 h2;\n        refine h1 (ind_eq h2 (λ z, z) ⊤ᵢ)}\n        {assume h1 h2;\n        have H1: π(x = ⊤)\n            {refine propExt x ⊤ _ _\n                {assume h3;\n                refine ⊤ᵢ}\n                {assume h3;\n                refine h2}};\n        refine h1 H1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -137,13 +138,13 @@ object AccessoryRules {
   }
 
   case class mkPosLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [o] (= [o] (¬ a) ⊤) (¬ a))
+    // x: (π (((¬ x) = ⊤) = (¬ x)))
 
     override def name: lpConstantTerm = lpConstantTerm("posEqNegProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTop), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt (¬ x) ((¬ x) = ⊤) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊤ _ _ \n            {assume h2;\n            refine ⊤I}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        have H1: Prf((¬ x) = ⊤) → Prf(¬ x)\n            {assume h2;\n            refine (=def [o] (¬ x) ⊤ h2 (λ z, z)) ⊤I};\n        refine H1 h1}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt (¬ x) ((¬ x) = ⊤) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊤ _ _ \n            {assume h2;\n            refine ⊤ᵢ}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        have H1: π((¬ x) = ⊤) → π(¬ x)\n            {assume h2;\n            refine (ind_eq  h2 (λ z, z)) ⊤ᵢ};\n        refine H1 h1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -159,13 +160,13 @@ object AccessoryRules {
   }
 
   case class mkPosLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
-    // Provide a proof of the type Prf(= [o] (= [o] (a) ⊤) (a))
+    // x: (π ((x = ⊤) = x))
 
     override def name: lpConstantTerm = lpConstantTerm("posEqPosProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly,lpOlConstantTerm(patternVarName), lpOlTop), lpOlConstantTerm(patternVarName)).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt x (x = ⊤) _ _\n        {assume h1;\n        refine propExt x ⊤ _ _ \n            {assume h2;\n            refine ⊤I}\n            {assume h2;\n            refine h1}}\n        {assume h2;\n        refine (=def [o] x ⊤ h2 (λ z, z)) ⊤I}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    symmetry;\n    refine propExt x (x = ⊤) _ _\n        {assume h1;\n        refine propExt x ⊤ _ _ \n            {assume h2;\n            refine ⊤ᵢ}\n            {assume h2;\n            refine h1}}\n        {assume h2;\n        refine (ind_eq h2 (λ z, z)) ⊤ᵢ}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -181,6 +182,7 @@ object AccessoryRules {
   }
 
   case class mkNegPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
+    // todo -> stdlib
 
     override def name: lpConstantTerm = lpConstantTerm("PropBotNeg_eq")
 
@@ -194,12 +196,13 @@ object AccessoryRules {
   }
 
   case class mkBotEqNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
+    // x: (π ((⊥ = x) = (¬ x)))
 
     override def name: lpConstantTerm = lpConstantTerm("botNegProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (⊥ = x) (¬ x) _ _\n        {assume h1;\n        have H1 : Prf x → Prf x\n            {assume h2;\n            refine h2};\n        refine  ¬I x (⇒E x ⊥ (=def ⊥ x h1 (λ z, x ⇒ z) (⇒I x x H1)))}\n        {assume h1;\n        refine propExt ⊥ x _ _\n            {assume h2;\n            refine ⊥E x h2}\n            {assume h2;\n            refine ¬E x h2 h1}}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (⊥ = x) (¬ x) _ _\n        {assume h1;\n        have H1 : π x → π x\n            {assume h2;\n            refine h2};\n        refine ind_eq h1 (λ z, x ⇒ z) H1}\n        {assume h1;\n        refine propExt ⊥ x _ _\n            {assume h2;\n            refine ⊥ₑ h2}\n            {assume h2;\n            refine h1 h2}}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -315,7 +318,7 @@ object AccessoryRules {
   ////////////////////////////////////////////////////////////////
 
   case class flipLiteral(polarity: Boolean) extends lpDefinedRules {
-    // Prf(= [o] (= [T] x y) (= [T] y x))
+    // [T] (x y : τ T) : π((x = y) = (y = x))
 
     val T = lpOlUserDefinedMonoType("T")
     val x = lpOlTypedVar(lpOlConstantTerm("x"),T)
@@ -329,7 +332,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y), ty, Seq(T))
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T x y;\n    have H1: Prf(x = y) → Prf(y = x)\n        {assume h;\n        symmetry;\n        refine h};\n    have H2: Prf(y = x) → Prf(x = y)\n        {assume h;\n        symmetry;\n        refine h};\n    refine propExt (x = y) (y = x) H1 H2")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T x y;\n    have H1: π(x = y) → π(y = x)\n        {assume h;\n        symmetry;\n        refine h};\n    have H2: π(y = x) → π(x = y)\n        {assume h;\n        symmetry;\n        refine h};\n    refine propExt (x = y) (y = x) H1 H2")))
 
     override def pretty: String = lpDefinition(name, Seq(x, y), ty, proof, Seq(T)).pretty
 
@@ -349,7 +352,7 @@ object AccessoryRules {
 
   def flipEqLiteralsProofScript(lits: Seq[(lpOlTerm, lpOlType)], origClause: lpClause, sourceBefore: lpTerm, nameStept: lpConstantTerm): (lpProofScriptStep, Seq[lpOlTerm], Set[lpStatement]) = {
 
-    // change order wighin literals of a given clause
+    // change order within literals of a given clause
 
     var usedSymbols: Set[lpStatement] = Set.empty
 
@@ -409,6 +412,7 @@ object AccessoryRules {
   ////////// Change order of literals
   ////////////////////////////////////////////////////////////////
 
+  /*
   def changePositions(positions: Seq[Int], proofNames: String): (lpHave, Set[lpStatement]) = {
     // given is a sequence of integers, this represent the position of the literal at the index of the integer in the positions sequence in the clause we want to prove
 
@@ -491,13 +495,14 @@ object AccessoryRules {
 
     (haveStep, usedSymbols)
   }
-
+  */
   ////////////////////////////////////////////////////////////////
   ////////// Transitivity of Implication
   ////////////////////////////////////////////////////////////////
 
   case class implicationTransitivity(patternVarName: String = "x") extends lpDefinedRules {
     // (a b c : El o): (Prf a → Prf b) → (Prf b → Prf c) → (Prf a → Prf c)
+    // todo ->stdlib
 
     val a = lpOlConstantTerm("a")
     val b = lpOlConstantTerm("b")
@@ -518,7 +523,7 @@ object AccessoryRules {
   ////////////////////////////////////////////////////////////////
   ////////// Transform rule
   ////////////////////////////////////////////////////////////////
-
+  /*
   def generateClorRule(positions: Seq[Boolean], proofNames: String): (lpHave, Set[lpStatement]) = {
     // generate a proof script to only transform single literals in clauses and still proof the entire clause
     // the positions vector then encodes how many literals the remaining clause has and for positions a clause application has to be proven
@@ -643,6 +648,6 @@ object AccessoryRules {
 
     (haveStep, usedSymbols)
   }
-
+  */
 
 }

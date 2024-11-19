@@ -201,12 +201,12 @@ object lpDatastructures {
   abstract class lpOlTypeConstants extends lpType
 
   case object lpOlTypeConstructor extends lpOlTypeConstants {
-    override def pretty: String = "⤳"
+    override def pretty: String = "×"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpOlTypeConstructor.pretty} to meta level")
   }
 
   case object lpSet extends lpOlType {
-    override def pretty: String = "MonoSet"
+    override def pretty: String = "Set"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpSet.pretty} to meta level")
 
     override def lift2Poly: lpOlPolyType = throw new Exception(s"attempting to lift ${lpSet.pretty} to poly")
@@ -218,7 +218,7 @@ object lpDatastructures {
   }
 
   case object lpPrf extends lpOlTypeConstants {
-    override def pretty: String = "Prf"
+    override def pretty: String = "π"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpPrf.pretty} to meta level")
   }
 
@@ -228,12 +228,12 @@ object lpDatastructures {
   }
 
   case object lpEl extends lpMlType {
-    override def pretty: String = "El"
+    override def pretty: String = "τ"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpEl.pretty} to meta level")
   }
 
   case object lpEls extends lpMlType {
-    override def pretty: String = "El"
+    override def pretty: String = "τ"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpEls.pretty} to meta level")
   }
 
@@ -360,10 +360,10 @@ object lpDatastructures {
 
   final case object lpEq extends lpOlBinaryConnective {
     override def pretty: String = "="
-    def definitionName(): lpConstantTerm = lpConstantTerm("=def")
+    def definitionName(): lpConstantTerm = lpConstantTerm("ind_eq")
   }
 
-  final case object lpInEq extends lpOlBinaryConnective {override def pretty: String = "inEq"}
+  final case object lpInEq extends lpOlBinaryConnective {override def pretty: String = "≠"}
 
   abstract class lpOlQuantifier extends lpOlConnective
 

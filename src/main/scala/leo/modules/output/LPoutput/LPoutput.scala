@@ -8,7 +8,6 @@ import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
-import leo.modules.output.LPoutput.NaturalDeductionRules._
 
 import java.nio.file.{Files, Paths}
 import java.nio.charset.StandardCharsets
@@ -25,35 +24,25 @@ import scala.util.{Try, Success, Failure}
 object LPoutput {
 
   val nameLogicFile = "extt"
-  val nameRewriteRuleFile = "rwr"
-  val nameCorrectnessFile = "correctness"
-  val nameNaturalDeductionFile = "nd"
   val nameRulesFile = "rules"
   val nameProofFile = "encodedProof"
 
-  def generateSignature(usedSymbols: Set[lpStatement], nameLpOutputFolder: String): (mutable.StringBuilder,mutable.StringBuilder,mutable.StringBuilder) = {
+  def generateSignature(usedSymbols: Set[lpStatement], nameLpOutputFolder: String): (mutable.StringBuilder) = {
 
-    val correctnessFileSB: mutable.StringBuilder = new StringBuilder()
-    correctnessFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRewriteRuleFile};\n\n")
-    // todo: encode the remaining rules and change back to automated selection of necessary rules
-    correctnessFileSB.append(allNDDefs)
-    val naturalDeductionFileSB: mutable.StringBuilder = new StringBuilder()
-    naturalDeductionFileSB.append(s"require open ${nameLpOutputFolder}.${nameLogicFile};\n\n")
-    naturalDeductionFileSB.append(allNDDecs)
     val rulesFileSB: mutable.StringBuilder = new StringBuilder()
-    rulesFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameNaturalDeductionFile};\n\n")
+    // todo: once lambdapi is fixed, remove the declaration here
+    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile;\nnotation ∨ infix right 6;\n\n")
 
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
     var infRules: Set[lpInferenceRuleEncoding.inferenceRules] = Set.empty
     var infRulesRWfree: Set[lpInferenceRuleEncoding.inferenceRules] = Set.empty
-    var basicRules: Set[lpBasicRules] = Set.empty
 
     // sort the symbols
     usedSymbols foreach { symbol =>
       symbol match {
-        case basicRule: lpBasicRules =>
-          basicRules = basicRules + basicRule
+        //case basicRule: lpBasicRules =>
+        //  basicRules = basicRules + basicRule
         case simpRule: SimplificationEncoding.simplificationRules =>
           simplificationRules = simplificationRules + simpRule
         case infRule: lpInferenceRuleEncoding.inferenceRules =>
@@ -70,18 +59,6 @@ object LPoutput {
     val output: mutable.StringBuilder = new StringBuilder()
     val correctnessSb: mutable.StringBuilder = new StringBuilder()
     output.append("//SIGNATURE\n\n\n\n")
-
-    // add basic rules to output and to correctness
-    // todo: make sure that things like the basic rules that can depend on each other are given in the right order
-    if (basicRules.nonEmpty) output.append("////// Basic Rules \n\n")
-    /*
-    basicRules foreach { basicRule =>
-      correctnessFileSB.append(basicRule.pretty)
-      correctnessFileSB.append("\n")
-      naturalDeductionFileSB.append(basicRule.dec.pretty)
-      naturalDeductionFileSB.append("\n")
-    }
-     */
 
     // add simplification rules
     if (simplificationRules.nonEmpty) output.append("////// Simplification Rules \n\n")
@@ -113,7 +90,7 @@ object LPoutput {
       rulesFileSB.append("\n")
     }
 
-    (correctnessFileSB, naturalDeductionFileSB,rulesFileSB)
+    (rulesFileSB)
   }
 
   def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long, ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0: (Int, Int, Int, Int)): (String, lpStatement, (Int, Int, Int, Int), Set[lpStatement]) = {
@@ -182,8 +159,7 @@ object LPoutput {
     val lpOutputPath = s"${lpOutputPath0}${nameLpOutputFolder}/"
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
-    proofFileSB.append(s"require open ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameNaturalDeductionFile} ${nameLpOutputFolder}.${nameRulesFile};\n\n")
-
+    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile};\nnotation ∨ infix right 6;\n\n")
     val proofStepsSB: mutable.StringBuilder = new StringBuilder()
 
     def extractNecessaryFormulas(state:LocalState):Unit={
@@ -191,7 +167,7 @@ object LPoutput {
       val sig = state.signature
       val proof = state.proof
 
-      var usedSymbols:Set[lpStatement] = Set(eqDef(),eqRef()) // always add them because they are necessary for equality tactics. Todo: handle differently
+      var usedSymbols:Set[lpStatement] = Set.empty // always add them because they are necessary for equality tactics. Todo: handle differently
       var parameters: (Int,Int,Int,Int) = (0,0,0,0)
 
 
@@ -338,13 +314,13 @@ object LPoutput {
 
       // generate the signature
 
-      val (correctnessFileSB, naturalDeductionFileSB,rulesFileSB) = generateSignature(usedSymbols, nameLpOutputFolder)
+      val rulesFileSB = generateSignature(usedSymbols, nameLpOutputFolder)
 
       // initiate a lambdapi package
 
       var lpInitSuccess = true
 
-      val command = Seq("/bin/sh", "-c", s"cd $lpOutputPath0 && lambdapi init $nameLpOutputFolder")
+      val command = Seq("/bin/bash", "-c", s"cd $lpOutputPath0 && lambdapi init $nameLpOutputFolder")
 
       val initLP = Try(command.!)
 
@@ -368,22 +344,14 @@ object LPoutput {
       val exttFilePath = Paths.get(s"${lpOutputPath}${nameLogicFile}.lp")
       Files.write(exttFilePath, ExTTenc.getBytes(StandardCharsets.UTF_8))
 
-      val rwrFilePath = Paths.get(s"${lpOutputPath}${nameRewriteRuleFile}.lp")
-      Files.write(rwrFilePath, s"require open ${nameLpOutputFolder}.$nameLogicFile; \n\n${RwRenc}".getBytes(StandardCharsets.UTF_8))
-
-      val correctnessFilePath = Paths.get(s"${lpOutputPath}${nameCorrectnessFile}.lp")
-      Files.write(correctnessFilePath, correctnessFileSB.toString.getBytes(StandardCharsets.UTF_8))
-
-      naturalDeductionFileSB.append(s"builtin \"eqind\" ≔ ${eqDef().name.pretty};\n")//todo: pass linking to builtin differently")
-      naturalDeductionFileSB.append(s"builtin \"refl\" ≔ ${eqRef().name.pretty};\n")//todo: pass linking to builtin differently")
-      val ndFilePath = Paths.get(s"${lpOutputPath}${nameNaturalDeductionFile}.lp")
-      Files.write(ndFilePath, naturalDeductionFileSB.toString.getBytes(StandardCharsets.UTF_8))
-
       val rulesFilePath = Paths.get(s"${lpOutputPath}${nameRulesFile}.lp")
       Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
       val proofFilePath = Paths.get(s"${lpOutputPath}${nameProofFile}.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
+
+      //print(s"// rules \n ${rulesFileSB.toString}\n  // proof \n ${proofFileSB.toString}")
+
 
       /*
       if (lpInitSuccess) {

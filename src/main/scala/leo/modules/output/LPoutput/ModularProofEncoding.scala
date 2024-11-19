@@ -166,7 +166,7 @@ object ModularProofEncoding {
       // For each affected literal:
       //    2. If the order within the literal was changed, apply eqSym_eq
       //    3. Instantiate PFE and use it to define a new hypothesis (in the case of a nested application, use impTrans)
-      // 4. Use the proven hypothesis to apply the changes to the (instanciated) parent formula, using the appropriate transform rule
+      // 4. Use the proven hypothesis to apply the changes to the (instantiated) parent formula, using the appropriate transform rule
       // 5. If the order of literals was changed, generate a permute rule and apply it to permute the literals
       // 6. Refine with the last step
 
@@ -206,7 +206,7 @@ object ModularProofEncoding {
           val refineWithFunExt = {
             if (!origLit.polarity) throw new Exception(s"The LP encoding of FunExt for negative literals is not implemented yet")
             else {
-              usedSymbols = usedSymbols + funExtPosEq_rev() ++ funExtPosEq_rev().usedBasicRules
+              usedSymbols = usedSymbols + funExtPosEq_rev()
               lpRefine(funExtPosEq_rev().instanciate(None, encOrigLitLhs, encOrigLitRhs, appliedVars))
             }
           }
@@ -280,7 +280,7 @@ object ModularProofEncoding {
         else if (!afterLhs.polarity & !afterRhs.polarity) (false, false)
         else throw new Exception(s"attempting to encode boolExt in lp but found wrong format")
       }
-      usedSymbols = usedSymbols + lpInferenceRuleEncoding.boolExt(lhs,pol) ++ lpInferenceRuleEncoding.boolExt(lhs,pol).usedBasicRules
+      usedSymbols = usedSymbols + lpInferenceRuleEncoding.boolExt(lhs,pol)
       transitions = transitions :+ lpInferenceRuleEncoding.boolExt(lhs,pol).instanciate(beforeLhsEnc,beforeRhsEnc)
     }
 
