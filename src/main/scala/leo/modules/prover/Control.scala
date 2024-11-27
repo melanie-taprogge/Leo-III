@@ -1822,9 +1822,10 @@ package inferenceControl {
         assert(Clause.unit(cl.cl))
         val lit = cl.cl.lits.head
         assert(!lit.equational)
-        val (newleft, addInfoSimp, addInforDefExp) = DefExpSimp.apply_andTrack(lit.left)(sig)
+        //val (newleft, addInfoSimp, addInforDefExp) = DefExpSimp.apply_andTrack(lit.left)(sig)
+        val (newleft, addInforDefExp) = DefExpSimp.apply_andTrack(lit.left)(sig)
         val information: FurtherInfo = cl.furtherInfo
-        information.addInfoSimp = information.addInfoSimp ++ addInfoSimp
+        //information.addInfoSimp = information.addInfoSimp ++ addInfoSimp
         information.addInfoDefExp = information.addInfoDefExp ++ addInforDefExp
         val result = AnnotatedClause(Clause(Literal(newleft, lit.polarity)), Role_Plain, InferredFrom(DefExpSimp, cl), cl.properties, information)
         Out.trace(s"Def expansion: ${result.pretty(sig)}")
@@ -2294,13 +2295,14 @@ package inferenceControl {
           else deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties)
           AnnotatedClause(newCl, InferredFrom(RewriteSimp, Seq(cl) ++ rewriteRulesUsed.toSeq), newAnnotation)
         }
-        val (simpResult, addInfo) = Simp.shallowSimp_andTrack(result0.cl)(sig)
+        //val (simpResult, addInfo) = Simp.shallowSimp_andTrack(result0.cl)(sig)
+        val (simpResult) = Simp.shallowSimp(result0.cl)(sig)
         val result = if (simpResult == result0.cl) result0
         else {
           //print(s"${result0.cl.pretty}\n")
           //print(s"${simpResult.pretty}\n")
           val information: FurtherInfo = cl.furtherInfo
-          information.addInfoSimp = information.addInfoSimp ++ addInfo
+          //information.addInfoSimp = information.addInfoSimp ++ addInfo
           information.addInfoRewriting = Some(result0.cl)
           AnnotatedClause(simpResult, Role_Plain, InferredFrom(Simp, Seq(result0)), result0.properties, information)
         }

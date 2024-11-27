@@ -3,6 +3,7 @@ package leo.modules.output.LPoutput
 import leo.modules.output.LPoutput.lpDatastructures._
 
 /** No longer in Use
+  * todo: add names of stdlib versions of rules to datastrucutres so they can be called upon (curently used in three cases, they might however not be needed anymore with the new encodings of meta theorems)
   *
   * Representations of the rules of natural deduction and some additional fundamental rules
   *

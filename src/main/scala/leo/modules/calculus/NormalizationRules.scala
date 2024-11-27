@@ -27,12 +27,15 @@ object DefExpSimp extends CalculusRule {
     Simp.normalize(t.δ_expand_upTo(symb).betaNormalize.etaExpand)
   }
 
-  final def apply_andTrack(t: Term)(implicit sig: Signature): (Term, Seq[(Seq[Int], String, Term, Term)], Seq[Signature.Key]) = {
+
+  final def apply_andTrack(t: Term)(implicit sig: Signature): (Term, Seq[Signature.Key]) = {
     val symb: Set[Signature.Key] = Set(sig("?").key, sig("&").key, sig("=>").key)
     val (expandedTerm, expandedSymbols) = t.δ_expand_andTrack_upTo(symb)
-    val (simplifiedTerm, simpInfo) = Simp.normalize_andTrack(expandedTerm.betaNormalize.etaExpand)
-    (simplifiedTerm, simpInfo,expandedSymbols)
+    //val (simplifiedTerm, simpInfo) = Simp.normalize(expandedTerm.betaNormalize.etaExpand)
+    val simplifiedTerm = Simp.normalize(expandedTerm.betaNormalize.etaExpand)
+    (simplifiedTerm, expandedSymbols)
   }
+
 
   final def apply(cl: Clause)(implicit sig: Signature): Clause = {
     val litsIt = cl.lits.iterator
@@ -735,6 +738,7 @@ object Simp extends CalculusRule {
     }
   }
 
+  /*
   final private def eqSimp_andTrack(l: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], String, Term, Term)]) = {
     if (!l.equational) {
       val (norm, addInfo) = normalize_andTrack(l.left)
@@ -748,6 +752,7 @@ object Simp extends CalculusRule {
       }
     }
   }
+   */
 
   private final val CANNOTAPPLY = 0
   private final val VARLEFT = 1
@@ -770,10 +775,12 @@ object Simp extends CalculusRule {
 
   final def apply(lit: Literal)(implicit sig: Signature): Literal = PolaritySwitch(eqSimp(lit))
 
+  /*
   final def apply_andTrack(lit: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], String, Term, Term)]) = {
     val (simpTerm, addInfo) = eqSimp_andTrack(lit)
     (PolaritySwitch(simpTerm), addInfo)
   }
+   */
 
   /** Only directly use this method if you really know what you are doing.
     * It applies destructive equality resolution and thus needs to be applied to the clause as a whole.
@@ -864,6 +871,7 @@ object Simp extends CalculusRule {
     newLits
   }
 
+  /*
   final def shallowSimp_andTrack(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Seq[(Seq[Int], String, Term, Term)]) = {
     var newLits: Seq[Literal] = Vector.empty
     var addInfo:  Seq[(Seq[Int], String, Term, Term)] = Seq.empty
@@ -881,14 +889,18 @@ object Simp extends CalculusRule {
     (newLits, addInfo)
   }
 
+   */
+
   final def shallowSimp(cl: Clause)(implicit sig: Signature): Clause = {
     Clause(shallowSimp(cl.lits)(sig))
   }
 
+  /*
   final def shallowSimp_andTrack(cl: Clause)(implicit sig: Signature): (Clause, Seq[(Seq[Int], String, Term, Term)]) = {
     val (simpLits, addInfo) = shallowSimp_andTrack(cl.lits)(sig)
     (Clause(simpLits), addInfo)
   }
+   */
 
   final def detUniInferences(cl: Clause)(implicit sig: Signature): Seq[Clause] = {
     val (posLits, negLits) = (cl.posLits, cl.negLits)
@@ -1030,6 +1042,7 @@ object Simp extends CalculusRule {
     else result
   }
 
+  /*
   final def normalize_andTrack(t: Term): (Term, Seq[(Seq[Int], String, Term, Term)]) = {
     // termSimp(t)
     import leo.modules.procedures.{Simplification, GroundArithmeticEval}
@@ -1040,6 +1053,7 @@ object Simp extends CalculusRule {
     if (t.sharing) (Term.insert(result), addInfo)
     else (result, addInfo)
   }
+   */
 
   /**
     * Exhaustively applies the simplification rules of `simp` to `t`.
