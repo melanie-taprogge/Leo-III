@@ -75,10 +75,10 @@ object Simplification extends Function1[Term, Term] {
   }
 
   final def track(term: Term): (Term, Seq[(Seq[Int], String, Term, Term)]) = {
-    val (restult, addInfo) = applyAndTrack(term, true)
+    val (restult, addInfo) = applyAndTrack(term.betaNormalize, true)
     // we want to reverse the order of the positional encoding sequence so that the first step is the first integer
     val addInfoReverseOrder = addInfo.map(tuple => (tuple._1.reverse,tuple._2,tuple._3,tuple._4))
-    (restult,addInfoReverseOrder)
+    (restult.betaNormalize,addInfoReverseOrder)
   }
   private[this] final def applyAndTrack(term: Term, extensional: Boolean): (Term, Seq[(Seq[Int], String, Term, Term)]) = {
     import leo.datastructures.Term.{:::>, TypeLambda, Bound, Symbol, ∙, Rational, Real}

@@ -37,3 +37,8 @@ src/native/picosat-965
 
 # Leo-III StarExec image
 contrib/leo3_starexec.tar.gz
+demo/.DS_Store
+oldsrc/.DS_Store
+project/.DS_Store
+src/.DS_Store
+src/main/.DS_Store
