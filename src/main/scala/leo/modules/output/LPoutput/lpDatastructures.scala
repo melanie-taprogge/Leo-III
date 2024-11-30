@@ -372,6 +372,37 @@ object lpDatastructures {
   final case object lpOlForAll extends lpOlQuantifier {override def pretty: String = "∀"}
 
 
+  ///////////// NATS
+
+  case class lpNum(n: Int) extends lpOlTerm {
+    override def pretty: String = n.toString
+
+    override def prf: liftedProp = throw new Exception(s"attempting to lift number encoding to meta level")
+  }
+
+  ///////////// LISTS
+
+  case object lpListConst extends lpTerm {
+    override def pretty: String = "⸬"
+  }
+
+  case object lpListLast extends lpTerm {
+    override def pretty: String = "□"
+  }
+
+  case class lpList(els : Seq[lpOlTerm]) extends lpOlTerm {
+
+    val listEnd = els match {
+      case Seq() =>
+        lpListLast.pretty
+      case _ =>
+        f" ${lpListConst.pretty} ${lpListLast.pretty}"
+    }
+    override def pretty: String = s"(${els.map(el => el.pretty).mkString(f" ${lpListConst.pretty} ")}${listEnd})"
+
+    override def prf: liftedProp = throw new Exception(s"attempting to lift list encoding to meta level")
+  }
+
   ///////////// CONSTANTS
 
   case object lpOlWildcard extends lpOlTerm {
@@ -383,6 +414,12 @@ object lpDatastructures {
   case object lpOlTop extends lpOlTerm {
     override def pretty: String = "⊤"
     override def prf: liftedProp = liftedProp(lpOlTop)
+  }
+
+  case object lpOlTop_i extends lpOlTerm {
+    override def pretty: String = "⊤ᵢ"
+
+    override def prf: liftedProp = throw new Exception("trying to print prf for ⊤ᵢ")
   }
 
   case object lpOlBot extends lpOlTerm {
@@ -465,8 +502,9 @@ object lpDatastructures {
   case class lpOlTypedBinaryConnectiveTerm(connective: lpOlBinaryConnective, ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
     override def pretty: String = {
       if (monomorphic) {
-        if (connective == lpInEq) lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,ty, lhs, rhs)).pretty
-        else s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
+        //if (connective == lpInEq) lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,ty, lhs, rhs)).pretty
+        //else s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
+        s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
       }
       else {
         val encodedType = ty match {

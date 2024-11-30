@@ -425,7 +425,7 @@ package inferenceControl {
         }
       }
     }
-    
+
     private final def singleParamod1(withWrapper: AnnotatedClause,
                                      withClause: Clause,
                                      withIndex: Int,
@@ -1833,9 +1833,12 @@ package inferenceControl {
     }
 
     final def liftEq(cl: AnnotatedClause)(implicit sig: Signature): AnnotatedClause = {
-      val (cA_lift, posLift, negLift, lift_other) = LiftEq.canApply(cl.cl)
+      val (cA_lift, posLift, negLift, lift_other, indxs) = LiftEq.canApplyAndTrack(cl.cl)
       if (cA_lift) {
-        val result = AnnotatedClause(Clause(LiftEq(posLift, negLift, lift_other)(sig)), InferredFrom(LiftEq, cl), deleteProp(ClauseAnnotation.PropBoolExt,cl.properties))
+
+        val encInfo = new FurtherInfo()
+        encInfo.addInfoLiftEq = indxs
+        val result = AnnotatedClause(Clause(LiftEq(posLift, negLift, lift_other)(sig)), Role_Plain, InferredFrom(LiftEq, cl), deleteProp(ClauseAnnotation.PropBoolExt,cl.properties), encInfo)
         Out.debug(s"[ToEq] [${cl.id}] > [${result.id}]")
         Out.trace(s"[ToEq] Result: ${result.pretty(sig)}")
         result

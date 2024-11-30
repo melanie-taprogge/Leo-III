@@ -193,5 +193,73 @@ object lpInferenceRuleEncoding {
     }
   }
 
+  case class liftEq(eq0: Boolean, pol0: Boolean) extends inferenceRules {
+    // produce equalitites for rewrite tactic in cases where equality lift changes the representation in the lp encoding
+    // this occours when....
+    // a literal like ((x = y) == T)^^f is lifted, this corresponds to ...
+    // ...
+
+    override val proofIsDefined = true
+
+    override def name: lpConstantTerm = {
+      val eq = if (eq0) "p" else "n"
+      val pol = if (pol0) "t" else "f"
+      lpConstantTerm(s"lifteq_${eq}_$pol")
+    }
+
+    val a = lpOlUserDefinedMonoType("a")
+    val x = lpOlTypedVar(lpOlConstantTerm("x"),a)
+    val y = lpOlTypedVar(lpOlConstantTerm("y"),a)
+    // do i need to do this differently such that I can type x and y?
+
+    override def ty: lpMlType =
+      if (eq0) {
+        // in this case we only need a rule if the literal has negative polarity
+        // [a] (x y : τ a) : π ((x ≠ y) = (¬ (x = y)))
+        lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpInEq,a,x,y),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,a,x,y))).prf
+      } else {
+        throw new Exception("rule for liftEq not encoded yet")
+      }
+    override def proof: lpProofScript =
+      if (eq0) {
+        // in this case we only need a rule if the literal has negative polarity
+        // [a] (x y : τ a) : π ((x ≠ y) = (¬ (x = y)))
+        lpProofScript(Seq(lpProofScriptStringProof("assume a x y;\n\treflexivity")))
+      } else {
+        throw new Exception("proof for liftEq not encoded yet")
+      }
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y), ty, Seq(a))
+
+    override def pretty: String = lpDefinition(name, Seq(x, y), ty, proof, Seq(a)).pretty
+
+    def instanciate(a : lpOlType, x: lpOlTerm, y: lpOlTerm): lpFunctionApp = {
+      lpFunctionApp(name, Seq(x, y), Seq(a))
+    }
+  }
+
+  ////////////////////////////////////////////////////////////////
+  ////////// Meta-Theorem
+  ////////////////////////////////////////////////////////////////
+
+  case object  metaPermutation extends inferenceRules {
+    override def name: lpConstantTerm = lpConstantTerm(s"perm_theorem")
+
+    val σ = lpOlConstantTerm("σ")
+    val c = lpOlConstantTerm("c")
+    val pc = lpOlConstantTerm("preserves_contents")
+    val disj = lpOlConstantTerm("disj")
+    val eval = lpOlConstantTerm("eval_list")
+
+    override def ty: lpMlType = lpMlFunctionType(Seq(lpOlFunctionApp(pc,Seq(σ, c)).prf,lpOlFunctionApp(disj,Seq(c)).prf,lpOlFunctionApp(disj,Seq(lpOlFunctionApp(eval,Seq(σ, c)))).prf))
+
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume σ c h1 h2;\n\n    have H1: (Π x: τ nat, π ((λ x1, (eval x1 c) ∧ (∈ eqn x1 (indexes c))) x) → π (∃(λ y ,(eval y c) ∧ (∈ eqn y σ))))\n        {assume x0 h3;\n        refine (∃ᵢ [nat] [λ y ,(eval y c) ∧ (∈ eqn y σ)] x0) (∧ᵢ (∧ₑ₁ h3) (preserves_contents_el x0 σ c h1 (∧ₑ₂ h3)))};\n    \n    have H2: π (∃(λ y ,(eval y c) ∧ (∈ eqn y σ)))\n        {refine ∃ₑ (disj_imp_lit c h2) H1};\n\n    refine  lit_imp_disj c σ H2;")))
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(σ, c), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(σ, c), ty, proof).pretty
+    def instanciate(σ: Seq[Int], c: Seq[lpOlTerm], before: lpTerm): lpFunctionApp = {
+      lpFunctionApp(name, Seq(lpList(σ.map(indx => lpNum(indx))), lpList(c), lpOlTop_i, before))
+    }
+  }
+
 
 }

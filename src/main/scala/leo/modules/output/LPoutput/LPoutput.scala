@@ -5,7 +5,7 @@ import leo.modules.output.tptpEscapeName
 import leo.modules.prover.LocalState
 import leo.modules.symbolsInProof
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc}
+import leo.modules.output.LPoutput.LPSignature.{ExTTenc,permLib, RwRenc}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
@@ -24,6 +24,7 @@ import scala.util.{Try, Success, Failure}
 object LPoutput {
 
   val nameLogicFile = "extt"
+  val permlibFile = "permuteLib"
   val nameRulesFile = "rules"
   val nameProofFile = "encodedProof"
 
@@ -31,7 +32,7 @@ object LPoutput {
 
     val rulesFileSB: mutable.StringBuilder = new StringBuilder()
     // todo: once lambdapi is fixed, remove the declaration here
-    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile;\nnotation ∨ infix right 6;\n\n")
+    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Impred ${nameLpOutputFolder}.$nameLogicFile;\nnotation ∨ infix right 6;\n\n")
 
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
@@ -104,6 +105,7 @@ object LPoutput {
     val parameters = if (continuousNumbers) parameters0 else (0, 0, 0, 0)
 
     if (!Seq(leo.datastructures.Role_Conjecture).contains(cl.role)) { // we start our proof with the negated conjecture
+      //print(f"\nencoding ${rule}\n")
 
       rule match {
         case leo.modules.calculus.PolaritySwitch =>
@@ -133,10 +135,11 @@ object LPoutput {
           val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
           ("DexExpand", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
         case leo.modules.calculus.Simp =>
-          throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
+          //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
           // todo: eta expansion
-          val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
-          ("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
+          //val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
+          //("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
+          (s"Rule ${rule.name} not encoded yet", lpOlNothing, parameters, Set.empty)
         case leo.modules.calculus.PreUni =>
           val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
           ("PreUni", encodingPreUni._1, parameters, encodingPreUni._2)
@@ -145,9 +148,12 @@ object LPoutput {
           //throw new Exception(s"add info rewriting: ${cl.furtherInfo.addInfoRewriting}")
           val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
           ("RewriteSimp", encodingRewrite._1, parameters, encodingRewrite._2)
+        case leo.modules.calculus.LiftEq =>
+          val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
+          ("LiftEq", encodingLiftEq._1, parameters, encodingLiftEq._2)
         case _ =>
-          //print(s"\n $rule not encoded yet \n\n")
-          (s"Rule ${rule.name} not encoded yet", lpOlNothing, parameters, Set.empty)
+          val parentIDs = parentInLpEncID.map(id => id.name)
+          (s"Rule ${rule.name} not encoded yet, parents are: ${parentIDs.mkString(", ")}", lpOlNothing, parameters, Set.empty)
       }
     } //todo: either introduce else or filter out conj before!
     else ("no role or conjecture?", lpOlNothing, parameters, Set.empty)
@@ -159,7 +165,7 @@ object LPoutput {
     val lpOutputPath = s"${lpOutputPath0}${nameLpOutputFolder}/"
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
-    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile};\nnotation ∨ infix right 6;\n\n")
+    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Impred ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} ${nameLpOutputFolder}.${permlibFile};\nnotation ∨ infix right 6;\n\n")
     val proofStepsSB: mutable.StringBuilder = new StringBuilder()
 
     def extractNecessaryFormulas(state:LocalState):Unit={
@@ -327,13 +333,11 @@ object LPoutput {
       initLP match {
         case Success(exitCode) => {
           if (exitCode != 0) {
-            println(s"\nFailed to initiate Lambdapi package (exit code $exitCode).\nFiles are saved to the output directory.")
             lpInitSuccess = false
             Files.createDirectories(Paths.get(lpOutputPath))
           }
         }
         case Failure(exception) => {
-          println(s"\nFailed to initiate Lambdapi package ($exception).\nFiles are saved to the output directory.")
           lpInitSuccess = false
           Files.createDirectories(Paths.get(lpOutputPath))
         }
@@ -344,13 +348,15 @@ object LPoutput {
       val exttFilePath = Paths.get(s"${lpOutputPath}${nameLogicFile}.lp")
       Files.write(exttFilePath, ExTTenc.getBytes(StandardCharsets.UTF_8))
 
+      //
+      val permLibFilePath = Paths.get(s"${lpOutputPath}${permlibFile}.lp")
+      Files.write(permLibFilePath, permLib.getBytes(StandardCharsets.UTF_8))
+
       val rulesFilePath = Paths.get(s"${lpOutputPath}${nameRulesFile}.lp")
       Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
       val proofFilePath = Paths.get(s"${lpOutputPath}${nameProofFile}.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
-
-      //print(s"// rules \n ${rulesFileSB.toString}\n  // proof \n ${proofFileSB.toString}")
 
 
       /*

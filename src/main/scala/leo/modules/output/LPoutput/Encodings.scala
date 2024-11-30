@@ -183,7 +183,7 @@ object Encodings {
           if (lit.polarity) {
             encLit = lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl,lefEnc,rigEnc)
           } else {
-            encLit = lpOlTypedBinaryConnectiveTerm(lpInEq,encTyTl,lefEnc,rigEnc)
+            encLit = lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl,lefEnc,rigEnc))
           }
         } else {
           val (termEnc, usedSymbolsUpdated) = term2LP(lit.left, bVarMap, sig, usedSymbols)

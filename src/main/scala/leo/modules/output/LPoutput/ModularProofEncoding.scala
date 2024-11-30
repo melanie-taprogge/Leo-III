@@ -614,6 +614,107 @@ object ModularProofEncoding {
     (proofScript, usedSymbols)
   }
 
+  // encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
+  def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature) = { //: (lpProofScript, Set[lpStatement]) = {
+
+    // encode the lift of equality literals
+    // ((x = y) = T)^a to (x = T)^a
+    // ((x ≠ y) = T)^tt to (x = T)^ff
+    // ((x ≠ y) = T)^ff to (x = T)^tt
+
+    // the complete proof script consists of 3 steps:
+    // 1. Assume free variables
+    // 2. For each of the literals in the original caluse:
+    //    a) in case of negative equality lift, a rewrite tactic has to be applied
+    //    b) for the new equality literlas, the order within the equality may have changed, if so: apply rewrite tactic
+    // 3. If the order of literals has changed, apply meta theorem and refine with instanciated meta-theorem
+    //    Else refine with the last step
+
+    if (parents.length != 1) throw new Exception("trying to encode lift equaltiy step with more than one parent")
+
+    // Extract information about what literals were edited in which way
+    // And in which order they will occur in the resulting clause
+    val litsPosLift = addInfo(0)
+    val litsNegLift = addInfo(1)
+    val litsOld = addInfo(2)
+    val edIndices = litsPosLift ++ litsNegLift
+    val indices = (edIndices ++ litsOld).sorted
+    val permutation = litsPosLift ++ litsNegLift ++ litsOld
+
+    var allSteps: Seq[lpProofScriptStep] = Seq.empty
+    var usedRules: Set[lpStatement] = Set.empty
+    var liftedLits: Seq[lpOlTerm] = Seq.empty
+
+    // 1. Abstract over free variables
+    val bVars = clauseVars2LP(parents.head.cl.implicitlyBound, sig, Set.empty)._2
+    val (clauseQuantification, applySymbolsToParent) = clauseRuleQuantification(parents.head.cl, bVars, sig)
+    if (clauseQuantification.nonEmpty) allSteps = allSteps :+ lpAssume(clauseQuantification.map(var0 => var0.untyped))
+    val lastStep: lpTerm = lpFunctionApp(parentNameLpEnc.head, applySymbolsToParent)
+
+    indices foreach {indx =>
+      val lit = parents.head.cl.lits(indx)
+      if (edIndices.contains(indx)){
+        val lhsRhs = ===.unapply(lit.left)
+        if (lhsRhs == None) throw new Exception("trying to encode lifting equality on malformed term")
+        val (lhs, rhs) = lhsRhs.get
+        val encRhs = term2LP(rhs, bVars, sig)._1
+        val encLhs = term2LP(lhs, bVars, sig)._1
+        val encType = type2LP(lhs.ty, sig)._1
+        val rwPattern = generateClausePatternTerm(permutation(indx), indices.length)
+        val litPol = lit.polarity
+        var finalLit : lpOlTerm = lpOlNothing
+        if (litsPosLift.contains(indx)) {
+          if (!litPol) {
+            finalLit = lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, encType, encLhs, encRhs))
+          } else {
+            finalLit = lpOlTypedBinaryConnectiveTerm(lpEq, encType, encLhs, encRhs)
+          }
+        } else if (litsNegLift.contains(indx)) {
+          //    2 a) in case of negative equality lift, a rewrite tactic has to be applied
+          throw new Exception("encoding of inequality lift is unfinished")
+          /*
+          if (!litPol) {
+            print("\nlit is negative")
+            allSteps = allSteps :+ lpRewrite(rwPattern, lpInferenceRuleEncoding.liftEq().instanciate(encType, encLhs, encRhs))
+            usedRules = usedRules + liftEq()
+            print(f"\nadd rule:\n${liftEq().pretty}")
+            finalLit = lpOlTypedBinaryConnectiveTerm(lpInEq, encType, encLhs, encRhs)
+          } else {
+            finalLit = lpOlTypedBinaryConnectiveTerm(lpEq, encType, encLhs, encRhs)
+          }
+           */
+        }
+        val lit_cl = cl.cl.lits(indx)
+        if (lhs != lit_cl.left) {
+          // 2 b) for the new equality literlas, the order within the equality may have changed, if so: apply rewrite tactic
+          allSteps = allSteps :+ lpRewrite(rwPattern, flipLiteral(litPol).instanciate(encRhs,encLhs,None))
+          finalLit = flipLiteral(litPol).res(encType.lift2Poly,encRhs,encLhs)
+          usedRules = usedRules + flipLiteral(true)
+        }
+        liftedLits = liftedLits :+ finalLit
+      }else{
+        val lit = parents.head.cl.lits(indx)
+        val encLit = term2LP(asTerm(lit), bVars, sig)._1
+        liftedLits = liftedLits :+ encLit
+      }
+    }
+
+    // 3. If the order of literals has changed, apply meta theorem and refine with instanciated meta-theorem
+    //    Else refine with the last step
+    val needsPermute = permutation != permutation.sorted
+    if (needsPermute){
+      allSteps = allSteps :+ lpRefine(metaPermutation.instanciate(permutation,liftedLits,lastStep))
+      // permutation will not need to be added to the rules assuming that we will add it to stdlib
+    } else {
+      allSteps = allSteps :+ lpRefine(lpFunctionApp(lastStep,Seq()))
+    }
+
+    val finishedProof = lpProofScript(allSteps)
+
+    (finishedProof, usedRules)
+  }
+
+
   def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], String, Term, Term)], parentModoluRw: Option[Clause], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature) = { //: (lpProofScript, Set[lpStatement]) = {
 
     val rewriteEqClause = parents(1).cl

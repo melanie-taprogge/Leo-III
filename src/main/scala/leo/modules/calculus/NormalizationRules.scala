@@ -355,26 +355,40 @@ object LiftEq extends CalculusRule {
   type NegLiftLits = Seq[Literal]
   type OtherLits = Seq[Literal]
   final def canApply(cl: Clause): (Boolean, PosLiftLits, NegLiftLits, OtherLits) = {
-    var can = false
-    var posLiftLits: PosLiftLits = Vector()
-    var negLiftLits: NegLiftLits = Vector()
-    var otherLits: OtherLits = Vector()
-    val lits = cl.lits.iterator
-    while (lits.hasNext) {
-      val l = lits.next()
-      val canLift = canApply(l)
-      if (canLift == POS_LIFT) {
-        posLiftLits = posLiftLits :+ l
-        can = true
-      } else if (canLift == NEG_LIFT) {
-        negLiftLits = negLiftLits :+ l
-        can = true
-      } else {
-        otherLits = otherLits :+ l
-      }
-    }
+    val (can, posLiftLits, negLiftLits, otherLits, _) = canApplyAndTrack(cl)
     (can, posLiftLits, negLiftLits, otherLits)
   }
+
+  final def canApplyAndTrack(cl: Clause): (Boolean, PosLiftLits, NegLiftLits, OtherLits, Seq[Seq[Int]]) = {
+      var can = false
+      var posLiftLits: PosLiftLits = Vector()
+      var negLiftLits: NegLiftLits = Vector()
+      var otherLits: OtherLits = Vector()
+      var posLiftLits_inx: Seq[Int] = Vector()
+      var negLiftLits_inx: Seq[Int] = Vector()
+      var otherLits_inx: Seq[Int] = Vector()
+
+      val lits = cl.lits.iterator
+      var indx = -1
+      while (lits.hasNext) {
+        indx = indx +1
+        val l = lits.next()
+        val canLift = canApply(l)
+        if (canLift == POS_LIFT) {
+          posLiftLits = posLiftLits :+ l
+          posLiftLits_inx = posLiftLits_inx :+ indx
+          can = true
+        } else if (canLift == NEG_LIFT) {
+          negLiftLits = negLiftLits :+ l
+          negLiftLits_inx = negLiftLits_inx :+ indx
+          can = true
+        } else {
+          otherLits = otherLits :+ l
+          otherLits_inx = otherLits_inx :+ indx
+        }
+      }
+      (can, posLiftLits, negLiftLits, otherLits, Seq(posLiftLits_inx, negLiftLits_inx, otherLits_inx))
+    }
 
   final def apply(posLiftLits: PosLiftLits, negLiftLits: NegLiftLits, otherLits: OtherLits)(implicit sig: Signature): Seq[Literal] = {
     posLiftLits.map(l => apply(POS_LIFT, l.left, l.polarity)(sig)) ++ negLiftLits.map(l => apply(NEG_LIFT, l.left, l.polarity)(sig)) ++ otherLits
