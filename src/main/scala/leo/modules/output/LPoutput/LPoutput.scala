@@ -28,11 +28,13 @@ object LPoutput {
   val nameRulesFile = "rules"
   val nameProofFile = "encodedProof"
 
+  var inclduePermLib = false
+
   def generateSignature(usedSymbols: Set[lpStatement], nameLpOutputFolder: String): (mutable.StringBuilder) = {
 
     val rulesFileSB: mutable.StringBuilder = new StringBuilder()
     // todo: once lambdapi is fixed, remove the declaration here
-    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Impred ${nameLpOutputFolder}.$nameLogicFile;\nnotation ∨ infix right 6;\n\n")
+    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool ${nameLpOutputFolder}.$nameLogicFile;\n\n") // maybe it will be necessary for now to add \nnotation ∨ infix right 6;
 
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
@@ -147,7 +149,11 @@ object LPoutput {
         case leo.modules.calculus.RewriteSimp =>
           //throw new Exception(s"add info rewriting: ${cl.furtherInfo.addInfoRewriting}")
           val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
-          ("RewriteSimp", encodingRewrite._1, parameters, encodingRewrite._2)
+          if (encodingRewrite._3){
+            ("RewriteSimp", encodingRewrite._1, parameters, encodingRewrite._2)
+          }else {
+            (s"Rewrite Simp with non-grpund arguments not encoded yet", lpOlNothing, parameters, Set.empty)
+          }
         case leo.modules.calculus.LiftEq =>
           val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
           ("LiftEq", encodingLiftEq._1, parameters, encodingLiftEq._2)
@@ -165,7 +171,11 @@ object LPoutput {
     val lpOutputPath = s"${lpOutputPath0}${nameLpOutputFolder}/"
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
-    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Impred ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} ${nameLpOutputFolder}.${permlibFile};\nnotation ∨ infix right 6;\n\n")
+    val permLibStr: String ={
+      if (inclduePermLib) f"${nameLpOutputFolder}.${permlibFile}"
+      else ""
+    }
+    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
     val proofStepsSB: mutable.StringBuilder = new StringBuilder()
 
     def extractNecessaryFormulas(state:LocalState):Unit={

@@ -201,7 +201,7 @@ object lpDatastructures {
   abstract class lpOlTypeConstants extends lpType
 
   case object lpOlTypeConstructor extends lpOlTypeConstants {
-    override def pretty: String = "×"
+    override def pretty: String = "⤳"
     override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpOlTypeConstructor.pretty} to meta level")
   }
 

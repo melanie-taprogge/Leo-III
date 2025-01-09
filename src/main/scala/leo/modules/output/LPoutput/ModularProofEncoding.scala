@@ -618,9 +618,9 @@ object ModularProofEncoding {
   def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature) = { //: (lpProofScript, Set[lpStatement]) = {
 
     // encode the lift of equality literals
-    // ((x = y) = T)^a to (x = T)^a
-    // ((x ≠ y) = T)^tt to (x = T)^ff
-    // ((x ≠ y) = T)^ff to (x = T)^tt
+    // ((x = y) = T)^a to (x = y)^a
+    // ((x ≠ y) = T)^tt to (x = y)^ff
+    // ((x ≠ y) = T)^ff to (x = y)^tt
 
     // the complete proof script consists of 3 steps:
     // 1. Assume free variables
@@ -721,82 +721,85 @@ object ModularProofEncoding {
     val parent = parents(0).cl
     val bVarsRewriteEq = clauseVars2LP(rewriteEqClause.implicitlyBound, sig, Set.empty)._2
     val (rewriteEqImpVars, encRewriteEq0, _) = clause2LP_unquantified(rewriteEqClause, Set.empty, sig)
-    if (rewriteEqImpVars.nonEmpty) throw new Exception(s"The LP encoding of Rewrite for non grounded rules is not implemented yet")
-    var encRewriteEq = encRewriteEq0.args.head
-    val (parentImpVars, _, _) = clause2LP_unquantified(parent, Set.empty, sig)
-    val (childImpVars, _, _) = clause2LP_unquantified(cl.cl, Set.empty, sig)
-    if (childImpVars.nonEmpty) throw new Exception(s"encRewrite for child with free variables is not encoded yet (but only application should be missing :))")
-    var sourceBeforeEq: lpTerm = parentNameLpEnc(1)
-    val sourceBeforeParent: lpTerm = parentNameLpEnc(0)
-
     var usedSymbols: Set[lpStatement] = Set.empty
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
+    if (rewriteEqImpVars.nonEmpty) {
+      (lpOlNothing, usedSymbols, false)
+    }//throw new Exception(s"The LP encoding of Rewrite for non grounded rules is not implemented yet")
+    else {
+      var encRewriteEq = encRewriteEq0.args.head
+      val (parentImpVars, _, _) = clause2LP_unquantified(parent, Set.empty, sig)
+      val (childImpVars, _, _) = clause2LP_unquantified(cl.cl, Set.empty, sig)
+      if (childImpVars.nonEmpty) throw new Exception(s"encRewrite for child with free variables is not encoded yet (but only application should be missing :))")
+      var sourceBeforeEq: lpTerm = parentNameLpEnc(1)
+      val sourceBeforeParent: lpTerm = parentNameLpEnc(0)
 
-    // The modular proof script can consist of the following steps:
-    // 1. Abstract over free variables
-    // 2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal. The exact form depends on the kind of clause used as a rewrite rule by Leo-III:
-    //    a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
-    //    a) case II) If the rewrite-clause is an equational single literal, use =symp pos eq to prove the reverse rewrite rule
-    //    b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly
-    // 3. Use the (transformed) rewrite-clause to rewrite the focused goal
-    // 4. If simplifications were applied, use the encoding of (Simp) to verify the transformations
-    // 5. Refine with the (instantiated) parent
+      // The modular proof script can consist of the following steps:
+      // 1. Abstract over free variables
+      // 2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal. The exact form depends on the kind of clause used as a rewrite rule by Leo-III:
+      //    a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
+      //    a) case II) If the rewrite-clause is an equational single literal, use =symp pos eq to prove the reverse rewrite rule
+      //    b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly
+      // 3. Use the (transformed) rewrite-clause to rewrite the focused goal
+      // 4. If simplifications were applied, use the encoding of (Simp) to verify the transformations
+      // 5. Refine with the (instantiated) parent
 
-    // 1. Abstract over free variables
-    val impBoundParent = parentImpVars.map(var0 => var0.untyped)
-    if (impBoundParent.nonEmpty) allSteps = allSteps :+ lpAssume(impBoundParent)
+      // 1. Abstract over free variables
+      val impBoundParent = parentImpVars.map(var0 => var0.untyped)
+      if (impBoundParent.nonEmpty) allSteps = allSteps :+ lpAssume(impBoundParent)
 
-    // 2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal
-    // Test if the clause representing the rewrite equation has the right form (only has one literal that is positive and equational)
-    // If it is not equational, transform it to an equational one
-    if (rewriteEqClause.lits.length != 1) throw new Exception(s"Error while attempting to encode rewrite step in LP: Rewrite-clause with more than one literal")
-    val rewriteEq = rewriteEqClause.lits.head
-    if (!rewriteEq.equational) {
-      // 2 a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
-      val transformedRewriteEq = if (rewriteEq.polarity) {
-        lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, term2LP(rewriteEq.left, bVarsRewriteEq, sig)._1, lpOlTop)
-      } else {
-        lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, term2LP(rewriteEq.left, bVarsRewriteEq, sig)._1, lpOlBot)
+      // 2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal
+      // Test if the clause representing the rewrite equation has the right form (only has one literal that is positive and equational)
+      // If it is not equational, transform it to an equational one
+      if (rewriteEqClause.lits.length != 1) throw new Exception(s"Error while attempting to encode rewrite step in LP: Rewrite-clause with more than one literal")
+      val rewriteEq = rewriteEqClause.lits.head
+      if (!rewriteEq.equational) {
+        // 2 a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
+        val transformedRewriteEq = if (rewriteEq.polarity) {
+          lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, term2LP(rewriteEq.left, bVarsRewriteEq, sig)._1, lpOlTop)
+        } else {
+          lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, term2LP(rewriteEq.left, bVarsRewriteEq, sig)._1, lpOlBot)
+        }
+        val transformationStepName = "TransformToEqLits"
+        val rewriteEqTransformed = encRewriteEq match {
+          case lpOlUnaryConnectiveTerm(lpNeg, body) =>
+            lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, body)
+          case _ =>
+            throw new Exception("trying to transform term of wrong format to rewriting equality")
+        }
+        //  2 b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly
+        // todo: sbustitution
+        val haveTransformStep = lpHave(transformationStepName, rewriteEqTransformed.prf, lpProofScript(Seq(lpRewrite(None, mkBotEqNegProp_script(sourceBeforeEq.pretty).name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
+        usedSymbols = usedSymbols + mkBotEqNegProp_script()
+        allSteps = allSteps :+ haveTransformStep
+        encRewriteEq = transformedRewriteEq
+        sourceBeforeEq = lpConstantTerm(transformationStepName)
+      } else if (rewriteEq.polarity) {
+        //2 a) case II) If the rewrite-clause is an equational single literal, use =symp pos eq to prove the reverse rewrite rule
+        // todo
+        throw new Exception("The LP encoding of Rewrite for positive equational rewrite-clauses is not implemented yet")
       }
-      val transformationStepName = "TransformToEqLits"
-      val rewriteEqTransformed = encRewriteEq match {
-        case lpOlUnaryConnectiveTerm(lpNeg, body) =>
-          lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, body)
-        case _ =>
-          throw new Exception("trying to transform term of wrong format to rewriting equality")
+      else throw new Exception("Error while attempting to encode rewrite step in LP: Rewrite rule is equational but not positive")
+
+      // 3. Use the (transformed) rewrite-clause to rewrite the focused goal
+      // todo: will we still find the position if variables have different names? I assume i should prove the rules with quantifications then it should work
+      var rewriteSkript: Seq[lpProofScriptStep] = Seq(lpRewrite(None, sourceBeforeEq))
+
+      // 4. If simplifications were applied, use the encoding of (Simp) to verify the transformations
+      if (addInfoSimp.nonEmpty) {
+        throw new Exception(s"rewriting with following simplification is implemented but untested, check carefully")
+        val (simplificationSteps, usedSymbolsNew) = simplificationInfoToSteps(parentModoluRw.get, addInfoSimp, sig)
+        rewriteSkript = rewriteSkript ++ simplificationSteps
+        usedSymbols = usedSymbols ++ usedSymbolsNew
       }
-      //  2 b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly
-      // todo: sbustitution
-      val haveTransformStep = lpHave(transformationStepName, rewriteEqTransformed.prf, lpProofScript(Seq(lpRewrite(None, mkBotEqNegProp_script(sourceBeforeEq.pretty).name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
-      usedSymbols = usedSymbols + mkBotEqNegProp_script()
-      allSteps = allSteps :+ haveTransformStep
-      encRewriteEq = transformedRewriteEq
-      sourceBeforeEq = lpConstantTerm(transformationStepName)
-    } else if (rewriteEq.polarity) {
-      //2 a) case II) If the rewrite-clause is an equational single literal, use =symp pos eq to prove the reverse rewrite rule
-      // todo
-      throw new Exception("The LP encoding of Rewrite for positive equational rewrite-clauses is not implemented yet")
+
+      // 5. Refine with the (instantiated) parent
+      allSteps = allSteps :+ lpRewrite(None, lpConstantTerm(sourceBeforeEq.pretty))
+      allSteps = allSteps :+ lpRefine(lpFunctionApp(sourceBeforeParent, Seq()))
+      val finishedProof = lpProofScript(allSteps)
+
+      (finishedProof, usedSymbols, true)
     }
-    else throw new Exception("Error while attempting to encode rewrite step in LP: Rewrite rule is equational but not positive")
-
-    // 3. Use the (transformed) rewrite-clause to rewrite the focused goal
-    // todo: will we still find the position if variables have different names? I assume i should prove the rules with quantifications then it should work
-    var rewriteSkript: Seq[lpProofScriptStep] = Seq(lpRewrite(None, sourceBeforeEq))
-
-    // 4. If simplifications were applied, use the encoding of (Simp) to verify the transformations
-    if (addInfoSimp.nonEmpty) {
-      throw new Exception(s"rewriting with following simplification is implemented but untested, check carefully")
-      val (simplificationSteps, usedSymbolsNew) = simplificationInfoToSteps(parentModoluRw.get, addInfoSimp, sig)
-      rewriteSkript = rewriteSkript ++ simplificationSteps
-      usedSymbols = usedSymbols ++ usedSymbolsNew
-    }
-
-    // 5. Refine with the (instantiated) parent
-    allSteps = allSteps :+ lpRewrite(None, lpConstantTerm(sourceBeforeEq.pretty))
-    allSteps = allSteps :+ lpRefine(lpFunctionApp(sourceBeforeParent, Seq()))
-    val finishedProof = lpProofScript(allSteps)
-
-    (finishedProof, usedSymbols)
   }
 
   ////////////////////////////////////////////////////////////////
