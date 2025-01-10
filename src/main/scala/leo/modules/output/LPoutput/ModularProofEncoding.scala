@@ -715,7 +715,7 @@ object ModularProofEncoding {
   }
 
 
-  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], String, Term, Term)], parentModoluRw: Option[Clause], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature) = { //: (lpProofScript, Set[lpStatement]) = {
+  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], String, Term, Term)], parentModoluRw: Option[Clause], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Boolean) = { //: (lpProofScript, Set[lpStatement]) = {
 
     val rewriteEqClause = parents(1).cl
     val parent = parents(0).cl
@@ -724,7 +724,7 @@ object ModularProofEncoding {
     var usedSymbols: Set[lpStatement] = Set.empty
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     if (rewriteEqImpVars.nonEmpty) {
-      (lpOlNothing, usedSymbols, false)
+      (lpProofScript(Seq.empty), usedSymbols, false)
     }//throw new Exception(s"The LP encoding of Rewrite for non grounded rules is not implemented yet")
     else {
       var encRewriteEq = encRewriteEq0.args.head

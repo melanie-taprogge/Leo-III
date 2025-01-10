@@ -5,7 +5,7 @@ import leo.modules.output.tptpEscapeName
 import leo.modules.prover.LocalState
 import leo.modules.symbolsInProof
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{ExTTenc,permLib, RwRenc}
+import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpNpp, permLib}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
@@ -13,7 +13,7 @@ import java.nio.file.{Files, Paths}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
 import scala.sys.process._
-import scala.util.{Try, Success, Failure}
+import scala.util.{Failure, Success, Try}
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -96,7 +96,7 @@ object LPoutput {
     (rulesFileSB)
   }
 
-  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long, ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0: (Int, Int, Int, Int)): (String, lpStatement, (Int, Int, Int, Int), Set[lpStatement]) = {
+  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long, ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0: (Int, Int, Int, Int)): (String, lpProofScript, (Int, Int, Int, Int), Set[lpStatement]) = {
 
     val skripts = true
 
@@ -141,7 +141,7 @@ object LPoutput {
           // todo: eta expansion
           //val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
           //("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
-          (s"Rule ${rule.name} not encoded yet", lpOlNothing, parameters, Set.empty)
+          (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), parameters, Set.empty)
         case leo.modules.calculus.PreUni =>
           val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
           ("PreUni", encodingPreUni._1, parameters, encodingPreUni._2)
@@ -152,17 +152,17 @@ object LPoutput {
           if (encodingRewrite._3){
             ("RewriteSimp", encodingRewrite._1, parameters, encodingRewrite._2)
           }else {
-            (s"Rewrite Simp with non-grpund arguments not encoded yet", lpOlNothing, parameters, Set.empty)
+            (s"Rewrite Simp with non-grpund arguments not encoded yet", lpProofScript(Seq.empty), parameters, Set.empty)
           }
         case leo.modules.calculus.LiftEq =>
           val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
           ("LiftEq", encodingLiftEq._1, parameters, encodingLiftEq._2)
         case _ =>
           val parentIDs = parentInLpEncID.map(id => id.name)
-          (s"Rule ${rule.name} not encoded yet, parents are: ${parentIDs.mkString(", ")}", lpOlNothing, parameters, Set.empty)
+          (s"Rule ${rule.name} not encoded yet, parents are: ${parentIDs.mkString(", ")}", lpProofScript(Seq.empty), parameters, Set.empty)
       }
     } //todo: either introduce else or filter out conj before!
-    else ("no role or conjecture?", lpOlNothing, parameters, Set.empty)
+    else ("no role or conjecture?", lpProofScript(Seq.empty), parameters, Set.empty)
   }
 
 
@@ -177,6 +177,7 @@ object LPoutput {
     }
     proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
     val proofStepsSB: mutable.StringBuilder = new StringBuilder()
+    var proofSteps: Seq[lpProofScriptStep] = Seq.empty
 
     def extractNecessaryFormulas(state:LocalState):Unit={
 
@@ -240,23 +241,27 @@ object LPoutput {
         val compressedProof = proof
         var idClauseMap: mutable.HashMap[Long,ClauseProxy] = mutable.HashMap.empty
         val identicalSteps: mutable.HashMap[Long,lpConstantTerm] = mutable.HashMap.empty
-        var conjCounter = 0
+        var conjEnc = false
         var axCounter = 0
+        val conjName = lpConstantTerm(s"negatedConjecture")
 
       proofFileSB.append("\n\n// PROBLEM ENCODING //////////////////////////////////////\n\n")
+
+        var conjecture : lpOlTerm = lpOlNothing
 
         compressedProof foreach { step =>
           val stepId = step.id
           idClauseMap = idClauseMap + (stepId -> step)
 
           if (step.role == Role_NegConjecture) {
-            val (encConj, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
-            usedSymbols = usedSymbolsNew
-            val conjName = lpConstantTerm(s"negatedConjecture$conjCounter")
-            proofFileSB.append(lpDeclaration(conjName, Seq.empty, encConj).pretty)
-            // let the corresponding step number point to "negated_conjecture"
+            if (conjEnc) throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
+            conjEnc = true
+            val (encConj, _) = clause2LP(step.cl, usedSymbols, sig)
             identicalSteps += (stepId -> conjName)
-            conjCounter = conjCounter + 1
+            conjecture = encConj.lits match {
+              case Seq(lpOlUnaryConnectiveTerm(lpNot, conj)) => conj
+              case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
+            }
           } else if (step.role == Role_Axiom){ //todo: what about other roles like lamme etc. ?
             val (encClause, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
             usedSymbols = usedSymbolsNew
@@ -271,7 +276,7 @@ object LPoutput {
 
             var encodeStep = false
 
-            step.annotation.parents foreach { parent =>
+            step.annotation.parents foreach {parent =>
               if (!Seq().contains(parent.role)) { //Role_NegConjecture Role_Conjecture
                 val encParent = clause2LP(parent.cl, usedSymbols, sig)._1
                 if (encParent == encStep) {
@@ -306,15 +311,18 @@ object LPoutput {
               val (ruleName,proofTerm, updatedParameters, updatedUsedSymbols) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
 
               // if the step is actually new, we want to add it to the output
-              if (proofTerm == lpOlNothing) {
+              if (proofTerm == lpProofScript(Seq.empty)) {
                 // todo: encode these rules! :)
                 proofStepsSB.append(s"// The rule ${step.annotation.fromRule} is not encoded yet\n")
                 proofStepsSB.append(s"symbol step${step.id} : ${encStep.pretty};\n\n")
+                proofSteps = proofSteps :+ lpProofScriptCommentLine(s"The rule ${step.annotation.fromRule} is not encoded yet")
+                proofSteps = proofSteps :+ lpHave(nameStep(step.id.toInt).name, encStep, lpProofScript(Seq(lpProofScriptAdmit())))
               } else {
                 // otherwise we provide it as an axiom
                 //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
                 // and encode the proof based on its parent clauses
                 //encodedProblem.append(s"$proofTerm;\n")
+                proofSteps = proofSteps :+ lpHave(nameStep(step.id.toInt).name,encStep,proofTerm)
                 proofStepsSB.append(s"// $ruleName\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm, Seq.empty, Seq(lpOpaque)).pretty}\n")
                 // and we will add the necessary symbols to the generated Signature
                 usedSymbols = usedSymbols ++ updatedUsedSymbols
@@ -326,7 +334,18 @@ object LPoutput {
 
       proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
 
-      proofFileSB.append(proofStepsSB)
+      // construct the proof based on all the individual steps
+      // in the proof of the conjecture, first instanciate npp, then assume the negated conjecture
+      proofSteps =  lpAssume(Seq(conjName)) +: proofSteps
+      proofSteps =  lpRefine(lpFunctionApp(lpNpp.name,Seq(conjecture, lpWildcard))) +: proofSteps
+      // finally, refine with the last step.
+      val lastStepName = proofSteps.last match {
+        case lpHave(name, _,_,_) => name
+        case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last.pretty}")
+      }
+      proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lpConstantTerm(lastStepName),Seq.empty))
+      val completeProof = lpDefinition(lpConstantTerm("encodedProof"),Seq.empty,conjecture.prf,lpProofScript(proofSteps))
+      proofFileSB.append(completeProof.pretty)
 
       // generate the signature
 

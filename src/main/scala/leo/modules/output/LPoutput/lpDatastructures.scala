@@ -565,6 +565,19 @@ object lpDatastructures {
     override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{$proof"
   }
 
+  case class lpProofScriptAdmit(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+
+    val tabs = "\t" * tab
+
+    override def addTab(i: Int): lpProofScriptStep = lpProofScriptAdmit(tab + i)
+
+    override def toProofScrips: lpProofScript = throw new Exception(s"Error: trying to convert the single comment `admit` to a proof script")
+
+    override def pretty: String = s"${tabs}admit"
+
+    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{admit"
+  }
+
   case class lpSimplify(symbolsToUnfold: Set[lpConstantTerm], tab: Int = 0)  extends lpProofScriptStep(tab: Int) {
     override def addTab(i: Int): lpProofScriptStep = lpSimplify(symbolsToUnfold, tab + i)
 

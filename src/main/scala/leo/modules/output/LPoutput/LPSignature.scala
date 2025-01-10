@@ -16,6 +16,16 @@ object LPSignature {
     override def pretty: String = lpDeclaration(lpEm.name,Seq.empty,lpEm.ty).pretty
   }
 
+  case object lpNpp extends lpAxioms {
+    // symbol npp x : π(¬ ¬ x) → π x
+    // todo: add proof encoding
+    override def name: lpConstantTerm = lpConstantTerm("npp")
+
+    override def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"), lpOtype.lift2Meta)),lpMlFunctionType(Seq(lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm("x"))).prf,lpOlConstantTerm("x").prf)))
+
+    override def pretty: String = lpDeclaration(lpNpp.name, Seq.empty, lpNpp.ty).pretty
+  }
+
   case object lpPropExt extends lpAxioms {
     override def name: lpConstantTerm = lpConstantTerm("propExt")
 
