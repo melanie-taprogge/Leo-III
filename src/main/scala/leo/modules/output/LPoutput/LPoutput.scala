@@ -1,5 +1,6 @@
 package leo.modules.output.LPoutput
 
+import leo.Out
 import leo.datastructures.{ClauseProxy, Role_Axiom, Role_NegConjecture, Signature}
 import leo.modules.output.tptpEscapeName
 import leo.modules.prover.LocalState
@@ -96,7 +97,7 @@ object LPoutput {
     (rulesFileSB)
   }
 
-  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long, ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0: (Int, Int, Int, Int)): (String, lpProofScript, (Int, Int, Int, Int), Set[lpStatement]) = {
+  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long, ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0: (Int, Int, Int, Int)): (String, lpProofScript, Set[lpStatement], Option[String]) = {
 
     val skripts = true
 
@@ -109,60 +110,63 @@ object LPoutput {
     if (!Seq(leo.datastructures.Role_Conjecture).contains(cl.role)) { // we start our proof with the negated conjecture
       //print(f"\nencoding ${rule}\n")
 
+      //print(s"Encoding application of caluclus rule ${rule.name}\n")
+      Out.info(s"Encoding application of caluclus rule ${rule.name}")
       rule match {
         case leo.modules.calculus.PolaritySwitch =>
           //todo: dont forget to map to the correct formula! make special case for negated conjecture
           //val encoding = encPolaritySwitchClause(cl, cl.annotation.parents.head,parentInLpEncID.head,sig,parameters) //¿polarity switch always only has one parent, right?
           //encoding
           val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
-          ("PolaritySwitch", encoding._1, (0, 0, 0, 0), encoding._2)
+          ("PolaritySwitch", encoding._1, encoding._2, None)
 
         case leo.modules.calculus.FuncExt =>
           val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig)
-          ("FuncExt", encoding._1, parameters, encoding._2)
+          ("FuncExt", encoding._1, encoding._2, None)
 
         case leo.modules.calculus.BoolExt =>
           val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
-          ("BoolExt", encoding._1, (0, 0, 0, 0), encoding._2)
+          ("BoolExt", encoding._1, encoding._2, None)
 
         case leo.modules.calculus.OrderedEqFac =>
           //val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig)
           //(encodings._1,(0,0,0,0),encodings._2)
           val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
-          ("OrderedEqFac", encodings._1, parameters, encodings._2)
+          ("OrderedEqFac", encodings._1, encodings._2, None)
 
         case leo.modules.calculus.DefExpSimp =>
           //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
           // todo: eta expansion
           val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
-          ("DexExpand", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
+          print(s"RESPULT: ${encodingsSimp._4}\n\n")
+          ("DexExpand", encodingsSimp._1, encodingsSimp._2, encodingsSimp._4)
+
         case leo.modules.calculus.Simp =>
           //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
           // todo: eta expansion
           //val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
           //("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
-          (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), parameters, Set.empty)
+          (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, Option("Formula simplification not encoded yet"))
+
         case leo.modules.calculus.PreUni =>
           val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
-          ("PreUni", encodingPreUni._1, parameters, encodingPreUni._2)
+          ("PreUni", encodingPreUni._1, encodingPreUni._2, encodingPreUni._3)
         //throw new Exception(s"${cl.furtherInfo.addInfoUni}")
+
         case leo.modules.calculus.RewriteSimp =>
           //throw new Exception(s"add info rewriting: ${cl.furtherInfo.addInfoRewriting}")
           val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
-          if (encodingRewrite._3){
-            ("RewriteSimp", encodingRewrite._1, parameters, encodingRewrite._2)
-          }else {
-            (s"Rewrite Simp with non-grpund arguments not encoded yet", lpProofScript(Seq.empty), parameters, Set.empty)
-          }
+          ("RewriteSimp", encodingRewrite._1, encodingRewrite._2, encodingRewrite._3)
+
         case leo.modules.calculus.LiftEq =>
           val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
-          ("LiftEq", encodingLiftEq._1, parameters, encodingLiftEq._2)
+          ("LiftEq", encodingLiftEq._1, encodingLiftEq._2, None)
         case _ =>
           val parentIDs = parentInLpEncID.map(id => id.name)
-          (s"Rule ${rule.name} not encoded yet, parents are: ${parentIDs.mkString(", ")}", lpProofScript(Seq.empty), parameters, Set.empty)
+          ("", lpProofScript(Seq.empty), Set.empty, Option(s"Rule ${rule.name} not encoded yet, parents are: ${parentIDs.mkString(", ")}"))
       }
     } //todo: either introduce else or filter out conj before!
-    else ("no role or conjecture?", lpProofScript(Seq.empty), parameters, Set.empty)
+    else ("no role or conjecture?", lpProofScript(Seq.empty), Set.empty, Option("no role or conjecture?"))
   }
 
 
@@ -175,8 +179,7 @@ object LPoutput {
       if (inclduePermLib) f"${nameLpOutputFolder}.${permlibFile}"
       else ""
     }
-    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
-    val proofStepsSB: mutable.StringBuilder = new StringBuilder()
+    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\nnotation ∨ infix right 6;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
     var proofSteps: Seq[lpProofScriptStep] = Seq.empty
 
     def extractNecessaryFormulas(state:LocalState):Unit={
@@ -308,29 +311,30 @@ object LPoutput {
 
               // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
               val parentInLpEncID = step.annotation.parents.map(parent => identicalSteps.getOrElse(parent.id, nameStep(parent.id.toInt)))
-              val (ruleName,proofTerm, updatedParameters, updatedUsedSymbols) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
+              print(s"encoding Rule ${step.annotation.fromRule} for step ${nameStep(step.id.toInt).name} from parents ${parentInLpEncID.map(s => s.pretty)}\n")
+              val (ruleName,proofTerm, updatedUsedSymbols, notEncoded) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
 
               // if the step is actually new, we want to add it to the output
-              if (proofTerm == lpProofScript(Seq.empty)) {
+              if (notEncoded.isDefined) {
                 // todo: encode these rules! :)
-                proofStepsSB.append(s"// The rule ${step.annotation.fromRule} is not encoded yet\n")
-                proofStepsSB.append(s"symbol step${step.id} : ${encStep.pretty};\n\n")
-                proofSteps = proofSteps :+ lpProofScriptCommentLine(s"The rule ${step.annotation.fromRule} is not encoded yet")
+                print(s"symbol step${step.id} : ${encStep.pretty};\n\n")
+                //proofSteps = proofSteps :+ lpProofScriptCommentLine(s"The rule ${step.annotation.fromRule} is not encoded yet")
+                proofSteps = proofSteps :+ lpProofScriptCommentLine(notEncoded.get)
                 proofSteps = proofSteps :+ lpHave(nameStep(step.id.toInt).name, encStep, lpProofScript(Seq(lpProofScriptAdmit())))
               } else {
                 // otherwise we provide it as an axiom
                 //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
                 // and encode the proof based on its parent clauses
                 //encodedProblem.append(s"$proofTerm;\n")
+                proofSteps = proofSteps :+ lpProofScriptCommentLine(s"${step.annotation.fromRule}")
                 proofSteps = proofSteps :+ lpHave(nameStep(step.id.toInt).name,encStep,proofTerm)
-                proofStepsSB.append(s"// $ruleName\n${lpDefinition(nameStep(step.id.toInt), Seq.empty, encStep, proofTerm, Seq.empty, Seq(lpOpaque)).pretty}\n")
                 // and we will add the necessary symbols to the generated Signature
                 usedSymbols = usedSymbols ++ updatedUsedSymbols
-                parameters = updatedParameters
               }
             }
           }
       }
+      Out.info("Done enocoding the inference rules")
 
       proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
 
@@ -349,6 +353,7 @@ object LPoutput {
 
       // generate the signature
 
+      Out.info("Generating Signature")
       val rulesFileSB = generateSignature(usedSymbols, nameLpOutputFolder)
 
       // initiate a lambdapi package
@@ -373,6 +378,7 @@ object LPoutput {
       }
 
       // write the files
+      Out.info("Writing the Lambdapi files")
 
       val exttFilePath = Paths.get(s"${lpOutputPath}${nameLogicFile}.lp")
       Files.write(exttFilePath, ExTTenc.getBytes(StandardCharsets.UTF_8))

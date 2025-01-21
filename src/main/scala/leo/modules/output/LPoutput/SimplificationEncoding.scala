@@ -27,7 +27,8 @@ object SimplificationEncoding {
     Map("Simp1" -> (Simp1_eq, SimpNeedsTyping(Simp1_eq)),
         "Simp9" -> (Simp9_eq, SimpNeedsTyping(Simp9_eq)),
         "Simp10" -> (Simp10_eq, SimpNeedsTyping(Simp10_eq)),
-        "Simp16" -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)))
+        "Simp16" -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)),
+        "Simp17" -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)))
 
   abstract class simplificationRules extends lpStatement{
     def name: lpConstantTerm

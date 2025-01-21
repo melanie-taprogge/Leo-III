@@ -1,5 +1,6 @@
 package leo.modules.output
 
+import leo.datastructures.Term.∙
 import leo.datastructures.{Clause, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature.{===, Not, |||}
 import leo.modules.output.LPoutput.Encodings.type2LP
@@ -135,9 +136,12 @@ package object LPoutput {
             val (intermediatePattern, intermediateTerm) = acessSubterm(tl, position.tail, sig, patternVar)
             (lpOlTypedBinaryConnectiveTerm(lpEq, ty, lpOlWildcard, intermediatePattern), intermediateTerm)
           }
-          else throw new Exception(s"invalid position $currentPosition vor connective ${lpOr.pretty}")
+          else throw new Exception(s"invalid position $currentPosition for connective ${lpOr.pretty}")
+        //case f ∙ args =>
+          //val (intermediatePattern, intermediateTerm) = acessSubterm(args(currentPosition +1), position.tail, sig, patternVar)
+          //throw new Exception(s"this is an application to ${f.pretty}")
 
-        case _ => throw new Exception(s"connective not encoded?")
+        case _ => throw new Exception(s"connective ${t.pretty} not encoded?")
       }
     }
   }

@@ -267,7 +267,7 @@ object Encodings {
           usedSymbolsQuant = usedSymbolsTyNew
           quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType)
         }
-        (lpOlMonoQuantifiedTerm(lpOlForAll,quantifiedVars,encBody), usedSymbolsQuant+lpOlForAll)
+        (lpOlQuantifiedTerm(lpOlForAll,quantifiedVars,encBody), usedSymbolsQuant+lpOlForAll)
       case Exists(_) =>
         // todo: Add explicit types for quantifiers?
         val (bVarTys, body) = collectExists(t)
@@ -280,7 +280,7 @@ object Encodings {
           usedSymbolsQuant = usedSymbolsTyNew
           quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1), encType)
         }
-        (lpOlMonoQuantifiedTerm(lpOlExists, quantifiedVars, encBody), usedSymbolsQuant + lpOlExists)
+        (lpOlQuantifiedTerm(lpOlExists, quantifiedVars, encBody), usedSymbolsQuant + lpOlExists)
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet 3 ${t.pretty}")
       case leo.modules.HOLSignature.Choice(_) => throw new Error(s"choice not encoded yet ${t.pretty}")
 

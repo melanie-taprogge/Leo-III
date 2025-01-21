@@ -517,11 +517,32 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlTypedBinaryConnectiveTerm(connective, ty, lhs, rhs))
   }
 
-  case class lpOlMonoQuantifiedTerm(quantifier: lpOlQuantifier, variables: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
+  case class lpOlMonoQuantifiedTerm(quantifier: lpOlQuantifier, variable: lpOlTypedVar, body: lpOlTerm) extends lpOlTerm {
     override def pretty: String = {
-      s"(${quantifier.pretty}${lpLambdaTerm(variables.map(var0 => lpTypedVar(var0.lift2Meta.name,var0.lift2Meta.ty)),body).pretty})"
+      s"(${quantifier.pretty}${lpLambdaTerm(Seq(variable.lift2Meta),body).pretty})"
     }
-    override def prf: liftedProp = liftedProp(lpOlMonoQuantifiedTerm(quantifier, variables, body))
+    override def prf: liftedProp = liftedProp(lpOlMonoQuantifiedTerm(quantifier, variable, body))
+  }
+
+  case class lpOlQuantifiedTerm(quantifier: lpOlQuantifier, variables: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
+
+    def quantEachVar(quantifier: lpOlQuantifier, variables: Seq[lpOlTypedVar], body: lpOlTerm): lpOlTerm = {
+      if (variables.isEmpty) throw new Exception("trying to encode Lambdapi quanification without variables")
+      else if (variables.length == 1) lpOlMonoQuantifiedTerm(quantifier, variables.head, body)
+      else {
+        var quantifiedTerm = body
+        variables foreach { variable =>
+          quantifiedTerm = lpOlMonoQuantifiedTerm(quantifier, variable, quantifiedTerm)
+        }
+        quantifiedTerm
+      }
+    }
+
+    override def pretty: String = {
+      quantEachVar(quantifier, variables, body).pretty
+    }
+
+    override def prf: liftedProp = liftedProp(lpOlQuantifiedTerm(quantifier, variables, body))
   }
 
 
@@ -600,11 +621,13 @@ object lpDatastructures {
 
     override private[lpDatastructures] def openCurlyBracket: String = {
       if (steps.length == 1) s"${steps.head.addTab(tab).openCurlyBracket}"
+      else if (steps.length == 0) "there shoudl be nothing here" //throw new Exception(s"trying to give curly brackets to empty list")
       else s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
     }
 
     def prettyCurlyBrackets: String = {
       if (steps.length == 1) s"${steps.head.addTab(tab).openCurlyBracket}}"
+      else if (steps.length == 0) "there shoudl be nothing here" //throw new Exception(s"trying to give curly brackets to empty list")
       else s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}}"
     }
 

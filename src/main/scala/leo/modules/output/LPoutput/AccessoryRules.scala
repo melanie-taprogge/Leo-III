@@ -209,6 +209,20 @@ object AccessoryRules {
     override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
   }
 
+  case class mkTopEqPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
+    // x: (π ((⊤ = x) = x))
+
+    override def name: lpConstantTerm = lpConstantTerm("topPosProp_eq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTop, lpOlConstantTerm(patternVarName)), lpOlConstantTerm(patternVarName)).prf
+
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt (⊤ = x) x _ _\n        {assume h1;\n        refine ind_eq h1 (λ y, y ⇒ x) (λ (y : π x), y) ⊤ᵢ}\n        {assume h1;\n        refine propExt ⊤ x _ _\n            {assume h2;\n            refine h1}\n            {assume h2;\n            refine ⊤ᵢ}}")))
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+  }
+
   def makeLiteralEquational_proofSkript(lits: Seq[lpOlTerm], origClause: lpClause, sourceBefore: lpTerm, desiredEquational: Boolean, desiredPolarity: Boolean, nameStept: lpConstantTerm): (lpProofScriptStep, Map[lpOlTerm, (lpOlTerm, lpOlTerm, lpOlTerm)], Seq[lpOlTerm], Set[lpStatement]) = {
 
     // Takes a literal and an desired polarity and returns the transformed versions
