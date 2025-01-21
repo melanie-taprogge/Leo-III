@@ -4,7 +4,7 @@ import leo.Out
 import leo.datastructures.{ClauseProxy, Role_Axiom, Role_NegConjecture, Signature}
 import leo.modules.output.tptpEscapeName
 import leo.modules.prover.LocalState
-import leo.modules.symbolsInProof
+import leo.modules.{symbolsInProof, userSignature}
 import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpNpp, permLib}
 import leo.modules.output.LPoutput.lpDatastructures._
@@ -189,14 +189,14 @@ object LPoutput {
 
       var usedSymbols:Set[lpStatement] = Set.empty // always add them because they are necessary for equality tactics. Todo: handle differently
       var parameters: (Int,Int,Int,Int) = (0,0,0,0)
-
-
-      // encode the typing and definition formulas:
-      val keysToTypeDecsAndDefs = sig.allUserConstants.intersect(symbolsInProof(proof).union(sig.typeSymbols))
-
+      
       proofFileSB.append("// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
 
-      keysToTypeDecsAndDefs.foreach {key =>
+      // add symbols of the user defined TPTP problem signature if necessary
+
+      val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof(proof))(sig)
+
+      (relevantSymbols union additionalSymbols).foreach {key =>
         val symbol = sig.apply(key)
         val sName = tptpEscapeName(symbol.name)
 
@@ -213,7 +213,7 @@ object LPoutput {
             proofFileSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,typeDec.lift2Meta).pretty)
           }
 
-          if (symbol.hasDefn) {
+          if (symbol.hasDefn & (! additionalSymbols.contains(key))) {
 
             val encAsRewriteRule = true
 

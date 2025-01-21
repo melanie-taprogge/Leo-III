@@ -117,11 +117,29 @@ package object modules {
     sb.dropRight(1).toString()
   }
 
-  def userSignatureToTPTP(constants: Set[Signature.Key])(implicit sig: Signature): String = {
+  def userSignature(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): (Set[Signature.Key],Set[Signature.Key]) ={
+    /* start with user symbols that occur in the proof, plus type symbols */
+    val relevantSymbols: Set[Signature.Key] = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)
+    var additionalSymbols: Set[Signature.Key] = Set.empty
+    /* add symbols that occur in definitions only, but only their type */
+    for (symbol <- relevantSymbols) {
+      if (sig(symbol).hasDefn) {
+        val defn = sig(symbol)._defn
+        val symbolsInDefn = defn.symbols.toSet
+        additionalSymbols ++= ((symbolsInDefn diff relevantSymbols) intersect sig.allUserConstants)
+      }
+    }
+    (relevantSymbols, additionalSymbols)
+  }
+
+  def userSignatureToTPTP(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): String = {
+
+    val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof)
+
     val sb: StringBuilder = new StringBuilder()
-    sig.allUserConstants.intersect(constants.union(sig.typeSymbols)).foreach { key =>
+    (relevantSymbols union additionalSymbols).foreach { key =>
       val name = sig.apply(key).name
-      sb.append(ToTPTP(key))
+      sb.append(ToTPTP(key, typeOnly = additionalSymbols.contains(key)))
       sb.append("\n")
     }
     sb.dropRight(1).toString()
