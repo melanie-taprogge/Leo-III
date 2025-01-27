@@ -24,6 +24,7 @@ object Configuration extends DefaultConfiguration {
 
   private val PARAM_THREADCOUNT = "n"
   private val PARAM_VERBOSITY = "v"
+  private val PARAM_LPDEBUG = "l"
   private val PARAM_TIMEOUT = "t"
   private val PARAM_PROOFOBJECT = "p"
   final val PARAM_HELP = "h"
@@ -81,6 +82,7 @@ object Configuration extends DefaultConfiguration {
       PROBLEMFILE
       PROOF_OBJECT
       VERBOSITY
+      LPDEBUG
       SOS
       ATPS
       HELP
@@ -135,6 +137,13 @@ object Configuration extends DefaultConfiguration {
   lazy val TIMEOUT: Int = {
     if (configMap.get(PARAM_TIMEOUT).isEmpty) Out.info(s"No timeout was given, using default timeout -t $DEFAULT_TIMEOUT")
     uniqueIntFor(PARAM_TIMEOUT, DEFAULT_TIMEOUT)
+  }
+
+  lazy val LPDEBUG: Boolean = {
+    configMap.get(PARAM_LPDEBUG) match {
+      case Some(_) => true
+      case _ => DEFAULT_LPDEBUG
+    }
   }
 
   lazy val PROOF_OBJECT : Boolean = isSet(PARAM_PROOFOBJECT)
@@ -478,6 +487,7 @@ object Configuration extends DefaultConfiguration {
 trait DefaultConfiguration {
   val DEFAULT_THREADCOUNT = 4
   val DEFAULT_VERBOSITY = java.util.logging.Level.CONFIG
+  val DEFAULT_LPDEBUG = false
   val DEFAULT_TIMEOUT = 60
   val DEFAULT_SOS = false
   val DEFAULT_BOOLEXT = true

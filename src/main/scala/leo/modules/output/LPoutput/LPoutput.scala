@@ -111,7 +111,7 @@ object LPoutput {
       //print(f"\nencoding ${rule}\n")
 
       //print(s"Encoding application of caluclus rule ${rule.name}\n")
-      Out.info(s"Encoding application of caluclus rule ${rule.name}")
+      Out.lp_debug_info(s"Encoding application of caluclus rule ${rule.name}")
       rule match {
         case leo.modules.calculus.PolaritySwitch =>
           //todo: dont forget to map to the correct formula! make special case for negated conjecture
@@ -189,7 +189,7 @@ object LPoutput {
 
       var usedSymbols:Set[lpStatement] = Set.empty // always add them because they are necessary for equality tactics. Todo: handle differently
       var parameters: (Int,Int,Int,Int) = (0,0,0,0)
-      
+
       proofFileSB.append("// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
 
       // add symbols of the user defined TPTP problem signature if necessary

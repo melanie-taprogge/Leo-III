@@ -6,6 +6,7 @@ import java.util.logging.Level
 import leo.Configuration
 import leo.modules.output.Output
 
+import java.util.logging.Level.ALL
 import scala.annotation.elidable
 
 /**
@@ -18,6 +19,13 @@ trait Logging {
   protected lazy val log = {val l = Logger.getLogger(loggerName)
     l.setLevel(defaultLogLevel)
     l.setUseParentHandlers(useParentLoggers); l}
+
+  // Dedicated Logger for LP-Output-Debugging
+  protected lazy val lpLog: Logger = {val l = Logger.getLogger(s"$loggerName.lpOutput")
+    l.setUseParentHandlers(false)
+    l.setLevel(ALL)
+    l
+  }
 
   /** The logger's name. */
   protected def loggerName: String = getClass.getName
@@ -65,16 +73,34 @@ trait Logging {
   final def severe(msg: => String): Unit = if (log.isLoggable(SEVERE)) log.severe(msg)
   /** Log an Output as `severe` error. These errors are likely to break the system/certain functionality. */
   final def severe(msg: Output): Unit = if (log.isLoggable(SEVERE)) log.severe(msg.apply())
+  /** Log LambdaPi-specific debug information if LPDEBUG is true. */
+  final def lp_debug_info(msg: => String): Unit = {
+    if (Configuration.LPDEBUG) {
+      lpLog.info(msg)
+    }
+  }
+  final def lp_debug_info(msg: Output): Unit = {
+    if (Configuration.LPDEBUG) {
+      lpLog.info(msg.apply())
+    }
+  }
 
   import java.util.logging.Handler
 
   final def addLogHandler(h: Handler): Unit = log.addHandler(h)
   final def removeLogHandler(h: Handler): Unit = log.removeHandler(h)
 
+  final def addLpLogHandler(h: Handler): Unit = lpLog.addHandler(h)
+
 
   def setLogLevel(level: Level): Unit = {
     log.setLevel(level)
     log.getHandlers.toSeq.foreach(_.setLevel(level))
+  }
+
+  def setLpLogLevel(level: Level): Unit = {
+    lpLog.setLevel(level)
+    lpLog.getHandlers.toSeq.foreach(_.setLevel(level))
   }
 
   def logLevel: Level = log.getLevel
