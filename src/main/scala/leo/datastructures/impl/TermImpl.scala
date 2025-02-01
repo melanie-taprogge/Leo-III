@@ -183,7 +183,7 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
 
   override lazy val symbolMap: Map[Signature.Key, (Count, Depth)] = {
     hd match {
-      case BoundIndex(_,_) => Map()
+      case BoundIndex(_,_) => args.symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap
       case Atom(key,_)             =>  fuseSymbolMap(Map(key -> (1,1)), args.symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap)
       case HeadClosure(Atom(key,_), _) => fuseSymbolMap(Map(key -> (1,1)), args.symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap)
       case HeadClosure(BoundIndex(_, scope), subs) => subs._1.substBndIdx(scope) match {

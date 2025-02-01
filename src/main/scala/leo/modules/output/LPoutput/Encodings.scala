@@ -347,17 +347,17 @@ object Encodings {
       case f ∙ args =>
         val (translatedF, updatedUsedSymbols0) = term2LP(f, bVars, sig, usedSymbols)
         var updatedUsedSymbols = updatedUsedSymbols0
-        var arguments:Seq[lpTerm] = Seq.empty
+        var arguments:Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
         args foreach { arg =>
           arg match {
             case Left(termArg) =>
               val (encArg, updatedUsedSymbols0) = term2LP(termArg, bVars, sig, updatedUsedSymbols)
               updatedUsedSymbols = updatedUsedSymbols0
-              arguments = arguments :+ encArg
+              arguments = arguments :+ Left(encArg)
             case Right(tyArg) =>
               val (encArg, updatedUsedSymbols0) = type2LP(tyArg, sig, updatedUsedSymbols)
               updatedUsedSymbols = updatedUsedSymbols0
-              arguments = arguments :+ encArg
+              arguments = arguments :+ Right(encArg)
           }
         }
         (lpOlFunctionApp(translatedF,arguments),updatedUsedSymbols)

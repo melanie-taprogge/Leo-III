@@ -1,10 +1,12 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.{ClauseProxy, Role_Axiom, Role_NegConjecture, Signature}
+import leo.datastructures.Clause.symbols
+import leo.datastructures.Literal.asTerm
+import leo.datastructures.{ClauseProxy, Literal, Role_Axiom, Role_NegConjecture, Signature}
 import leo.modules.output.tptpEscapeName
 import leo.modules.prover.LocalState
-import leo.modules.{symbolsInProof, userSignature}
+import leo.modules.{calculus, symbolsInProof, userSignature}
 import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpNpp, permLib}
 import leo.modules.output.LPoutput.lpDatastructures._
@@ -29,7 +31,7 @@ object LPoutput {
   val nameRulesFile = "rules"
   val nameProofFile = "encodedProof"
 
-  var inclduePermLib = false
+  var inclduePermLib = true
 
   def generateSignature(usedSymbols: Set[lpStatement], nameLpOutputFolder: String): (mutable.StringBuilder) = {
 
@@ -97,21 +99,15 @@ object LPoutput {
     (rulesFileSB)
   }
 
-  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long, ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0: (Int, Int, Int, Int)): (String, lpProofScript, Set[lpStatement], Option[String]) = {
+  def step2LP(cl: ClauseProxy, idClauseMap: mutable.HashMap[Long, ClauseProxy], parentInLpEncID: Seq[lpConstantTerm], sig: Signature, parameters0: (Int, Int, Int, Int), rule: calculus.CalculusRule): (String, lpProofScript, Set[lpStatement], Option[String]) = {
 
     val skripts = true
-
-    val rule = cl.annotation.fromRule
 
     val continuousNumbers = true
 
     val parameters = if (continuousNumbers) parameters0 else (0, 0, 0, 0)
 
     if (!Seq(leo.datastructures.Role_Conjecture).contains(cl.role)) { // we start our proof with the negated conjecture
-      //print(f"\nencoding ${rule}\n")
-
-      //print(s"Encoding application of caluclus rule ${rule.name}\n")
-      Out.lp_debug_info(s"Encoding application of caluclus rule ${rule.name}")
       rule match {
         case leo.modules.calculus.PolaritySwitch =>
           //todo: dont forget to map to the correct formula! make special case for negated conjecture
@@ -122,7 +118,7 @@ object LPoutput {
 
         case leo.modules.calculus.FuncExt =>
           val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig)
-          ("FuncExt", encoding._1, encoding._2, None)
+          ("FuncExt", encoding._1, encoding._2, encoding._3)
 
         case leo.modules.calculus.BoolExt =>
           val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
@@ -134,12 +130,14 @@ object LPoutput {
           val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
           ("OrderedEqFac", encodings._1, encodings._2, None)
 
+        /*
         case leo.modules.calculus.DefExpSimp =>
           //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
           // todo: eta expansion
           val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
           print(s"RESPULT: ${encodingsSimp._4}\n\n")
           ("DexExpand", encodingsSimp._1, encodingsSimp._2, encodingsSimp._4)
+         */
 
         case leo.modules.calculus.Simp =>
           //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
@@ -196,6 +194,12 @@ object LPoutput {
 
       val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof(proof))(sig)
 
+      Out.lp_debug_info(s"additional symbols: ${additionalSymbols.map(sig.apply(_).name)}")
+      Out.lp_debug_info(s"relevant symbols: ${relevantSymbols.map(sig.apply(_).name)}")
+
+      val typeDecSB: mutable.StringBuilder = new StringBuilder()
+      val defSB: mutable.StringBuilder = new StringBuilder()
+
       (relevantSymbols union additionalSymbols).foreach {key =>
         val symbol = sig.apply(key)
         val sName = tptpEscapeName(symbol.name)
@@ -203,41 +207,43 @@ object LPoutput {
         if (symbol.hasKind) {
           //user defined types: add declarations to the problem
           //todo: what is saved as a kind? look at lines 96-99 in toTPTPscala again
-          proofFileSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,lpSet).pretty)
+          typeDecSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,lpSet).pretty)
           usedSymbols = usedSymbols + lpSet
 
         }else{
           if (symbol.hasType) {
             val (typeDec, updatedUsedSymbols) = type2LP(symbol._ty, sig, usedSymbols)
             usedSymbols = updatedUsedSymbols
-            proofFileSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,typeDec.lift2Meta).pretty)
+            typeDecSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,typeDec.lift2Meta).pretty)
           }
 
-          if (symbol.hasDefn & (! additionalSymbols.contains(key))) {
+          if (symbol.hasDefn && (! additionalSymbols.contains(key))) {
 
-            val encAsRewriteRule = true
+            val encAsRewriteRule = false
 
             val (definition, updatedUsedSymbols,boundVars) = def2LP(symbol._defn, sig, usedSymbols, encAsRewriteRule)
             usedSymbols = updatedUsedSymbols
-            var variables: Seq[lpVariable] = Seq.empty
+            var variables: Seq[lpOlUntypedVar] = Seq.empty
             boundVars foreach { v_t =>
+              variables = variables :+ lpOlUntypedVar(lpOlConstantTerm(v_t._1))
               // todo: for poylmorphic types this might have to be extended
-              if (encAsRewriteRule) variables = variables :+ lpRuleVariable(lpOlConstantTerm(v_t._1))
-              else variables = variables :+ lpUntypedVar(lpOlConstantTerm(v_t._1))
+              //if (encAsRewriteRule) variables = variables :+ lpRuleVariable(lpOlConstantTerm(v_t._1))
+              //else variables = variables :+ lpOlUntypedVar(lpOlConstantTerm(v_t._1))
             }
             val encodedDef = {
               if (encAsRewriteRule) {
                 lpRule(lpOlConstantTerm(sName),variables,definition)
               } else {
                 val defTermType = type2LP(symbol._defn.ty,sig)._1
-                val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq,defTermType,lpOlFunctionApp(lpOlConstantTerm(sName),variables),definition)
+                val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq,defTermType,lpOlFunctionApp(lpOlConstantTerm(sName),variables.map(Left(_))),definition)
                 lpDeclaration(lpConstantTerm(s"${sName}_def"),variables,defAsEq.prf)
               }
             }
-            proofFileSB.append(encodedDef.pretty)
+            defSB.append(encodedDef.pretty)
           }
         }
       }
+      proofFileSB.append(typeDecSB).append(defSB)
 
       // encode the clauses representing the steps
       // todo: Also make it possible to just output one long lambda-term
@@ -257,6 +263,7 @@ object LPoutput {
           idClauseMap = idClauseMap + (stepId -> step)
 
           if (step.role == Role_NegConjecture) {
+            //print(s" symbols in negated conjecture: ${symbols(step.cl).map(sig.apply(_).name)}\n")
             if (conjEnc) throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
             conjEnc = true
             val (encConj, _) = clause2LP(step.cl, usedSymbols, sig)
@@ -311,24 +318,26 @@ object LPoutput {
 
               // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
               val parentInLpEncID = step.annotation.parents.map(parent => identicalSteps.getOrElse(parent.id, nameStep(parent.id.toInt)))
-              print(s"encoding Rule ${step.annotation.fromRule} for step ${nameStep(step.id.toInt).name} from parents ${parentInLpEncID.map(s => s.pretty)}\n")
-              val (ruleName,proofTerm, updatedUsedSymbols, notEncoded) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters)
+              //print(s"encoding Rule ${step.annotation.fromRule} for step ${nameStep(step.id.toInt).name} from parents ${parentInLpEncID.map(s => s.pretty)}\n")
+              val stepName = nameStep(step.id.toInt).name
+              val rule = step.annotation.fromRule
+              Out.lp_debug_info(s"Encoding step $stepName: application of caluclus rule ${rule.name}")
+              Out.lp_debug_info(s"The parents are ${parentInLpEncID.map(term => term.pretty).mkString(", ")}")
+              val (ruleName,proofTerm, updatedUsedSymbols, notEncoded) = step2LP(step, idClauseMap, parentInLpEncID, sig, parameters, rule)
 
               // if the step is actually new, we want to add it to the output
               if (notEncoded.isDefined) {
+                // add substeps for which the encoding is not implemented using the "admit" tactic
                 // todo: encode these rules! :)
-                print(s"symbol step${step.id} : ${encStep.pretty};\n\n")
-                //proofSteps = proofSteps :+ lpProofScriptCommentLine(s"The rule ${step.annotation.fromRule} is not encoded yet")
+                Out.lp_debug_info(s"Not encoded yet (${notEncoded.get})\n")
                 proofSteps = proofSteps :+ lpProofScriptCommentLine(notEncoded.get)
-                proofSteps = proofSteps :+ lpHave(nameStep(step.id.toInt).name, encStep, lpProofScript(Seq(lpProofScriptAdmit())))
+                proofSteps = proofSteps :+ lpHave(stepName, encStep, lpProofScript(Seq(lpProofScriptAdmit())))
               } else {
-                // otherwise we provide it as an axiom
-                //encodedProblem.append(s"\nsymbol step${step.id} : $encStep $colonEq\n")
-                // and encode the proof based on its parent clauses
-                //encodedProblem.append(s"$proofTerm;\n")
+                Out.lp_debug_info(s"Encoding finished!\n")
+                // add the encoded proofs to the overall proof as substeps
                 proofSteps = proofSteps :+ lpProofScriptCommentLine(s"${step.annotation.fromRule}")
-                proofSteps = proofSteps :+ lpHave(nameStep(step.id.toInt).name,encStep,proofTerm)
-                // and we will add the necessary symbols to the generated Signature
+                proofSteps = proofSteps :+ lpHave(stepName,encStep,proofTerm)
+                // and add the necessary symbols to the generated Signature
                 usedSymbols = usedSymbols ++ updatedUsedSymbols
               }
             }

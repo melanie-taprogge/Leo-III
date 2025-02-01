@@ -32,7 +32,7 @@ object NaturalDeductionRules {
     override def name: lpConstantTerm = lpConstantTerm("=def")
 
     // =def [T] x y: Prf (= [T] x y) → Π (p: Els T → Prop), Prf (p y) → Prf (p x)
-    override def ty: lpMlType = lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,T,x,y).prf,lpMlDependType(Seq(lpTypedVar(p,lpMlFunctionType(Seq(T.lift2Meta,lpOtype.lift2Meta)))),lpMlFunctionType(Seq(lpOlFunctionApp(p,Seq(y)).prf,lpOlFunctionApp(p,Seq(x)).prf)))))
+    override def ty: lpMlType = lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,T,x,y).prf,lpMlDependType(Seq(lpTypedVar(p,lpMlFunctionType(Seq(T.lift2Meta,lpOtype.lift2Meta)))),lpMlFunctionType(Seq(lpOlFunctionApp(p,Seq(Left(y))).prf,lpOlFunctionApp(p,Seq(Left(x))).prf)))))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y), ty, Seq(T))
 

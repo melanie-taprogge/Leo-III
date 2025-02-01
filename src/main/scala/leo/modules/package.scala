@@ -137,8 +137,12 @@ package object modules {
     val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof)
 
     val sb: StringBuilder = new StringBuilder()
+    print(s"relevant Symbols : ${relevantSymbols.map(sig.apply(_).name)}\n")
+    print(s"additional Symbols : ${additionalSymbols.map(sig.apply(_).name)}\n")
+    print(s"Union of both : ${((relevantSymbols union additionalSymbols)).map(sig.apply(_).name)}\n")
     (relevantSymbols union additionalSymbols).foreach { key =>
       val name = sig.apply(key).name
+      print(s"ADDING $name to signature\n")
       sb.append(ToTPTP(key, typeOnly = additionalSymbols.contains(key)))
       sb.append("\n")
     }

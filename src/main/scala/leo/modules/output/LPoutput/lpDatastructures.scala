@@ -97,7 +97,7 @@ object lpDatastructures {
     }
   }
 
-  case class lpRule(symbol: lpTerm, variableIdentifier: Seq[lpVariable], lambdaTerm: lpTerm) extends lpStatement {
+  case class lpRule(symbol: lpTerm, variableIdentifier: Seq[lpOlUntypedVar], lambdaTerm: lpTerm) extends lpStatement {
     override def pretty: String = s"rule ${symbol.pretty} ${variableIdentifier.map(var0 => var0.pretty).mkString(" ")} ↪ ${lambdaTerm.pretty};\n"
   }
   abstract class lpDefinedRules extends lpStatement {
@@ -475,9 +475,13 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlLambdaTerm(vars, body))
   }
 
-  case class lpOlFunctionApp(f: lpOlTerm, args: Seq[lpTerm]) extends lpOlTerm{
+  case class lpOlFunctionApp(f: lpOlTerm, args: Seq[Either[lpOlTerm,lpOlType]]) extends lpOlTerm{
     override def pretty: String = {
-      if (args.isEmpty) f.pretty else s"(${f.pretty} ${args.map(_.pretty).mkString(" ")})"
+      val prettyArgs = args.map(arg => arg match {
+        case Left(term) => term.pretty
+        case Right(ty) => ty.pretty
+      })
+      if (args.isEmpty) f.pretty else s"(${f.pretty} ${prettyArgs.mkString(" ")})"
     }
     override def prf: liftedProp = liftedProp(lpOlFunctionApp(f, args))
   }

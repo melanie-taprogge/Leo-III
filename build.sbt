@@ -42,7 +42,7 @@ lazy val leo = (project in file("."))
 
 // The following are new commands to allow build with debug output
 lazy val elideLevel = settingKey[Int]("elide code below this level.")
-Global/elideLevel := 501
+Global/elideLevel := 501//0
 scalacOptions ++= Seq("-Xelide-below", elideLevel.value.toString)
 def compileCommand(name: String, level: Int) =
   Command.command(s"${name}Compile") { s =>

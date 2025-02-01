@@ -1,7 +1,10 @@
 package leo.modules.output.LPoutput
 
 import leo.modules.output.LPoutput.lpDatastructures._
+
 import scala.collection.mutable
+import leo.Out
+import leo.modules.output.LPoutput.lpInferenceRuleEncoding.metaPermutation
 
 /**
   * Representations of the accessory rules
@@ -16,7 +19,7 @@ object AccessoryRules {
   ////////////////////////////////////////////////////////////////
   ////////// Transform from non-eauational to equational literals and back
   ////////////////////////////////////////////////////////////////
-
+  //
   case class mkNegPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((¬ x) = ((¬ x) = ⊤)))
 
@@ -35,7 +38,7 @@ object AccessoryRules {
     def origLit(x0: lpOlTerm): (lpOlTerm) =  lpOlUnaryConnectiveTerm(lpNot, x0)
 
   }
-
+//
   case class mkNegPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((¬ x) = (¬ (x = ⊤))))
 
@@ -54,7 +57,7 @@ object AccessoryRules {
     def origLit(x0: lpOlTerm): (lpOlTerm) = lpOlUnaryConnectiveTerm(lpNot, x0)
 
   }
-
+//
   case class mkPosPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π (x = (¬ ((¬ x) = ⊤))))
 
@@ -73,7 +76,7 @@ object AccessoryRules {
 
     def origLit(x0: lpOlTerm): (lpOlTerm) = x0
   }
-
+//
   case class mkPosPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // todo -> stdlib
     // Provide a proof of the type Prf(= [o] a (= [o] a ⊤))
@@ -94,6 +97,7 @@ object AccessoryRules {
     def origLit(x0: lpOlTerm): (lpOlTerm) = x0
   }
 
+  //
   case class mkNegLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((¬ ((¬ x) = ⊤)) = x))
 
@@ -115,6 +119,7 @@ object AccessoryRules {
 
   }
 
+  //
   case class mkNegLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((¬ (x = ⊤)) = (¬ x)))
 
@@ -137,6 +142,7 @@ object AccessoryRules {
 
   }
 
+  //
   case class mkPosLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π (((¬ x) = ⊤) = (¬ x)))
 
@@ -159,6 +165,7 @@ object AccessoryRules {
 
   }
 
+  //
   case class mkPosLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((x = ⊤) = x))
 
@@ -181,14 +188,58 @@ object AccessoryRules {
 
   }
 
+  //
   case class mkNegPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
-    // todo -> stdlib
+    // Π x: τ o, π (¬ x = (x = ⊥))
 
-    override def name: lpConstantTerm = lpConstantTerm("PropBotNeg_eq")
+    override def name: lpConstantTerm = lpConstantTerm("negPropEqBot_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlBot)).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkNegPropEqBot_script not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt (¬ x) (x = ⊥) _ _\n        {assume h1;\n        refine propExt x ⊥ _ _\n            {assume h2;\n            refine h1 h2}\n            {assume h2;\n            refine ⊥ₑ h2}}\n        {assume h1;\n        refine ind_eq h1 (λ y, ¬ y) (λ h : π ⊥, h)}")))
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+  }
+
+  case class mkNegPropNegEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Π x: Prop, π (¬ x = ¬ (¬ x = ⊥))
+
+    override def name: lpConstantTerm = lpConstantTerm("negPropNegEqBot_eq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlBot))).prf
+
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt (¬ x) (¬ (¬ x = ⊥)) _ _\n\t\t{assume h1 h2;\n        have H1: π (⊥ = ¬ x)\n            {symmetry;\n            refine h2};\n        refine ind_eq H1 (λ y, y) h1}\n\t\t{assume h1 h2;\n\t\trefine h1 _;\n        refine propExt (¬ x) ⊥ _ _\n            {assume h3;\n            refine h3 h2}\n            {assume h3;\n            refine ⊥ₑ h3}}")))
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+  }
+
+  //
+  case class mkPosPropNegEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Π x: τ o, π (x = ¬ (x = ⊥))
+
+    override def name: lpConstantTerm = lpConstantTerm("propNegEqBot_eq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlBot))).prf
+
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt x (¬ (x = ⊥)) _ _\n\t\t{assume h1 h2;\n\t\trefine ind_eq (h2) (λ z, z ⇒ ⊥) (λ y : π (⊥), y) h1}\n\t\t{assume h1;\n\t\trefine npp (x) _;\n\t\tassume h2;\n\t\thave H1: π (x = ⊥)\n\t\t\t{refine propExt x ⊥ _ _\n\t\t\t\t{assume h3;\n\t\t\t\trefine h2 h3}\n\t\t\t\t{assume h3;\n\t\t\t\trefine ⊥ₑ h3}};\n\t\trefine h1 H1}")))
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+  }
+
+  case class mkPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
+    // Π x: Prop, π (x = (¬ x = ⊥))
+
+    override def name: lpConstantTerm = lpConstantTerm("PropEqBot_eq")
+
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlBot)).prf
+
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt x (¬ x = ⊥) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊥ _ _\n            {assume h2;\n            refine h2 h1}\n            {assume h2;\n            refine ⊥ₑ h2}}\n        {assume h1;\n        refine npp x (ind_eq h1 (λ y, ¬ y) (λ h : π ⊥, h))}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -196,6 +247,7 @@ object AccessoryRules {
   }
 
   case class mkBotEqNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
+    // todo: replace occourences with the transformLit script
     // x: (π ((⊥ = x) = (¬ x)))
 
     override def name: lpConstantTerm = lpConstantTerm("botNegProp_eq")
@@ -210,6 +262,7 @@ object AccessoryRules {
   }
 
   case class mkTopEqPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
+    // todo: replace occourences with the transformLit script
     // x: (π ((⊤ = x) = x))
 
     override def name: lpConstantTerm = lpConstantTerm("topPosProp_eq")
@@ -326,6 +379,205 @@ object AccessoryRules {
     (haveStep, transformations.toMap, clauseAfter.lits, usedSymbols)
   }
 
+  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
+    Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
+
+    // Transform two literals into each other, including cases of eq-sym application, transformation to and from equality literal inclduing ones where we insert bottom rather than top
+
+    var usedSymbols: Set[lpStatement] = Set.empty
+    var allSteps: Seq[lpProofScriptStep] = Seq.empty
+    var canEncode = false
+    var flip: Boolean = false
+    val rewritePattern = Some(lpRewritePattern(generateClausePattern(litCount, clauseLen)))
+
+    def flipStep(pol: Boolean, eqType: lpOlType) = {
+      val rewritePatternEq = lpRewritePattern(generateClausePattern(litCount, clauseLen,pol))
+      lpRewrite(Some(rewritePatternEq),lpFunctionApp(flipLiteral(pol).name,Seq.empty, Seq(eqType)))
+    }
+
+    // first we register the two sides of the literals and wather or not the literals are negative
+    val (lhs0, rhs0, ty0, pol0): (Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean) = lit0 match {
+      case lpOlUnaryConnectiveTerm(`lpNot`,body) =>
+        body match {
+          case lpOlTypedBinaryConnectiveTerm(`lpEq`,ty, lhs,rhs) => (Some(lhs),Some(rhs),Some(ty),false)
+          case _ => (Some(body),None,None,false)
+        }
+      case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs),Some(rhs),Some(ty), true)
+      case _ => (Some(lit0), None, None, true)
+    }
+    val (lhs1, rhs1, ty1, pol1): (Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean) = lit1 match {
+      case lpOlUnaryConnectiveTerm(`lpNot`, body) =>
+        body match {
+          case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs),Some(rhs),Some(ty), false)
+          case _ => (Some(body), None, None, false)
+        }
+      case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs),Some(rhs),Some(ty), true)
+      case _ => (Some(lit0), None, None, true)
+    }
+
+    // then we detect which transformations to apply
+    canEncode = if (ty0.isDefined && !ty1.isDefined) {
+      // we transform to non equational form
+      Out.lp_debug_info(s"Transformation from equational to non-equational form neccesary...")
+      Out.lp_debug_info(s"lhs0: ${lhs0.get.pretty}, rhs0: ${rhs0.get.pretty}, lhs1: ${lhs1.get.pretty}")
+      Out.lp_debug_info(s"Seq(lhs0,rhs0).contains(lhs1): ${Seq(lhs0,rhs0).contains(lhs1)}, Seq(lhs0,rhs0).contains(lpOlBot): ${Seq(lhs0,rhs0).contains(Some(lpOlBot))}, Seq(lhs0,rhs0).contains(lpOlTop): ${Seq(lhs0,rhs0).contains(Some(lpOlTop))}")
+      // first we detect if we want to transform from bottom or to top
+      assert(Seq(lhs0,rhs0).contains(lhs1) && (Seq(lhs0,rhs0).contains(Some(lpOlBot)) || Seq(lhs0,rhs0).contains(Some(lpOlTop))))
+      // detect if we need to swap sides
+      flip = (rhs0 == lhs1)
+      // we need to transform to non-equational literal
+      val (necessaryRule, necessaryFlip) : (Option[lpDefinedRules], Boolean) = if (!pol0){
+        if (!pol1){
+          // go from neg eq to neg non-eq
+          if (Seq(lhs0,rhs0).contains(Some(lpOlTop))) {
+            // go to top
+            (Some(mkNegLitNegProp_script()),false)
+          }else{
+            // go to bottom
+            (None, false) // todo
+          }
+        }else{
+          // go from neg eq to pos non-eq
+          if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+            // go to top
+            (Some(mkNegLitPosProp_script()), false)
+          } else {
+            // go to bottom
+            (None, false) // todo
+          }
+        }
+      }else{
+        if (!pol1) {
+          // go from pos eq to neg non-eq
+          if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+            // go to top
+            (Some(mkPosLitNegProp_script()),true)
+          } else {
+            // go to bottom
+            (None,true) // todo
+          }
+        }else{
+          // go from pos eq to pos non-eq
+          if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+            // go to top
+            (Some(mkPosLitPosProp_script()), true)
+
+          } else {
+            // go to bottom
+            (None, true) // todo
+          }
+        }
+      }
+      necessaryRule match {
+        case Some(rule) =>
+          if (flip) {
+            usedSymbols = usedSymbols + flipLiteral(necessaryFlip)
+            allSteps = allSteps :+ flipStep(necessaryFlip,ty0.get)
+            Out.lp_debug_info(s"Applying ${flipLiteral(necessaryFlip)} to flip literal ${lit0.pretty}")
+          }
+          usedSymbols = usedSymbols + rule
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name,Seq(lhs0.get)))
+          Out.lp_debug_info(s"Applying ${rule.name} to transform equational literal to non-equational form")
+          true
+        case None =>
+          Out.lp_debug_info(s"Unencoded transformation")
+          false
+      }
+    } else if (!ty0.isDefined && ty1.isDefined) {
+      // we need to transform to equational literal
+      Out.lp_debug_info(s"Transformation from non-equational to equational form neccesary...")
+      // analogous to the previous case
+      assert(Seq(lhs1, rhs1).contains(lhs0) && (Seq(lhs1, rhs1).contains(Some(lpOlBot)) || Seq(lhs1, rhs1).contains(Some(lpOlTop))))
+      // detect if we need to swap sides
+      flip = (lhs0 == rhs1)
+
+      val (necessaryRule, necessaryFlip): (Option[lpDefinedRules], Boolean) = if (!pol0) {
+        if (!pol1) {
+          // go from neg non-eq to neg eq
+          Out.lp_debug_info("HEEERE")
+          if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+            // go to top
+            (Some(mkNegPropNegLit_script()), false)
+          } else {
+            // go to bottom
+            (Some(mkNegPropNegEqBot_script()), false) // todo
+          }
+        } else {
+          // go from neg non-eq to pos eq
+          if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+            // go to top
+            (Some(mkNegPropPosLit_script()), false)
+          } else {
+            // go to bottom
+            (Some(mkNegPropEqBot_script()), false) // todo
+          }
+        }
+      } else {
+        if (!pol1) {
+          // go from pos non-eq to neg eq
+          if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+            // go to top
+            (Some(mkPosPropNegLit_script()), true)
+          } else {
+            // go to bottom
+            (Some(mkPosPropNegEqBot_script()), true) // todo
+          }
+        } else {
+          // go from pos non-eq to pos eq
+          if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+            // go to top
+            (Some(mkPosPropPosLit_script()), true)
+
+          } else {
+            // go to bottom
+            (Some(mkPropEqBot_script()), true) // todo
+          }
+        }
+      }
+      necessaryRule match {
+        case Some(rule) =>
+          usedSymbols = usedSymbols + rule
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name, Seq(lhs0.get)))
+          Out.lp_debug_info(s"Applying ${rule.name} to transform non-equational literal to equational form")
+          if (flip) {
+            usedSymbols = usedSymbols + flipLiteral(necessaryFlip)
+            allSteps = allSteps :+ flipStep(necessaryFlip,ty1.get)
+            Out.lp_debug_info(s"Applying ${flipLiteral(necessaryFlip)} to flip literal ${lit0.pretty}")
+          }
+          true
+        case None =>
+          Out.lp_debug_info(s"Unencoded transformation")
+          false
+      }
+
+    } else if (ty0.isDefined && ty1.isDefined) {
+      // both literals are equational, maybe we need to switch sides or transform bot/ top and polarity
+      if (Seq(lhs0,rhs0).contains(lhs1) && Seq(lhs0,rhs0).contains(rhs1)){
+        // the only possible difference is if the sides differ:
+        if (lhs0 != lhs1){
+          val necessaryFlip = if (pol0) true else false
+          usedSymbols = usedSymbols + flipLiteral(necessaryFlip)
+          allSteps = allSteps :+ flipStep(necessaryFlip,ty0.get)
+          Out.lp_debug_info(s"Applying ${flipLiteral(necessaryFlip)} to flip literal ${lit0.pretty}")
+          true
+        }else {
+          Out.lp_debug_info(s"Literals are already identical")
+          true
+        } // In this case, the sides are already the same
+      } else {
+        Out.lp_debug_info(s"Unencoded transformation between equational literals")
+        false
+      }
+    } else {
+      // both literals are non-equational and should already be the same
+      assert(lit0 == lit1)
+      Out.lp_debug_info(s"Literals are already identical")
+      // maybe transform bot to not top and vice versa?
+      true
+    }
+
+    (allSteps,usedSymbols,canEncode)
+  }
 
   ////////////////////////////////////////////////////////////////
   ////////// Change order within literals
@@ -425,6 +677,16 @@ object AccessoryRules {
   ////////////////////////////////////////////////////////////////
   ////////// Change order of literals
   ////////////////////////////////////////////////////////////////
+
+
+  def containsLpLits(literals0: Seq[lpOlTerm], literals1: Seq[lpOlTerm]):Boolean = {
+    literals0.forall(literals1.contains)
+  }
+
+  def permutationStepSkript(literals0: Seq[lpOlTerm], literals1: Seq[lpOlTerm],before:lpTerm)={
+    val permutation = literals0.map(item => literals1.indexOf(item))
+    lpRefine(metaPermutation.instanciate(permutation,literals0,before))
+  }
 
   /*
   def changePositions(positions: Seq[Int], proofNames: String): (lpHave, Set[lpStatement]) = {

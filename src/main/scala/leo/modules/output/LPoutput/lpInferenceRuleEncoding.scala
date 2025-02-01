@@ -91,7 +91,7 @@ object lpInferenceRuleEncoding {
     val g = lpOlTypedVar(lpOlConstantTerm("g"),lpOlFunctionType(Seq(S,T)))
     val x = lpOlTypedVar(lpOlConstantTerm("x"),S)
 
-    override def ty: lpMlType = lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g).prf,lpOlTypedBinaryConnectiveTerm(lpEq,S,lpOlFunctionApp(f,Seq(x)),lpOlFunctionApp(g,Seq(x))).prf))
+    override def ty: lpMlType = lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g).prf,lpOlTypedBinaryConnectiveTerm(lpEq,S,lpOlFunctionApp(f,Seq(Left(x))),lpOlFunctionApp(g,Seq(Left(x)))).prf))
 
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T S f g x h;\n    refine ind_eq h (λ y, (y x) = (g x)) (eq_refl [T] (g x))"))) //todo: generate depending on number of args
 
@@ -250,7 +250,7 @@ object lpInferenceRuleEncoding {
     val disj = lpOlConstantTerm("disj")
     val eval = lpOlConstantTerm("eval_list")
 
-    override def ty: lpMlType = lpMlFunctionType(Seq(lpOlFunctionApp(pc,Seq(σ, c)).prf,lpOlFunctionApp(disj,Seq(c)).prf,lpOlFunctionApp(disj,Seq(lpOlFunctionApp(eval,Seq(σ, c)))).prf))
+    override def ty: lpMlType = lpMlFunctionType(Seq(lpOlFunctionApp(pc,Seq(Left(σ), Left(c))).prf,lpOlFunctionApp(disj,Seq(Left(c))).prf,lpOlFunctionApp(disj,Seq(Left(lpOlFunctionApp(eval,Seq(Left(σ), Left(c)))))).prf))
 
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume σ c h1 h2;\n\n    have H1: (Π x: τ nat, π ((λ x1, (eval x1 c) ∧ (∈ eqn x1 (indexes c))) x) → π (∃(λ y ,(eval y c) ∧ (∈ eqn y σ))))\n        {assume x0 h3;\n        refine (∃ᵢ [nat] [λ y ,(eval y c) ∧ (∈ eqn y σ)] x0) (∧ᵢ (∧ₑ₁ h3) (preserves_contents_el x0 σ c h1 (∧ₑ₂ h3)))};\n    \n    have H2: π (∃(λ y ,(eval y c) ∧ (∈ eqn y σ)))\n        {refine ∃ₑ (disj_imp_lit c h2) H1};\n\n    refine  lit_imp_disj c σ H2;")))
     override def dec: lpDeclaration = lpDeclaration(name, Seq(σ, c), ty)
