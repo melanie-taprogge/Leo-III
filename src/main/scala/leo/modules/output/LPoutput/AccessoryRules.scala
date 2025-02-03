@@ -85,9 +85,9 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop)).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet")
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt x (x = ⊤) _ _\n        {assume h1;\n        refine propExt x ⊤ _ _\n            {assume h2;\n            refine ⊤ᵢ}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        refine ind_eq h1 (λ y, y) ⊤ᵢ}")))
 
-    override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
+  override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
     override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
 

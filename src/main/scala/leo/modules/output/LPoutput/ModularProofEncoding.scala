@@ -734,67 +734,67 @@ object ModularProofEncoding {
 
   def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], String, Term, Term)], parentModoluRw: Option[Clause], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Option[String]) = {
 
+    // The modular proof script can consist of the following steps:
+    // 1. Abstract over free variables
+    // For each of the rewrite clauses applied:
+    //    2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal. The exact form depends on the kind of clause used as a rewrite rule by Leo-III:
+    //        a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
+    //       a) case II) If the rewrite-clause is an equational single literal, use eqSym_eq to prove the reverse rewrite rule
+    //       b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly
+    //   For each of the literals that are transformed:
+    //       2.5 if the literal in the parent clause is equational, but the literal in the child clause is not, transform to equality
+    //       3. If the order within equality literals was changed, apply eqSym
+    //       4. Use the (transformed) rewrite-clause to rewrite the focused goal
+    // 5. If simplifications were applied, use the encoding of (Simp) to verify the transformations
+    // 6. Refine with the (instantiated) parent
 
     // extract the parents and their names
     assert(parents.length == parentNameLpEnc.length)
-    val (parent,rewriteEqClause) = (parents(0).cl,parents(1).cl)
-    var (sourceBeforeParent, sourceBeforeEq) = (parentNameLpEnc(0), parentNameLpEnc(1))
-
-    if (parents.length == 2){
+    val (parent,rewriteEqCalsues) = (parents(0).cl,parents.tail.map(_.cl))
+    val (sourceBeforeParent, sourcesBeforeEq) = (parentNameLpEnc(0), parentNameLpEnc.tail)
 
     // initialize
     var usedSymbols: Set[lpStatement] = Set.empty
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
 
-    // encodings of the clauses
-    // rewrite Equality Literal
-    val bVarsRewriteEq = clauseVars2LP(rewriteEqClause.implicitlyBound, sig, Set.empty)._2
-    //val (rewriteEqImpVars, encRewriteEq0, _) = clause2LP_unquantified(rewriteEqClause, Set.empty, sig)
-    //val encRewriteEq = encRewriteEq0.args.head
-    assert (rewriteEqClause.lits.length == 1)
-    val rewriteEq = rewriteEqClause.lits.head
-    val rwLhs = term2LP(rewriteEq.left, bVarsRewriteEq, sig)._1
-    var rwRhs = term2LP(rewriteEq.right, bVarsRewriteEq, sig)._1
-    val rwType = type2LP(rewriteEq.right.ty, sig)._1
-    val rwPol = rewriteEq.polarity
-    
-    Out.lp_debug_info(s"Use ${sourceBeforeEq.name} : ${if (!rwPol) lpNot.pretty} (${rwLhs.pretty} = ${rwRhs.pretty})")
-    
+    // temporariy: If versions of the rule are needed that are not encoded yet, return admit
+    var allTransformationsEncoded = true
+    if (addInfoSimp.nonEmpty) allTransformationsEncoded = false
+
+    // 1. Abstract over free variables
+    val (parentImpVars, _, _) = clause2LP_unquantified(parent, Set.empty, sig)
+    val (childImpVars, _, _) = clause2LP_unquantified(cl.cl, Set.empty, sig)
+    val impBoundParent = parentImpVars.map(var0 => var0.untyped)
+    if (impBoundParent.nonEmpty) allSteps = allSteps :+ lpAssume(impBoundParent)
+
+    // encode the parent
     // just temporary: remove this translation, you will not need it.
     val (_, clauseModulo, _) = clause2LP_unquantified(parentModoluRw.get, Set.empty, sig)
     val (_, encParent, _) = clause2LP_unquantified(parent, Set.empty, sig)
     val (_, encChild, _) = clause2LP_unquantified(cl.cl, Set.empty, sig)
-    Out.lp_debug_info(s"To rewrite ${sourceBeforeParent.name} : ${encParent.pretty}")
-    Out.lp_debug_info(s"Clause after rewriting: ${clauseModulo.pretty}")
-    
-    // check that none of the things not yet encoded occur
-    if (rewriteEqClause.implicitlyBound.nonEmpty || rewriteEqClause.typeVars.nonEmpty){//(rewriteEqImpVars.nonEmpty) {
-      (lpProofScript(Seq.empty), usedSymbols, Option("EqFact for non ground rewrite-clauses is not implmented yet"))
-    }//throw new Exception(s"The LP encoding of Rewrite for non grounded rules is not implemented yet")
-    else if (addInfoSimp.nonEmpty){
-      (lpProofScript(Seq.empty), usedSymbols, Option("rewriting with following simplification is not implemented yet"))
-    }
-    else {
+
+    rewriteEqCalsues.zip(sourcesBeforeEq) foreach { case (rewriteEqClause, sourceBeforeEq0) =>
+      // encodings of the clauses
+      // rewrite Equality Literal
+      var sourceBeforeEq = sourceBeforeEq0
+      val bVarsRewriteEq = clauseVars2LP(rewriteEqClause.implicitlyBound, sig, Set.empty)._2
+      //val (rewriteEqImpVars, encRewriteEq0, _) = clause2LP_unquantified(rewriteEqClause, Set.empty, sig)
+      //val encRewriteEq = encRewriteEq0.args.head
+      assert(rewriteEqClause.lits.length == 1)
+      val rewriteEq = rewriteEqClause.lits.head
+      val rwLhs = term2LP(rewriteEq.left, bVarsRewriteEq, sig)._1
+      var rwRhs = term2LP(rewriteEq.right, bVarsRewriteEq, sig)._1
+      val rwType = type2LP(rewriteEq.right.ty, sig)._1
+      val rwPol = rewriteEq.polarity
+
+      Out.lp_debug_info(s"Use ${sourceBeforeEq.name} : ${if (!rwPol) lpNot.pretty} (${rwLhs.pretty} = ${rwRhs.pretty})")
+      Out.lp_debug_info(s"To rewrite ${sourceBeforeParent.name} : ${encParent.pretty}")
+      Out.lp_debug_info(s"Clause after rewriting: ${clauseModulo.pretty}")
+
+      // check that none of the things not yet encoded occur
+      if (rewriteEqClause.implicitlyBound.nonEmpty || rewriteEqClause.typeVars.nonEmpty) allTransformationsEncoded = false
+
       // begin with the encoding
-
-      // The modular proof script can consist of the following steps:
-      // 1. Abstract over free variables
-      // 2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal. The exact form depends on the kind of clause used as a rewrite rule by Leo-III:
-      //    a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
-      //    a) case II) If the rewrite-clause is an equational single literal, use eqSym_eq to prove the reverse rewrite rule
-      //    b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly
-      // For each of the literals that are transformed:
-      //    2.5 if the literal in the parent clause is equational, but the literal in the child clause is not, transform to equality
-      //    3. If the order within equality literals was changed, apply eqSym
-      //    4. Use the (transformed) rewrite-clause to rewrite the focused goal
-      // 5. If simplifications were applied, use the encoding of (Simp) to verify the transformations
-      // 6. Refine with the (instantiated) parent
-
-      // 1. Abstract over free variables
-      val (parentImpVars, _, _) = clause2LP_unquantified(parent, Set.empty, sig)
-      val (childImpVars, _, _) = clause2LP_unquantified(cl.cl, Set.empty, sig)
-      val impBoundParent = parentImpVars.map(var0 => var0.untyped)
-      if (impBoundParent.nonEmpty) allSteps = allSteps :+ lpAssume(impBoundParent)
 
       // 2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal
       // Test if the clause representing the rewrite equation has the right form (only has one literal that is positive and equational)
@@ -849,7 +849,6 @@ object ModularProofEncoding {
       //val (rewritePattern, rewrittenParent) = findRWTerm(rwLhs, encParent, rwRhs)
 
       // go over all of the literals and - for each occurrence of the term that has to be rewritten, apply a rewrite rule and if necessary eqSmy
-      var allTransformationsEncoded = true
       val clauseLen = parent.lits.length
       val bVarsParentEq = clauseVars2LP(parent.implicitlyBound, sig, Set.empty)._2
       var litCount = 0
@@ -861,9 +860,10 @@ object ModularProofEncoding {
         val (encType, _) = type2LP(lit.left.ty, sig)
         //val encLit = if (lit.polarity) lpOlTypedBinaryConnectiveTerm(lpEq,encType,encLitLhs,encLitRhs) else lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,encType,encLitLhs,encLitRhs))
         Out.lp_debug_info(s"encoded literal ${encLit}")
-        val (patternTerm, rewrittenLit, counter) = findRWTerm0(rwLhs, encLit, rwRhs)
-        if (counter != 0) {
-          if (counter > 1) throw new Exception(s"rewriting of multiple ($counter) therms detected! how to preceed?!")
+        val (patternTerm, rewrittenLit, counter, rwUnderBinder) = findRWTerm0(rwLhs, encLit, rwRhs)
+        if (rwUnderBinder) {
+          allTransformationsEncoded = false
+        } else if (counter != 0) {
           // generate the rewrite pattern for the rewriting operation itself
           val rewritePattern = lpRewritePattern(generateClausePattern(litCount, clauseLen, true, patternTerm))
 
@@ -937,7 +937,7 @@ object ModularProofEncoding {
        */
       var rewriteSkript: Seq[lpProofScriptStep] = Seq(lpRewrite(None, sourceBeforeEq))
 
-      // 4. If the order within equality literals was changed, apply eqSym
+    }
 
 
       // 5. If simplifications were applied, use the encoding of (Simp) to verify the transformations
@@ -956,9 +956,6 @@ object ModularProofEncoding {
 
       if (allTransformationsEncoded) (finishedProof, usedSymbols, None)
       else (finishedProof, usedSymbols, Some("When attempting to encode rewrite step, some transformation could not be encoded"))
-    }
-    }
-    else (lpProofScript(Seq(lpProofScriptAdmit())), Set.empty, Some("Unable to rewrite with mutiple parents at once"))
   }
 
   ////////////////////////////////////////////////////////////////
