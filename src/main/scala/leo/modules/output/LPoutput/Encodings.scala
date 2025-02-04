@@ -342,7 +342,14 @@ object Encodings {
       // match pattern of application
       case _@Symbol(id) ∙ args if leo.modules.input.InputProcessing.adHocPolymorphicArithmeticConstants.contains(id) =>
         // todo: no idea what is happening here
-        throw new Error(s"encountered something that is not encoded yet ${t.pretty}")
+        /*
+        in tptp encoding:
+        val translatedF = tptpEscapeExpression(sig(id).name)
+        val translatedArgs: Seq[String] = args.tail.map(argToTPTP(_, tyVarCount, bVars)(sig)) // drop type argument as it's implicit in the TPTP representation
+        s"$translatedF @ ${translatedArgs.mkString(" @ ")}"
+         */
+        val translatedF = tptpEscapeExpression(sig(id).name)
+        throw new Error(s"Arithmetic constants are not encoded yet ($translatedF)")
 
       case f ∙ args =>
         val (translatedF, updatedUsedSymbols0) = term2LP(f, bVars, sig, usedSymbols)

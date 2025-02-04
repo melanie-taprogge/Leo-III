@@ -356,7 +356,7 @@ object ModularProofEncoding {
   ////////// Primary Inference Rules
   ////////////////////////////////////////////////////////////////
 
-  def encEqFactLiterals(otherLit: Literal, maxLit: Literal, uc1Orig: Literal, cv2Orig: Literal, parent: Clause, child: Clause, bVarMap: Map[Int, String], sourceBefore: lpTerm, nameStep: lpOlTerm, sig: Signature): (lpProofScriptStep, Set[lpStatement]) = {
+  def encEqFactLiterals(otherLit: Literal, maxLit: Literal, uc1Orig: Literal, cc2Orig: Literal, parent: Clause, child: Clause, bVarMap: Map[Int, String], sourceBefore: lpTerm, nameStep: lpOlTerm, sig: Signature): (lpProofScriptStep, Set[lpStatement]) = {
 
     var lastStepName: lpTerm = sourceBefore
     var lastStepLits: Seq[lpOlTerm] = Seq.empty
@@ -367,6 +367,10 @@ object ModularProofEncoding {
     val otherLitEnc = term2LP(asTerm(otherLit),bVarMap,sig)._1
     val maxLitEnc = term2LP(asTerm(maxLit),bVarMap,sig)._1
     val parentEnc = clause2LP(parent,Set.empty,sig)._1
+    assert(otherLit.right.ty == maxLit.right.ty)
+    val eqTypeEnc = type2LP(otherLit.right.ty,sig)._1
+    Out.lp_debug_info(s"Applying to parent ${parentEnc.pretty}")
+    Out.lp_debug_info(s"MaxLit is ${maxLitEnc.pretty}, OtherLit is ${otherLitEnc.pretty}")
 
     // the values that we will pass on to the instantiation of the actual rule will be defined during this step and only need to be instantiated here
     var otherLit_l: lpOlTerm = lpOlNothing
@@ -397,6 +401,7 @@ object ModularProofEncoding {
     var literalsToTransform2: Seq[lpOlTerm] = Seq.empty
     // We detect the polarity of the max literal to make sure the other Literal shares it
     val polarityOfRule = maxLit.polarity
+    Out.lp_debug_info(s"polarity of the rule: $polarityOfRule")
     if (!otherLit.equational | !maxLit.equational) {
       // We first check weather we need to adjust the polarity of the literals and make them equational
       val transformOtherLit: Boolean = if (!otherLit.equational) {
@@ -407,11 +412,13 @@ object ModularProofEncoding {
         literalsToTransform = literalsToTransform :+ maxLitEnc
         true
       }else false
+      Out.lp_debug_info(s"Transform other lit? $transformOtherLit, transform max lit? $transformMaxLit")
       // Then the actual transformation is encoded
       if (literalsToTransform.nonEmpty) {
         val nameTransfStep = lpConstantTerm("TransformToEqLits")
         val (transformationStep,litMap,_,usedSymbolsNew) = makeLiteralEquational_proofSkript(literalsToTransform,parentEnc,lastStepName,true,polarityOfRule,nameTransfStep)
         allSteps = allSteps :+ transformationStep
+        Out.lp_debug_info(s"Transformation steps generated successfully: \n${transformationStep.pretty}")
         lastStepName = nameTransfStep
         if (transformOtherLit){
           val otherLitTrans = litMap(otherLitEnc)
@@ -420,6 +427,7 @@ object ModularProofEncoding {
           otherLit_r = otherLitTrans._3
           usedSymbols = usedSymbolsNew
           literalsToTransform2 = literalsToTransform2 :+ otherLitAsEq
+          Out.lp_debug_info(s"transformed other lit to ${otherLitAsEq.pretty}")
         } else{
           otherLitAsEq = otherLitEnc
           otherLit_l = term2LP(otherLit.left,bVarMap,sig)._1
@@ -431,6 +439,7 @@ object ModularProofEncoding {
           maxLit_l = maxLitTrans._2
           maxLit_r = maxLitTrans._3
           usedSymbols = usedSymbolsNew
+          Out.lp_debug_info(s"transformed max lit to ${maxLitAsEq.pretty}")
         } else {
           maxLitAsEq = otherLitEnc
           maxLit_l = term2LP(maxLit.left, bVarMap, sig)._1
@@ -444,6 +453,7 @@ object ModularProofEncoding {
       maxLitAsEq = otherLitEnc
       maxLit_l = term2LP(maxLit.left, bVarMap, sig)._1
       maxLit_r = term2LP(maxLit.right, bVarMap, sig)._1
+      Out.lp_debug_info(s"no transformation to equational form necessary")
     }
 
     // c) Apply the appropriate version of equal factoring (EqFact_p or EqFact_n)
@@ -455,6 +465,7 @@ object ModularProofEncoding {
     usedSymbols = usedSymbols + lpInferenceRuleEncoding.eqFactoring_script(polarityOfRule)
     val nameEqFactoringStep = lpConstantTerm("EqFact")
     val eqFactStep = lpHave(nameEqFactoringStep.name,afterEqFacAp,lpProofScript(Seq(lpRefine(lpFunctionApp(encEqFact,Seq(lastStepName))))))
+    Out.lp_debug_info(s"generated equal factoring step:\n${eqFactStep.pretty}")
     allSteps = allSteps :+ eqFactStep
     lastStepName = nameEqFactoringStep
 
@@ -464,22 +475,21 @@ object ModularProofEncoding {
     var uc2: lpOlTerm = lpOlNothing
     var uc2Eq: lpOlTerm = lpOlNothing
 
-    // e) If the order within any of the equality literals has changed after the rule application as a result of the term ordering, proof the transformation using eqSym_eq
+    // e) and f) If the order within any of the equality literals has changed after the rule application as a result of the term ordering, proof the transformation using eqSym_eq
+    var needsFlipping:  Seq[(lpOlTerm, lpOlType)] = Seq.empty
     val otherLitL = if (otherLit.equational) otherLit.left else asTerm(otherLit)
     if (otherLitL == uc1Orig.left) {
       // In this case, the order is already correct
-      uc1 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, otherLit_l, maxLit_r))
+      uc1 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, eqTypeEnc.lift2Poly, otherLit_l, maxLit_r))
       uc1Final = uc1
     } else if ((otherLitL == uc1Orig.right) | (Not(otherLitL) == uc1Orig.right) | (otherLitL == Not(uc1Orig.right))) {
       // In this case, the order was changed
-      uc1 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, otherLit_l, maxLit_l))
-      uc1Final = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, maxLit_l, otherLit_l))
-      val flipLitsName = lpConstantTerm("EqSymmetry")
-      val (flipLitsProofScript, flippedLits, usedSymbolsNew) = flipEqLiteralsProofScript(Seq((uc1,lpOtype)), lpClause(Seq(), lastStepLits), lastStepName, flipLitsName)
-      lastStepName = flipLitsName
-      lastStepLits = flippedLits
-      usedSymbols = usedSymbols ++ usedSymbolsNew
-      allSteps = allSteps :+ flipLitsProofScript
+      val encUniConst = term2LP(uc1Orig.right,bVarMap,sig)._1
+      //Out.lp_debug_info(s"flipping of other lit necessary, encoded unification constraint: ${encUniConst.pretty}")
+      Out.lp_debug_info(s"flipping of UC1 necessary, encoded unification constraint : ${encUniConst.pretty}")
+      uc1 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, eqTypeEnc.lift2Poly, otherLit_l, maxLit_l))
+      uc1Final = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, eqTypeEnc, maxLit_l, otherLit_l))
+      needsFlipping = needsFlipping :+ (uc1,eqTypeEnc)
     } else throw new Exception(s"In the LP encoding of EqFact, the first unification constraint constructed in LP encoding (${term2LP(otherLitL,bVarMap,sig)._1.pretty}) does not match the one derived by Leo (sides of ${term2LP(asTerm(uc1Orig),bVarMap,sig)._1.pretty}\ntrying to prove ${}")
 
     //  f) If the order within any of the equality literals has changed after the rule application as a result of the term ordering, proof the transformation using eqSym_eq
@@ -494,19 +504,42 @@ object ModularProofEncoding {
             throw new Exception(s"test what happens with eqFactoring back encoding here")
         }
       }
-      uc2Eq = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, otherLit_r, otherLit_r))
+      uc2Eq = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, eqTypeEnc.lift2Poly, otherLit_r, otherLit_r))
       uc2 = lpOlUnaryConnectiveTerm(lpNot, otherLit_r)
       literalsToTransform2 = literalsToTransform2 :+ uc2Eq
     } else if (otherLit_l == lpOlTop) {
       throw new Exception(s"The LP encoding of EqFact non-equational max literal and equational other literal not enocided yet yet")
+    } else if (otherLit.equational && ((otherLit.right == cc2Orig.right) | (Not(otherLit.right) == cc2Orig.right) | (otherLit.right == Not(cc2Orig.right)))){
+      val otherLitR = otherLit.right
+      // In this case, the order was changed
+      val encUniConst = term2LP(cc2Orig.right, bVarMap, sig)._1
+      //Out.lp_debug_info(s"flipping of other lit necessary, encoded unification constraint: ${encUniConst.pretty}")
+      Out.lp_debug_info(s"flipping of UC2 necessary, encoded unification constraint : ${encUniConst.pretty}")
+      uc2 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, eqTypeEnc.lift2Poly, otherLit_r, maxLit_r))
+      uc2Eq = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, eqTypeEnc, maxLit_r, otherLit_r))
+      needsFlipping = needsFlipping :+ (uc2, eqTypeEnc)
     } else {
-      uc2 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, otherLit_l, otherLit_r))
+      uc2 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, eqTypeEnc, otherLit_l, otherLit_r))
       uc2Eq = uc2
     }
+
+    if (needsFlipping.nonEmpty){
+      val flipLitsName = lpConstantTerm("EqSymmetry")
+      val (flipLitsProofScript, flippedLits, usedSymbolsNew) = flipEqLiteralsProofScript(needsFlipping, lpClause(Seq(), lastStepLits), lastStepName, flipLitsName)
+      lastStepName = flipLitsName
+      lastStepLits = flippedLits
+      usedSymbols = usedSymbols ++ usedSymbolsNew
+      allSteps = allSteps :+ flipLitsProofScript
+      Out.lp_debug_info(s"proving flip of equality literals:\n${flipLitsProofScript.pretty}")
+    }
+
     // Combine into one rule for the backwards encoding:
     if (literalsToTransform2.nonEmpty) {
+      Out.lp_debug_info(s"Encoding transformation back to non-equational literals for literals ${literalsToTransform2.map(_.pretty).mkString(", ")}")
+      Out.lp_debug_info(s"for the clause ${lpClause(Seq(), lastStepLits).pretty}")
       val nameTransfStep2 = lpConstantTerm("TransformToNonEqLits")
       val (backTransformationStep, backLitMap, litsAfter, usedSymbolsNew) = makeLiteralEquational_proofSkript(literalsToTransform2, lpClause(Seq(), lastStepLits), lastStepName, false, true, nameTransfStep2)
+      Out.lp_debug_info(s"successful")
       usedSymbols = usedSymbols ++ usedSymbolsNew
       lastStepName = nameTransfStep2
       lastStepLits = litsAfter
@@ -720,8 +753,8 @@ object ModularProofEncoding {
         val encRhs = term2LP(rhs, bVars, sig)._1
         val encLhs = term2LP(lhs, bVars, sig)._1
         val encType = type2LP(lhs.ty, sig)._1
-        val rwPattern = generateClausePatternTerm(permutation(indx), indices.length)
         val litPol = lit.polarity
+        val rwPattern = generateClausePatternTerm(permutation(indx), indices.length, None, lpOlUntypedVar(lpOlConstantTerm("x")),litPol)
         var finalLit : lpOlTerm = lpOlNothing
         if (litsPosLift.contains(indx)) {
           if (!litPol) {
@@ -749,7 +782,7 @@ object ModularProofEncoding {
           // 2 b) for the new equality literlas, the order within the equality may have changed, if so: apply rewrite tactic
           allSteps = allSteps :+ lpRewrite(rwPattern, flipLiteral(litPol).instanciate(encRhs,encLhs,None))
           finalLit = flipLiteral(litPol).res(encType.lift2Poly,encRhs,encLhs)
-          usedRules = usedRules + flipLiteral(true)
+          usedRules = usedRules + flipLiteral(litPol)
         }
         liftedLits = liftedLits :+ finalLit
       }else{
@@ -1121,7 +1154,7 @@ object ModularProofEncoding {
         }
       }
 
-      // permutation? todo: figure out why this can ecen happen
+      // permutation? todo: figure out why this can even happen
       if (containsLpLits(encParentLiterals,encChildLiterals)){
         val permutationStep = permutationStepSkript(encParentLiterals,encChildLiterals,lpFunctionApp(parentNameLpEnc,unboundVarsChild))
         Out.lp_debug_info(s"Permutation step: ${permutationStep.pretty}")

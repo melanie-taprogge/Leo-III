@@ -300,11 +300,16 @@ object AccessoryRules {
     var rewriteSteps: Seq[lpRewrite] = Seq.empty
     val transformations: mutable.HashMap[lpOlTerm, (lpOlTerm, lpOlTerm, lpOlTerm)] = mutable.HashMap.empty
 
+    Out.lp_debug_info(s"processing the literals ${orderedLits.map(_.pretty).mkString(", ")}")
+
     orderedLits foreach { lit =>
 
       val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None)
 
+      Out.lp_debug_info(s"Considering literal ${lit.pretty} ${if (rewritePattern.isDefined) s"at positions ${rewritePattern.get.pretty}"}")
+
       if (desiredEquational) {
+        Out.lp_debug_info(s"Trying to transform to equality...")
         lit match {
           case lpOlUnaryConnectiveTerm(lpNot, t) =>
             if (desiredPolarity == true) {
@@ -320,7 +325,6 @@ object AccessoryRules {
               val transformedLit = mkNegLitNegProp_script().origLit(t)
               litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit._1)
               transformations.update(lit, transformedLit)
-
             }
           case _ =>
             if (desiredPolarity == true) {
@@ -340,18 +344,24 @@ object AccessoryRules {
             }
         }
       } else {
+        Out.lp_debug_info(s"Trying to transform to non-equality...")
         lit match {
           case lpOlTypedBinaryConnectiveTerm(lpotype, lpEq, lhs, lpTop) =>
             lhs match {
-              case lpOlUnaryConnectiveTerm(lpNot, t) =>
+              case lpOlUnaryConnectiveTerm(`lpNot`, t) =>
                 usedSymbols = usedSymbols + mkNegPropPosLit_script()
                 rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropPosLit_script().name)
                 val transformedLit = mkNegPropPosLit_script().origLit(t)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
-
               case _ =>
-                throw new Exception("2")
+                Out.lp_debug_info(s"${lhs.pretty}")
+                usedSymbols = usedSymbols + mkPosPropPosLit_script()
+                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosPropPosLit_script().name)
+                val transformedLit = mkPosPropPosLit_script().origLit(lhs)
+                litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
+                transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
+                //throw new Exception("2")
             }
           case lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpotype, lpEq, lhs, lpTop)) =>
             lhs match {
@@ -631,8 +641,12 @@ object AccessoryRules {
     var litsToFind = origClause.lits
     val positionsInClause: mutable.HashMap[lpOlTerm, Int] = mutable.HashMap.empty
     var litsAfter: Seq[lpOlTerm] = Seq.empty
+
+    Out.lp_debug_info(s"lits to fine: ${lits.map(_._1.pretty)}")
     litsToFind foreach { lit =>
+      Out.lp_debug_info(s"processing literal ${lit.pretty}")
       if (lits.map(pair => pair._1).contains(lit)) {
+        Out.lp_debug_info("yes")
         orderedLits = orderedLits :+ (lit, litsTypeMap(lit))
         positionsInClause.update(lit, origClause.lits.indexOf(lit))
         litsAfter = litsAfter :+ lpOlNothing

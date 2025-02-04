@@ -37,7 +37,7 @@ object LPoutput {
 
     val rulesFileSB: mutable.StringBuilder = new StringBuilder()
     // todo: once lambdapi is fixed, remove the declaration here
-    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool ${nameLpOutputFolder}.$nameLogicFile;\n\n") // maybe it will be necessary for now to add \nnotation ∨ infix right 6;
+    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool ${nameLpOutputFolder}.$nameLogicFile;\nnotation ∨ infix right 6;\n\n") // maybe it will be necessary for now to add \nnotation ∨ infix right 6;
 
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
