@@ -177,7 +177,7 @@ object LPoutput {
       if (inclduePermLib) f"${nameLpOutputFolder}.${permlibFile}"
       else ""
     }
-    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\nnotation ∨ infix right 6;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\nnotation ∨ infix right 6;\nsymbol el a : τ a;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
     var proofSteps: Seq[lpProofScriptStep] = Seq.empty
 
     def extractNecessaryFormulas(state:LocalState):Unit={

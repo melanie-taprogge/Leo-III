@@ -427,6 +427,13 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlBot)
   }
 
+  case class lpWitness(ty: lpOlType) extends lpOlTerm {
+    override def pretty: String = s"(el ${ty.pretty})"
+    override def prf: liftedProp =
+      if (ty == lpOtype) liftedProp(lpWitness(ty: lpOlType))
+      else throw new Exception(s"trying to encode ${lpWitness(ty: lpOlType).pretty} as a proof")
+  }
+
   case object lpOlNothing extends lpOlTerm {
     override def pretty: String = ""
 

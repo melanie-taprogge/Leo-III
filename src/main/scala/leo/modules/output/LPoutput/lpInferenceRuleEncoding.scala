@@ -99,12 +99,12 @@ object lpInferenceRuleEncoding {
 
     override def pretty: String = lpDefinition(name, Seq(f,g,x), ty, proof, Seq(T,S)).pretty
 
-    def instanciate(TS0:Option[(lpOlPolyType,lpOlPolyType)],f:lpOlTerm,g:lpOlTerm,x:Seq[lpOlTerm]):lpFunctionApp ={
+    def instanciate(TS0:Option[(lpOlPolyType,lpOlPolyType)],f:lpOlTerm,g:lpOlTerm,x:lpOlTerm):lpFunctionApp ={
       val ImpArgs = TS0 match {
         case Some((t,s)) => Seq(t,s)
         case None => Seq.empty
       }
-      lpFunctionApp(name,Seq(f,g)++x,ImpArgs)
+      lpFunctionApp(name,Seq(f,g):+x,ImpArgs)
     }
   }
 
