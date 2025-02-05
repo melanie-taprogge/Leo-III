@@ -26,7 +26,7 @@ object Encodings {
 
   // adapted from ToTPTP (... for now, I will have to change to a different one/ change permissions)
   // todo: combine with the original functions
-  final private def collectLambdasLP(t: Term): (Seq[Type], Term) = {
+  final def collectLambdasLP(t: Term): (Seq[Type], Term) = {
     collectLambdasLP0(Seq.empty, t)
   }
 
@@ -90,7 +90,8 @@ object Encodings {
         if (tptpDefinedTypeMap.keySet.contains(baseType)){
           (tptpDefinedTypeMap(baseType), usedSymbols + tptpDefinedTypeMap(baseType))
         }else{
-          (lpOlUserDefinedType(baseType), usedSymbols)
+          val lpSafeName = lpEscapeName(sig(id).name,sig)
+          (lpOlUserDefinedType(lpSafeName), usedSymbols)
         }
       case ComposedType(id, args) =>
         var encArgs: Seq[lpType] = Seq.empty
@@ -99,7 +100,7 @@ object Encodings {
           usedSymbols = usedSymbolsUpdated
           encArgs = encArgs :+ encArg
         }
-        throw new Exception(s"attempting to encode composed Type, this was never tested! \ninput was ${ty.pretty}\noutput would be ${lpOlMonoComposedType(lpConstantTerm(tptpEscapeExpression(sig(id).name)),encArgs).pretty}")
+        throw new Exception(s"attempting to encode composed Type, this was never tested! \ninput was ${ty.pretty}\noutput would be ${lpOlMonoComposedType(lpConstantTerm(lpEscapeName(sig(id).name,sig)),encArgs).pretty}")
         (lpOlMonoComposedType(lpConstantTerm(tptpEscapeExpression(sig(id).name)),encArgs),usedSymbols)
       case BoundType(scope) =>
         throw new Error(s"BoundType not yet encoded, unable to do ${ty.pretty}")
@@ -241,7 +242,7 @@ object Encodings {
     t match {
       // Constant symbols
       case Symbol(id) => val name = sig(id).name
-        val symbol = tptpDefinedSymbolMap.getOrElse(tptpEscapeExpression(name), lpOlConstantTerm(tptpEscapeExpression(name)))
+        val symbol = tptpDefinedSymbolMap.getOrElse(name, lpOlConstantTerm(lpEscapeName(name,sig)))
         (symbol, usedSymbols+symbol)
       // Numbers
       case Integer(n) => throw new Error(s"integers are not encoded yet ${t.pretty}") //n.toString
@@ -348,7 +349,7 @@ object Encodings {
         val translatedArgs: Seq[String] = args.tail.map(argToTPTP(_, tyVarCount, bVars)(sig)) // drop type argument as it's implicit in the TPTP representation
         s"$translatedF @ ${translatedArgs.mkString(" @ ")}"
          */
-        val translatedF = tptpEscapeExpression(sig(id).name)
+        val translatedF = lpEscapeName(sig(id).name,sig)
         throw new Error(s"Arithmetic constants are not encoded yet ($translatedF)")
 
       case f ∙ args =>

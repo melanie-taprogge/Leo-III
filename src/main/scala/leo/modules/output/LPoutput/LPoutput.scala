@@ -4,7 +4,7 @@ import leo.Out
 import leo.datastructures.Clause.symbols
 import leo.datastructures.Literal.asTerm
 import leo.datastructures.{ClauseProxy, Literal, Role_Axiom, Role_NegConjecture, Signature}
-import leo.modules.output.tptpEscapeName
+import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{calculus, symbolsInProof, userSignature}
 import leo.modules.output.LPoutput.Encodings._
@@ -202,7 +202,7 @@ object LPoutput {
 
       (relevantSymbols union additionalSymbols).foreach {key =>
         val symbol = sig.apply(key)
-        val sName = tptpEscapeName(symbol.name)
+        val sName = lpEscapeName(symbol.name,sig)
 
         if (symbol.hasKind) {
           //user defined types: add declarations to the problem
@@ -221,6 +221,11 @@ object LPoutput {
 
             val encAsRewriteRule = false
 
+            val (bVarTys, body) = collectLambdasLP(symbol._defn)
+            val newBVars = makeBVarList(bVarTys,0)
+            val (definition, _) = term2LP(symbol._defn, fusebVarListwithMap(newBVars, Map()), sig)
+
+            /*
             val (definition, updatedUsedSymbols,boundVars) = def2LP(symbol._defn, sig, usedSymbols, encAsRewriteRule)
             usedSymbols = updatedUsedSymbols
             var variables: Seq[lpOlUntypedVar] = Seq.empty
@@ -238,7 +243,12 @@ object LPoutput {
                 val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq,defTermType,lpOlFunctionApp(lpOlConstantTerm(sName),variables.map(Left(_))),definition)
                 lpDeclaration(lpConstantTerm(s"${sName}_def"),variables,defAsEq.prf)
               }
-            }
+             */
+
+            val defTermType = type2LP(symbol._defn.ty, sig)._1
+            val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(sName), Seq.empty), definition)
+            val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
+            Out.lp_debug_info(s"${encodedDef.pretty}")
             defSB.append(encodedDef.pretty)
           }
         }

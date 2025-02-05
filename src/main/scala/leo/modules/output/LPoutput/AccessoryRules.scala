@@ -402,7 +402,7 @@ object AccessoryRules {
 
     def flipStep(pol: Boolean, eqType: lpOlType) = {
       val rewritePatternEq = lpRewritePattern(generateClausePattern(litCount, clauseLen,pol))
-      lpRewrite(Some(rewritePatternEq),lpFunctionApp(flipLiteral(pol).name,Seq.empty, Seq(eqType)))
+      lpRewrite(Some(rewritePatternEq),lpFunctionApp(flipLiteral().name,Seq.empty, Seq(eqType)))
     }
 
     // first we register the two sides of the literals and wather or not the literals are negative
@@ -481,9 +481,9 @@ object AccessoryRules {
       necessaryRule match {
         case Some(rule) =>
           if (flip) {
-            usedSymbols = usedSymbols + flipLiteral(necessaryFlip)
+            usedSymbols = usedSymbols + flipLiteral()
             allSteps = allSteps :+ flipStep(necessaryFlip,ty0.get)
-            Out.lp_debug_info(s"Applying ${flipLiteral(necessaryFlip)} to flip literal ${lit0.pretty}")
+            Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           }
           usedSymbols = usedSymbols + rule
           allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name,Seq(lhs0.get)))
@@ -550,9 +550,9 @@ object AccessoryRules {
           allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name, Seq(lhs0.get)))
           Out.lp_debug_info(s"Applying ${rule.name} to transform non-equational literal to equational form")
           if (flip) {
-            usedSymbols = usedSymbols + flipLiteral(necessaryFlip)
+            usedSymbols = usedSymbols + flipLiteral()
             allSteps = allSteps :+ flipStep(necessaryFlip,ty1.get)
-            Out.lp_debug_info(s"Applying ${flipLiteral(necessaryFlip)} to flip literal ${lit0.pretty}")
+            Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           }
           true
         case None =>
@@ -566,9 +566,9 @@ object AccessoryRules {
         // the only possible difference is if the sides differ:
         if (lhs0 != lhs1){
           val necessaryFlip = if (pol0) true else false
-          usedSymbols = usedSymbols + flipLiteral(necessaryFlip)
+          usedSymbols = usedSymbols + flipLiteral()
           allSteps = allSteps :+ flipStep(necessaryFlip,ty0.get)
-          Out.lp_debug_info(s"Applying ${flipLiteral(necessaryFlip)} to flip literal ${lit0.pretty}")
+          Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           true
         }else {
           Out.lp_debug_info(s"Literals are already identical")
@@ -593,7 +593,7 @@ object AccessoryRules {
   ////////// Change order within literals
   ////////////////////////////////////////////////////////////////
 
-  case class flipLiteral(polarity: Boolean) extends lpDefinedRules {
+  case class flipLiteral() extends lpDefinedRules {
     // [T] (x y : τ T) : π((x = y) = (y = x))
 
     val T = lpOlUserDefinedMonoType("T")
@@ -620,7 +620,7 @@ object AccessoryRules {
       lpFunctionApp(name, Seq(x0, y0) ++ prfXeqY)
     }
 
-    def res(T0: lpOlPolyType, x0: lpOlTerm, y0: lpOlTerm) = { // todo unite encoding with type
+    def res(polarity: Boolean, T0: lpOlPolyType, x0: lpOlTerm, y0: lpOlTerm) = { // todo unite encoding with type
       if (polarity) lpOlTypedBinaryConnectiveTerm(lpEq, T0, y0, x0)
       else lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, T0, y0, x0))
     }
@@ -675,9 +675,9 @@ object AccessoryRules {
 
       val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None, lpOlUntypedVar(lpConstantTerm("x")), ispos)
 
-      usedSymbols = usedSymbols + flipLiteral(ispos)
-      rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, lpFunctionApp(flipLiteral(ispos).name, Seq(), Seq(litType)))
-      val transformedLit = flipLiteral(ispos).res(ty0.lift2Poly, lhs0, rhs0)
+      usedSymbols = usedSymbols + flipLiteral()
+      rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, lpFunctionApp(flipLiteral().name, Seq(), Seq(litType)))
+      val transformedLit = flipLiteral().res(ispos,ty0.lift2Poly, lhs0, rhs0)
       litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
 
     }

@@ -33,6 +33,35 @@ package object LPoutput {
     lpConstantTerm(s"step${number}")
   }
 
+  val lpAllowedRegEx = """^[^\t\r\n :,;`(){}\[\]".@$|?/]+$"""
+  val lpKeywords = Set( //todo: also add all of the names of the lambdapi symbols that could be in tptp (like "el")
+    "require", "open", "symbol", "notation", "builtin", "opaque",
+    "rule", "unif_rule", "coerce_rule", "inductive", "proof",
+    "assume", "apply", "refine", "simplify", "rewrite",
+    "print", "proofterm", "assert", "assertnot", "compute",
+    "constant", "injective", "commutative", "associative",
+    "in", "notation", "admit"
+  )
+  def findSafeName(str: String, sig: Signature): String = {
+    val newName = s"${str}_"
+    if (!sig.exists(newName)) newName
+    else findSafeName(newName, sig)
+  }
+
+  final def lpEscapeName(str: String,sig: Signature): String = {
+    if (lpKeywords.contains(str)) {
+      val newName = findSafeName(str,sig)
+      Out.lp_debug_info(s"renamed $str to $newName")
+      return newName
+    }
+    if (!str.matches(lpAllowedRegEx)){
+      val newName = s"{|$str|}"
+      Out.lp_debug_info(s"renamed $str to $newName")
+      newName
+    }
+    else str
+  }
+
   def nestedLorIlApp(lhs: Seq[lpOlTerm], rhs: Seq[lpOlTerm], prfRhs: lpTerm): lpFunctionApp = {
     // iterativeley construct the proofs for disjunctions of literals based on a proof for the rhs. This is necessary to avoid errors in cases where (a \lor b) \lor (c \lor d ( ...
     // would otherwise been proven
