@@ -1,5 +1,6 @@
 package leo.modules.procedures
 
+import leo.Out
 import leo.datastructures.{Literal, Rat, Real, Term, Type}
 import leo.datastructures.Term.local._
 
@@ -92,7 +93,6 @@ object Simplification extends Function1[Term, Term] {
         (Left(intermediate._1),intermediate._2)
       case Right(arg0) => (Right(arg0),Seq.empty)
     }
-
     term match {
       case Bound(_, _) => (term,Seq.empty)
       case Symbol(_) => (term,Seq.empty)
@@ -150,6 +150,7 @@ object Simplification extends Function1[Term, Term] {
                 }
               case Impl.key =>
                 val (left,right) = Impl.unapply(term).get
+                //print(s"right is ${right.pretty}\n")
                 val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
                 val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2, tuple._3, tuple._4))
                 val (simpRight, addInfoR) = applyAndTrack(right, extensional)

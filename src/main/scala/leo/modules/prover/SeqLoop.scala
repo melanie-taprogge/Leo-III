@@ -481,7 +481,7 @@ object SeqLoop {
       }
     }
 
-    if (Configuration.LPOUTPUTPATH.isDefined){
+    if (Configuration.LPOUTPUTPATH.isDefined && proof != null){
       val problemFileName = Paths.get(Configuration.PROBLEMFILE).getFileName.toString
       val problemFileNameWithoutExtension = problemFileName.lastIndexOf('.') match {
         case -1 => problemFileName

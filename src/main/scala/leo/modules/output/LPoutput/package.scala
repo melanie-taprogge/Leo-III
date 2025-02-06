@@ -5,7 +5,7 @@ import leo.datastructures.Term.∙
 import leo.datastructures.{Clause, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature.{===, HOLBinaryConnective, Not, |||}
 import leo.modules.output.LPoutput.Encodings.type2LP
-import leo.modules.output.LPoutput.lpDatastructures.{lpConstantTerm, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlConstantTerm, lpOlFunctionApp, lpOlLambdaTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpTerm, lpTypedVar, lpUntypedVar, lpOlTop, lpOlBot}
+import leo.modules.output.LPoutput.lpDatastructures.{lpConstantTerm, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlFunctionApp, lpOlLambdaTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
 
@@ -33,15 +33,19 @@ package object LPoutput {
     lpConstantTerm(s"step${number}")
   }
 
+  val lambdapiNames = Set(
+    lpOtype.pretty, lpWildcard.pretty, lpSet.pretty, lpScheme.pretty,
+    lpSet2Schme.pretty, lpEq.pretty, lpElWitness.pretty) // todo:generate automatically
+
   val lpAllowedRegEx = """^[^\t\r\n :,;`(){}\[\]".@$|?/]+$"""
-  val lpKeywords = Set( //todo: also add all of the names of the lambdapi symbols that could be in tptp (like "el")
+  val lpKeywords = Set(
     "require", "open", "symbol", "notation", "builtin", "opaque",
     "rule", "unif_rule", "coerce_rule", "inductive", "proof",
-    "assume", "apply", "refine", "simplify", "rewrite",
+    "assume", "apply", "refine", "simplify", "rewrite", "have",
     "print", "proofterm", "assert", "assertnot", "compute",
     "constant", "injective", "commutative", "associative",
-    "in", "notation", "admit"
-  )
+    "in", "notation", "reflexivity", "admit") ++ lambdapiNames
+
   def findSafeName(str: String, sig: Signature): String = {
     val newName = s"${str}_"
     if (!sig.exists(newName)) newName
@@ -51,7 +55,7 @@ package object LPoutput {
   final def lpEscapeName(str: String,sig: Signature): String = {
     if (lpKeywords.contains(str)) {
       val newName = findSafeName(str,sig)
-      Out.lp_debug_info(s"renamed $str to $newName")
+      //Out.lp_debug_info(s"renamed $str to $newName")
       return newName
     }
     if (!str.matches(lpAllowedRegEx)){

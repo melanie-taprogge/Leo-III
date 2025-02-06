@@ -289,7 +289,7 @@ object ModularProofEncoding {
     else (lpProofScript(allSteps),usedSymbols, None)
   }
 
-  def encBoolExt(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, addInfo: Set[(Literal,Seq[Literal])], sig: Signature): (lpProofScript, Set[lpStatement]) = {
+  def encBoolExt(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, addInfo: Set[(Literal,Seq[Literal])], sig: Signature): (lpProofScript, Set[lpStatement], Option[String]) = {
 
     val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
 
@@ -343,12 +343,16 @@ object ModularProofEncoding {
     // 5. If the order of literals was changed, generate a transform rule and apply it to permute the literals
     // todo
 
-    if (parent.cl.lits.length > 1) throw new Exception(s"Encoding of boolExt in LP for clauses with more than one literal not encoded yet")
-    else allSteps = allSteps :+ lpRefine(lpFunctionApp(transitions.head, Seq(lpFunctionApp(parentNameLpEnc, freeVarsChild))))
-    val proof = lpProofScript(allSteps)
+    if (parent.cl.lits.length > 1) {
+      (lpProofScript(Seq.empty),usedSymbols,Some(s"Encoding of boolExt in LP for clauses with more than one literal not encoded yet"))
+    }
+    else {
+      allSteps = allSteps :+ lpRefine(lpFunctionApp(transitions.head, Seq(lpFunctionApp(parentNameLpEnc, freeVarsChild))))
+      val proof = lpProofScript(allSteps)
 
-    // 6. Refine with the last proven step
-    (proof,usedSymbols)
+      // 6. Refine with the last proven step
+      (proof, usedSymbols, None)
+    }
   }
 
 
@@ -707,7 +711,7 @@ object ModularProofEncoding {
   }
 
   // encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
-  def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature) = { //: (lpProofScript, Set[lpStatement]) = {
+  def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Option[String]) = { //: (lpProofScript, Set[lpStatement]) = {
 
     // encode the lift of equality literals
     // ((x = y) = T)^a to (x = y)^a
@@ -722,50 +726,58 @@ object ModularProofEncoding {
     // 3. If the order of literals has changed, apply meta theorem and refine with instanciated meta-theorem
     //    Else refine with the last step
 
-    if (parents.length != 1) throw new Exception("trying to encode lift equaltiy step with more than one parent")
+    assert(parents.length == 1, "trying to encode lift equaltiy step with more than one parent")
 
     // Extract information about what literals were edited in which way
     // And in which order they will occur in the resulting clause
-    val litsPosLift = addInfo(0)
-    val litsNegLift = addInfo(1)
-    val litsOld = addInfo(2)
-    val edIndices = litsPosLift ++ litsNegLift
-    val indices = (edIndices ++ litsOld).sorted
-    val permutation = litsPosLift ++ litsNegLift ++ litsOld
+    if (addInfo.isEmpty) {
+      Out.lp_debug_info(s"no additional inforamtion provided, can not encode") //todo: would be better to infer atuomtically anyays
+      (lpProofScript(Seq.empty), Set.empty, Some("missing the additional information for the encoding"))
+    } else {
 
 
-    var allSteps: Seq[lpProofScriptStep] = Seq.empty
-    var usedRules: Set[lpStatement] = Set.empty
-    var liftedLits: Seq[lpOlTerm] = Seq.empty
+      val litsPosLift = addInfo(0)
+      val litsNegLift = addInfo(1)
+      val litsOld = addInfo(2)
+      val edIndices = litsPosLift ++ litsNegLift
+      val indices = (edIndices ++ litsOld).sorted
+      val permutation = litsPosLift ++ litsNegLift ++ litsOld
 
-    // 1. Abstract over free variables
-    val bVars = clauseVars2LP(parents.head.cl.implicitlyBound, sig, Set.empty)._2
-    val (clauseQuantification, applySymbolsToParent) = clauseRuleQuantification(parents.head.cl, bVars, sig)
-    if (clauseQuantification.nonEmpty) allSteps = allSteps :+ lpAssume(clauseQuantification.map(var0 => var0.untyped))
-    val lastStep: lpTerm = lpFunctionApp(parentNameLpEnc.head, applySymbolsToParent)
+      Out.lp_debug_info(s"edited literals at indices ${edIndices.mkString(", ")}, unchanged literals: ${litsOld.mkString(", ")}")
 
-    indices foreach {indx =>
-      val lit = parents.head.cl.lits(indx)
-      if (edIndices.contains(indx)){
-        val lhsRhs = ===.unapply(lit.left)
-        if (lhsRhs == None) throw new Exception("trying to encode lifting equality on malformed term")
-        val (lhs, rhs) = lhsRhs.get
-        val encRhs = term2LP(rhs, bVars, sig)._1
-        val encLhs = term2LP(lhs, bVars, sig)._1
-        val encType = type2LP(lhs.ty, sig)._1
-        val litPol = lit.polarity
-        val rwPattern = generateClausePatternTerm(permutation(indx), indices.length, None, lpOlUntypedVar(lpOlConstantTerm("x")),litPol)
-        var finalLit : lpOlTerm = lpOlNothing
-        if (litsPosLift.contains(indx)) {
-          if (!litPol) {
-            finalLit = lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, encType, encLhs, encRhs))
-          } else {
-            finalLit = lpOlTypedBinaryConnectiveTerm(lpEq, encType, encLhs, encRhs)
-          }
-        } else if (litsNegLift.contains(indx)) {
-          //    2 a) in case of negative equality lift, a rewrite tactic has to be applied
-          throw new Exception("encoding of inequality lift is unfinished")
-          /*
+      var allSteps: Seq[lpProofScriptStep] = Seq.empty
+      var usedRules: Set[lpStatement] = Set.empty
+      var liftedLits: Seq[lpOlTerm] = Seq.empty
+
+      // 1. Abstract over free variables
+      val bVars = clauseVars2LP(parents.head.cl.implicitlyBound, sig, Set.empty)._2
+      val (clauseQuantification, applySymbolsToParent) = clauseRuleQuantification(parents.head.cl, bVars, sig)
+      if (clauseQuantification.nonEmpty) allSteps = allSteps :+ lpAssume(clauseQuantification.map(var0 => var0.untyped))
+      val lastStep: lpTerm = lpFunctionApp(parentNameLpEnc.head, applySymbolsToParent)
+
+      indices foreach { indx =>
+        val lit = parents.head.cl.lits(indx)
+        if (edIndices.contains(indx)) {
+          val lhsRhs = ===.unapply(lit.left)
+          if (lhsRhs == None) throw new Exception("trying to encode lifting equality on malformed term")
+          val (lhs, rhs) = lhsRhs.get
+          val encRhs = term2LP(rhs, bVars, sig)._1
+          val encLhs = term2LP(lhs, bVars, sig)._1
+          val encType = type2LP(lhs.ty, sig)._1
+          val litPol = lit.polarity
+          val rwPattern = generateClausePatternTerm(permutation.indexOf(indx), indices.length, None, lpOlUntypedVar(lpOlConstantTerm("x")), litPol)
+          if (rwPattern.isDefined) Out.lp_debug_info(s"generated pattern for rewrite operation: ${rwPattern.get.pretty}")
+          var finalLit: lpOlTerm = lpOlNothing
+          if (litsPosLift.contains(indx)) {
+            if (!litPol) {
+              finalLit = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, encType, encLhs, encRhs))
+            } else {
+              finalLit = lpOlTypedBinaryConnectiveTerm(lpEq, encType, encLhs, encRhs)
+            }
+          } else if (litsNegLift.contains(indx)) {
+            //    2 a) in case of negative equality lift, a rewrite tactic has to be applied
+            throw new Exception("encoding of inequality lift is unfinished")
+            /*
           if (!litPol) {
             print("\nlit is negative")
             allSteps = allSteps :+ lpRewrite(rwPattern, lpInferenceRuleEncoding.liftEq().instanciate(encType, encLhs, encRhs))
@@ -776,35 +788,38 @@ object ModularProofEncoding {
             finalLit = lpOlTypedBinaryConnectiveTerm(lpEq, encType, encLhs, encRhs)
           }
            */
+          }
+          Out.lp_debug_info(s"lifting to ${finalLit.pretty}")
+          val lit_cl = cl.cl.lits(permutation.indexOf(indx))
+          if (lhs != lit_cl.left) {
+            // 2 b) for the new equality literlas, the order within the equality may have changed, if so: apply rewrite tactic
+            allSteps = allSteps :+ lpRewrite(rwPattern, flipLiteral().instanciate(encRhs, encLhs, None))
+            finalLit = flipLiteral().res(litPol, encType.lift2Poly, encRhs, encLhs)
+            usedRules = usedRules + flipLiteral()
+          }
+          liftedLits = liftedLits :+ finalLit
+        } else {
+          val lit = parents.head.cl.lits(indx)
+          val encLit = term2LP(asTerm(lit), bVars, sig)._1
+          liftedLits = liftedLits :+ encLit
         }
-        val lit_cl = cl.cl.lits(permutation.indexOf(indx))
-        if (lhs != lit_cl.left) {
-          // 2 b) for the new equality literlas, the order within the equality may have changed, if so: apply rewrite tactic
-          allSteps = allSteps :+ lpRewrite(rwPattern, flipLiteral().instanciate(encRhs,encLhs,None))
-          finalLit = flipLiteral().res(litPol,encType.lift2Poly,encRhs,encLhs)
-          usedRules = usedRules + flipLiteral()
-        }
-        liftedLits = liftedLits :+ finalLit
-      }else{
-        val lit = parents.head.cl.lits(indx)
-        val encLit = term2LP(asTerm(lit), bVars, sig)._1
-        liftedLits = liftedLits :+ encLit
       }
+
+      // 3. If the order of literals has changed, apply meta theorem and refine with instanciated meta-theorem
+      //    Else refine with the last step
+      val needsPermute = permutation != permutation.sorted
+      if (needsPermute) {
+        Out.lp_debug_info(s"applying the following permutation: $permutation")
+        allSteps = allSteps :+ lpRefine(metaPermutation.instanciate(permutation, liftedLits, lastStep))
+        // permutation will not need to be added to the rules assuming that we will add it to stdlib
+      } else {
+        allSteps = allSteps :+ lpRefine(lpFunctionApp(lastStep, Seq()))
+      }
+
+      val finishedProof = lpProofScript(allSteps)
+
+      (finishedProof, usedRules, None)
     }
-
-    // 3. If the order of literals has changed, apply meta theorem and refine with instanciated meta-theorem
-    //    Else refine with the last step
-    val needsPermute = permutation != permutation.sorted
-    if (needsPermute){
-      allSteps = allSteps :+ lpRefine(metaPermutation.instanciate(permutation,liftedLits,lastStep))
-      // permutation will not need to be added to the rules assuming that we will add it to stdlib
-    } else {
-      allSteps = allSteps :+ lpRefine(lpFunctionApp(lastStep,Seq()))
-    }
-
-    val finishedProof = lpProofScript(allSteps)
-
-    (finishedProof, usedRules)
   }
 
 
@@ -854,6 +869,7 @@ object ModularProofEncoding {
     var rewriteenLits = encParent.args
     val clauseLen = rewriteenLits.length
     var transformationsRwCounter = 0
+    var eqFlipCounter = 0
     var rwRuleApplicationSteps: Seq[lpProofScriptStep] = Seq.empty
     rewriteEqCalsues.zip(sourcesBeforeEq) foreach { case (rewriteEqClause, sourceBeforeEq0) =>
       var sourceBeforeEq = sourceBeforeEq0
@@ -897,7 +913,8 @@ object ModularProofEncoding {
           sourceBeforeEq = lpConstantTerm(transformationStepName)
         } else if (rewriteEq.polarity) {
           //2 a) case II) If the rewrite-clause is an equational single literal, use eqSym_eq to prove the reverse rewrite rule
-          val transformationStepName = "flip_equality"
+          val transformationStepName = s"flip_equality_$eqFlipCounter"
+          eqFlipCounter = eqFlipCounter + 1
           val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, rwRhs, rwLhs)
           val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, lpFunctionApp(flipLiteral().name, Seq.empty, Seq(rwType))), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
           val (haveTransformStep, usedSymbols0) = (haveTransformStep0, flipLiteral())
@@ -1094,6 +1111,7 @@ object ModularProofEncoding {
 
       // Abstract over the free variables
       val (unboundVarsChild0, encChild, _) = clause2LP_unquantified(cl.cl, Set.empty, sig)
+      val (unboundVarsParent, _, _) = clause2LP_unquantified(parent.cl, Set.empty, sig)
       var encChildLiterals = encChild.args
       val unboundVarsChild = unboundVarsChild0.map(var0 => lpUntypedVar(var0.name))
       allSteps = if (unboundVarsChild.nonEmpty) allSteps :+ lpAssume(unboundVarsChild) else allSteps
@@ -1105,81 +1123,83 @@ object ModularProofEncoding {
       val typeUnification = addInfoUni._2
       val termUnification = addInfoUni._1
 
-      // Type unification
-      if (typeUnification.nonEmpty) {
-        throw new Exception(s"LP encoding of type unification not encoded yet")
-      }
+      if (termUnification.length != unboundVarsParent.length) {
+        //throw new Exception(s"trying to encode the unification that does not bind all free variables, this is implemented but untested, make sure this is done correctly") //todo
+        Out.lp_debug_info(s"unification that does not bind all free variables not yet encoded")
+        (lpProofScript(Seq.empty),usedSymbols,Some("unification that does not bind all free variables not yet encoded"))
+      } else {
+        // Type unification
+        if (typeUnification.nonEmpty) {
+          throw new Exception(s"LP encoding of type unification not encoded yet")
+        }
 
-      else if (termUnification.nonEmpty) {
-        // Construct a map for the substitutions
-        val subsMap: mutable.HashMap[String, lpOlTerm] = mutable.HashMap.empty
-        val varmap = clauseImplicitsToTPTPQuantifierList_map(parent.cl.implicitlyBound)(sig)
-        termUnification foreach { termUni =>
-          val lpUnboundVar = varmap.apply(termUni._1)
-          // Term unifications can either be bindings of variables by terms or by variables...
-          // Depending on that, the second element of the tuple is either a term or a String
-          termUni._2 match {
-            case var0: String =>
-              throw new Exception("binding by variables not yet encoded (only terms so far)") //todo: is it really variables? I suppose so, but bound ones, no?
-            case t: Term =>
-              val encBindTerm = term2LP(t, termUni._4, sig)._1 //todo: dont i need the offset? was it an oversight not to use it in term2lp?
-              subsMap += (lpUnboundVar -> encBindTerm)
-            case _ => throw new Exception("Encountered unexpected bound object when encoding Unification step in lp")
+        else if (termUnification.nonEmpty) {
+          // Construct a map for the substitutions
+          val subsMap: mutable.HashMap[String, lpOlTerm] = mutable.HashMap.empty
+          val varmap = clauseImplicitsToTPTPQuantifierList_map(parent.cl.implicitlyBound)(sig)
+          termUnification foreach { termUni =>
+            val lpUnboundVar = varmap.apply(termUni._1)
+            // Term unifications can either be bindings of variables by terms or by variables...
+            // Depending on that, the second element of the tuple is either a term or a String
+            termUni._2 match {
+              case var0: String =>
+                throw new Exception("binding by variables not yet encoded (only terms so far)") //todo: is it really variables? I suppose so, but bound ones, no?
+              case t: Term =>
+                val encBindTerm = term2LP(t, termUni._4, sig)._1 //todo: dont i need the offset? was it an oversight not to use it in term2lp?
+                subsMap += (lpUnboundVar -> encBindTerm)
+              case _ => throw new Exception("Encountered unexpected bound object when encoding Unification step in lp")
+            }
+          }
+
+          // Proof the substitution by applying the terms to be substituted to the parent quanififying over the respective variables
+          val encSubstLits = parent.cl.lits.map(lit => substituteVarTerm(term2LP(asTerm(lit), bVars, sig)._1, subsMap.toMap))
+          // The application that instanciates the quantified variables with the substituted Terms in lp
+          val applyToParent = unboundVarsParent.map(var0 => subsMap.getOrElse(var0.name.pretty, var0))
+          val substitution = lpProofScript(Seq(lpRefine(lpFunctionApp(parentNameLpEnc, applyToParent))))
+          val substitutionStepName = "Substitution"
+          val substitutionHaveStep = lpHave(substitutionStepName, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits).prf, substitution)
+          allSteps = allSteps :+ substitutionHaveStep
+
+          // Depending on the mode of Unification, additional steps like the removal of unification constraints have to be proven
+          // we carry out the substitution todo would there be an advantage to passing on the substitution in its original form after all and doing the actual substitution here instead of doing it as lambda terms?
+          if (Seq("uniAfterFactoring").contains(mode)) { // uniAfterFactoring is eqFact
+            // in this case the unification constraints were fulfilled and removed, we thus need to prove that they can be removed
+            // Remove the first unification constraint
+            val uniC1 = addInfoUniRule._2._1
+            if (parent.cl.lits.last != uniC1) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 1 in unexpected position")
+            val nameStep1Removal = "RemoveUC1"
+            val (removeUniC1, usedSymbolsUc1) = removeUnificationConstraint(uniC1, parent.cl, encSubstLits.last, sig)
+            usedSymbols = usedSymbols ++ usedSymbolsUc1
+            val proofStepUc1 = lpHave(nameStep1Removal, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init).prf, lpProofScript(removeUniC1 :+ lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName), Seq()))))
+            // Remove the second unification constraint
+            val uniC2 = addInfoUniRule._2._2
+            if (parent.cl.lits.init.last != uniC2) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 2 in unexpected position")
+            val nameStep2Removal = "RemoveUC2"
+            val clauseWighoutUC = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init.init)
+            val (removeUniC2, usedSymbolsUc2) = removeUnificationConstraint(uniC2, Clause(parent.cl.lits.init), encSubstLits.init.last, sig)
+            usedSymbols = usedSymbols ++ usedSymbolsUc2
+            val proofStepUc2 = lpHave(nameStep2Removal, clauseWighoutUC.prf, lpProofScript(removeUniC2 :+ lpRefine(lpFunctionApp(lpConstantTerm(nameStep1Removal), Seq()))))
+
+            // only add the rewrite steps, this is less complicated but should have the same result
+            allSteps = allSteps ++ removeUniC2 ++ removeUniC1
+
+            // Now the last step is refining with the last proven term after removal of the last unification constraint
+            val refineStep = lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName), Seq())) //lpRefine(lpFunctionApp(lpConstantTerm(nameStep2Removal),Seq()))
+
+            allSteps = allSteps :+ refineStep
           }
         }
 
-        // Proof the substitution by applying the terms to be substituted to the parent quanififying over the respective variables
-        val encSubstLits = parent.cl.lits.map(lit => substituteVarTerm(term2LP(asTerm(lit), bVars, sig)._1, subsMap.toMap))
-        // The application that instanciates the quantified variables with the substituted Terms in lp
-        val (unboundVarsParent, _, _) = clause2LP_unquantified(parent.cl, Set.empty, sig)
-        val applyToParent = unboundVarsParent.map(var0 => subsMap.getOrElse(var0.name.pretty, var0))
-        val substitution = lpProofScript(Seq(lpRefine(lpFunctionApp(parentNameLpEnc, applyToParent))))
-        val substitutionStepName = "Substitution"
-        val substitutionHaveStep = lpHave(substitutionStepName, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits).prf, substitution)
-        allSteps = allSteps :+ substitutionHaveStep
-
-        // Depending on the mode of Unification, additional steps like the removal of unification constraints have to be proven
-        // we carry out the substitution todo would there be an advantage to passing on the substitution in its original form after all and doing the actual substitution here instead of doing it as lambda terms?
-        if (Seq("uniAfterFactoring").contains(mode)) { // uniAfterFactoring is eqFact
-          // in this case the unification constraints were fulfilled and removed, we thus need to prove that they can be removed
-          if (termUnification.length != unboundVarsParent.length) {
-            throw new Exception(s"trying to encode the unification that does not bind all free variables, this is implemented but untested, make sure this is done correctly") //todo
-          }
-          // Remove the first unification constraint
-          val uniC1 = addInfoUniRule._2._1
-          if (parent.cl.lits.last != uniC1) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 1 in unexpected position")
-          val nameStep1Removal = "RemoveUC1"
-          val (removeUniC1, usedSymbolsUc1) = removeUnificationConstraint(uniC1, parent.cl, encSubstLits.last, sig)
-          usedSymbols = usedSymbols ++ usedSymbolsUc1
-          val proofStepUc1 = lpHave(nameStep1Removal, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init).prf, lpProofScript(removeUniC1 :+ lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName), Seq()))))
-          // Remove the second unification constraint
-          val uniC2 = addInfoUniRule._2._2
-          if (parent.cl.lits.init.last != uniC2) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 2 in unexpected position")
-          val nameStep2Removal = "RemoveUC2"
-          val clauseWighoutUC = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init.init)
-          val (removeUniC2, usedSymbolsUc2) = removeUnificationConstraint(uniC2, Clause(parent.cl.lits.init), encSubstLits.init.last, sig)
-          usedSymbols = usedSymbols ++ usedSymbolsUc2
-          val proofStepUc2 = lpHave(nameStep2Removal, clauseWighoutUC.prf, lpProofScript(removeUniC2 :+ lpRefine(lpFunctionApp(lpConstantTerm(nameStep1Removal), Seq()))))
-
-          // only add the rewrite steps, this is less complicated but should have the same result
-          allSteps = allSteps ++ removeUniC2 ++ removeUniC1
-
-          // Now the last step is refining with the last proven term after removal of the last unification constraint
-          val refineStep = lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName), Seq())) //lpRefine(lpFunctionApp(lpConstantTerm(nameStep2Removal),Seq()))
-
-          allSteps = allSteps :+ refineStep
+        // permutation? todo: figure out why this can even happen
+        if (containsLpLits(encParentLiterals, encChildLiterals)) {
+          val permutationStep = permutationStepSkript(encParentLiterals, encChildLiterals, lpFunctionApp(parentNameLpEnc, unboundVarsChild))
+          Out.lp_debug_info(s"Permutation step: ${permutationStep.pretty}")
+          allSteps = allSteps :+ permutationStep
         }
-      }
 
-      // permutation? todo: figure out why this can even happen
-      if (containsLpLits(encParentLiterals,encChildLiterals)){
-        val permutationStep = permutationStepSkript(encParentLiterals,encChildLiterals,lpFunctionApp(parentNameLpEnc,unboundVarsChild))
-        Out.lp_debug_info(s"Permutation step: ${permutationStep.pretty}")
-        allSteps = allSteps :+ permutationStep
+        val proofScript = lpProofScript(allSteps)
+        (proofScript, usedSymbols, None)
       }
-
-      val proofScript = lpProofScript(allSteps)
-      (proofScript, usedSymbols, None)
     }
     else{
       (lpProofScript(Seq.empty),Set.empty,  Option(s"the unification mode $mode is either not set or not encoded yet..."))

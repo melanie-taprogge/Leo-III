@@ -1281,10 +1281,17 @@ package inferenceControl {
           val (posFuncExtLits, negFuncExtLits) = funcExtLits.partition(_.polarity)
           val appliedNegFuncExtLits = negFuncExtLits.map(lit => FuncExt.applyExhaust(lit, vargen)(sig))
           // create Sequences of the before and after literals for negative literals
-          if (LP) addInfo = addInfo ++ negFuncExtLits.zip(appliedNegFuncExtLits).map { case (x, y) => (x, y)}
+          var addInfo: Seq[(Literal,Literal)] = Seq.empty
+          addInfo = addInfo ++ negFuncExtLits.zip(appliedNegFuncExtLits).map { case (x, y) => (x, y)}
           val (stepLiterals, stepInfo) = exhaustiveSteps(posFuncExtLits,vargen)(sig)
-          val steps = stepLiterals.zip(stepInfo).iterator
+          val pairs = stepLiterals.zip(stepInfo)
           val newProp = addProp(ClauseAnnotation.PropFuncExt, deleteProp(ClauseAnnotation.PropBoolExt | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
+          if (pairs.isEmpty){
+            val newClause = Clause(appliedNegFuncExtLits ++ otherLits)
+            val newInfo = new FurtherInfo() //todo : im sure there is a more elegant way of instantiation
+            result = result + AnnotatedClause(newClause, Role_Plain, InferredFrom(FuncExt, cl), newProp, newInfo)
+          }
+          val steps = pairs.iterator
           while (steps.hasNext) {
             val posFuncExtStep = steps.next()
             val newClause = Clause(posFuncExtStep._1 ++ appliedNegFuncExtLits ++ otherLits)
@@ -1306,10 +1313,8 @@ package inferenceControl {
     @tailrec private final def exhaustiveSteps0(posLits: Seq[Literal], vargen: FreshVarGen, done: Seq[Literal], acc: Seq[Seq[Literal]], addInfo0: Seq[(Literal,Literal)]=Seq.empty)(sig: Signature): (Seq[Seq[Literal]],Seq[(Literal,Literal)]) = {
       if (posLits.isEmpty) (acc,addInfo0)
       else {
-        val LP = true
-        var addInfo: Seq[(Literal,Literal)] = Seq.empty // todo only track if LP is true
         val appliedOneStepPosFuncExtLits = posLits.map(lit => FuncExt.applyNew(lit, vargen)(sig))
-        if (LP) addInfo = addInfo ++ posLits.zip(appliedOneStepPosFuncExtLits).map { case (x, y) => (x, y)}
+        val addInfo = posLits.zip(appliedOneStepPosFuncExtLits).map { case (x, y) => (x, y)}
         val (_,todoLits,doneLits) = FuncExt.canApply(appliedOneStepPosFuncExtLits)
         exhaustiveSteps0(todoLits, vargen, done ++ doneLits, acc :+ (appliedOneStepPosFuncExtLits ++ done), addInfo0 ++ addInfo)(sig)
       }
@@ -1817,6 +1822,7 @@ package inferenceControl {
 
 
     final def expandDefinitions(cl: AnnotatedClause)(implicit sig: Signature): AnnotatedClause = {
+      Out.trace(s"bingo")
       if (cl.annotation.fromRule != null && cl.annotation.fromRule == DefExpSimp) cl
       else {
         assert(Clause.unit(cl.cl))
@@ -1839,6 +1845,7 @@ package inferenceControl {
         val encInfo = new FurtherInfo()
         encInfo.addInfoLiftEq = indxs
         val result = AnnotatedClause(Clause(LiftEq(posLift, negLift, lift_other)(sig)), Role_Plain, InferredFrom(LiftEq, cl), deleteProp(ClauseAnnotation.PropBoolExt,cl.properties), encInfo)
+        //print(s"here are incices: $indxs for clause ${cl.id} to retrive ${result.id}\n")
         Out.debug(s"[ToEq] [${cl.id}] > [${result.id}]")
         Out.trace(s"[ToEq] Result: ${result.pretty(sig)}")
         result

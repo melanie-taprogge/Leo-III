@@ -122,7 +122,7 @@ object LPoutput {
 
         case leo.modules.calculus.BoolExt =>
           val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
-          ("BoolExt", encoding._1, encoding._2, None)
+          ("BoolExt", encoding._1, encoding._2, encoding._3)
 
         case leo.modules.calculus.OrderedEqFac =>
           //val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head,cl.furtherInfo.addInfoEqFac,parentInLpEncID.head,sig)
@@ -158,7 +158,7 @@ object LPoutput {
 
         case leo.modules.calculus.LiftEq =>
           val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
-          ("LiftEq", encodingLiftEq._1, encodingLiftEq._2, None)
+          ("LiftEq", encodingLiftEq._1, encodingLiftEq._2, encodingLiftEq._3)
         case _ =>
           val parentIDs = parentInLpEncID.map(id => id.name)
           ("", lpProofScript(Seq.empty), Set.empty, Option(s"Rule ${rule.name} not encoded yet, parents are: ${parentIDs.mkString(", ")}"))
