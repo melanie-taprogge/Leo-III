@@ -5,7 +5,7 @@ import leo.datastructures.Term.∙
 import leo.datastructures.{Clause, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature.{===, HOLBinaryConnective, Not, |||}
 import leo.modules.output.LPoutput.Encodings.type2LP
-import leo.modules.output.LPoutput.lpDatastructures.{lpConstantTerm, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlFunctionApp, lpOlLambdaTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
+import leo.modules.output.LPoutput.lpDatastructures.{lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlFunctionApp, lpOlLambdaTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
 
@@ -52,8 +52,15 @@ package object LPoutput {
     else findSafeName(newName, sig)
   }
 
+  private final val partiallyAlliedTPTPmap = //Vector("=", "!=", "&", "|", "~", "!", "?")
+  // symbol =_part (a : Set) ≔ λ (x y : τ a), x = y;
+    Map.apply("~" -> "¬_part", "=" -> "=_part", "!=" -> "!=_part", "&" -> "∧_part", "|" -> "∨_part", "!" -> "∀_part", "?" -> "∃_part")
+
   final def lpEscapeName(str: String,sig: Signature): String = {
-    if (lpKeywords.contains(str)) {
+    if (partiallyAlliedTPTPmap.keySet.contains(str)) {
+      return partiallyAlliedTPTPmap(str)
+    } //throw new Exception(s"found illegal $str")
+    else if (lpKeywords.contains(str)) {
       val newName = findSafeName(str,sig)
       //Out.lp_debug_info(s"renamed $str to $newName")
       return newName

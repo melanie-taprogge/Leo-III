@@ -484,8 +484,8 @@ object SeqLoop {
     if (Configuration.LPOUTPUTPATH.isDefined && proof != null){
       val problemFileName = Paths.get(Configuration.PROBLEMFILE).getFileName.toString
       val problemFileNameWithoutExtension = problemFileName.lastIndexOf('.') match {
-        case -1 => problemFileName
-        case i => problemFileName.substring(0, i)
+        case -1 => problemFileName.replace(".","_")
+        case i => problemFileName.substring(0, i).replace(".","_")
       }
       val lpFolderName = "lpProof"
       val lpOutputPath = if(Configuration.LPOUTPUTPATH.get.endsWith("/")) s"${Configuration.LPOUTPUTPATH.get}/" else s"${Configuration.LPOUTPUTPATH.get}/"

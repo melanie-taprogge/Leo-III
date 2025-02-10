@@ -108,48 +108,48 @@ object ModularProofEncoding {
     (lpProofScript(allSteps), usedSymbols)
     }
 
-  def encDefExSimp(child: ClauseProxy, parent: ClauseProxy, additionalInfoSimp: Seq[(Seq[Int], String, Term, Term)], additionalInfoDefExp: Seq[Signature.Key], parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Set[lpStatement], Set[Signature.Key], Option[String]) = {
+  def encDefExSimp(child: ClauseProxy, parent: ClauseProxy, additionalInfoSimp: Seq[(Seq[Int], Int)], additionalInfoDefExp: Seq[Signature.Key], parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Set[lpStatement], Set[Signature.Key], Option[String]) = {
 
     // outdated
     // todo: update this function to proof scripts
 
+
+
     val wasSimplified: Boolean = additionalInfoSimp.nonEmpty
-    print(s"\n\n WAS SIMPLIFIED: $wasSimplified \n\n")
-    if (wasSimplified) (lpProofScript(Seq.empty),Set.empty,Set.empty,Option("encDefExSimp encoding outdated"))
-    else {
-      val wasEtaExp: Boolean = false
+    Out.lp_debug_info(s"WAS SIMPLIFIED: $wasSimplified")
+    val wasEtaExp: Boolean = false
 
-      val bVars = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
+    val bVars = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
 
-      var usedSymbols: Set[lpStatement] = Set.empty
-      var allProofStep: Seq[lpProofScriptStep] = Seq.empty
+    var usedSymbols: Set[lpStatement] = Set.empty
+    var allProofStep: Seq[lpProofScriptStep] = Seq.empty
 
-      // todo: since we might have eta expanision this might have to be changed
+    // todo: since we might have eta expanision this might have to be changed
 
-      val encSimpChild = if (wasEtaExp) throw new Exception("lp proof for eta expansion not encoded yet") else term2LP(Clause.asTerm(child.cl), bVars, sig)._1
+    val encSimpChild = term2LP(Clause.asTerm(child.cl), bVars, sig)._1
 
-      //// 1. Abstraction step
-      val quantifiedVars = clauseRuleQuantification(parent.cl, bVars, sig)._2
-      if (quantifiedVars.length > 0) {
-        throw new Exception(s"the encoding of simplifications with implicitly quantified vars is not tested yet, comment this and check carefully")
-        val assumeStep = lpAssume(quantifiedVars)
-        allProofStep = allProofStep :+ assumeStep
-      }
-
-      //// 2. Proof defExpansion and / or simplification
-      if (wasSimplified) {
-        val (simpProof, usedSymbolsSimplification) = simplificationProofScript(child.cl, parent.cl, additionalInfoSimp, additionalInfoDefExp.toSet, parentNameLpEnc, quantifiedVars, bVars, sig)
-        usedSymbols = usedSymbols ++ usedSymbolsSimplification
-        if (parent.cl.lits.length != child.cl.lits.length) throw new Exception(s"when simplifying to ${encSimpChild.pretty} a literal was deleted, this is not yet encoded")
-
-        allProofStep = allProofStep :+ simpProof
-      }
-
-      // combine all steps into one proof script
-      val proofScript = lpProofScript(allProofStep)
-
-      (proofScript, usedSymbols, additionalInfoDefExp.toSet, Option("encDefExSimp encoding outdated"))
+    //// 1. Abstraction step
+    val quantifiedVars = clauseRuleQuantification(parent.cl, bVars, sig)._2
+    if (quantifiedVars.length > 0) {
+      //throw new Exception(s"the encoding of simplifications with implicitly quantified vars is not tested yet, comment this and check carefully")
+      val assumeStep = lpAssume(quantifiedVars)
+      allProofStep = allProofStep :+ assumeStep
     }
+
+    //// 2. Proof defExpansion and / or simplification
+    if (wasSimplified) {
+      val (simpProof, usedSymbolsSimplification) = simplificationProofScript(child.cl, parent.cl, additionalInfoSimp, additionalInfoDefExp.toSet, parentNameLpEnc, quantifiedVars, bVars, sig)
+      usedSymbols = usedSymbols ++ usedSymbolsSimplification
+      if (parent.cl.lits.length != child.cl.lits.length) throw new Exception(s"when simplifying to ${encSimpChild.pretty} a literal was deleted, this is not yet encoded")
+
+      allProofStep = allProofStep :+ simpProof
+    }
+
+    // combine all steps into one proof script
+    val proofScript = lpProofScript(allProofStep)
+
+    // (lpProofScript(Seq.empty),Set.empty,Set.empty,Option("encDefExSimp encoding outdated"))
+    (proofScript, usedSymbols, additionalInfoDefExp.toSet, Option("encDefExSimp encoding outdated"))
   }
 
 
@@ -186,6 +186,7 @@ object ModularProofEncoding {
       //val encMap = editedLiterals.map{case (lorig,led) => (term2LP(asTerm(lorig),bVarMap,sig)._1,term2LP(asTerm(led),bVarMap,sig)._1)}.toMap
       var litsAfterFunext: Seq[lpOlTerm] = Seq.empty
       var literalsToEqRW: Seq[lpProofScriptStep] = Seq.empty
+      if (parent.cl.lits.length > 1) cantEncode = cantEncode :+ "parent of length longer than two"
       parent.cl.lits foreach { origLit =>
         val edLit = editedLiteralsMap.getOrElse(origLit, origLit)
 
@@ -202,7 +203,7 @@ object ModularProofEncoding {
             // for in the following steps.
             val encEditedLit00 = encEditLit0 match {
               case lpOlUnaryConnectiveTerm(`lpNot`, body) =>
-                lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, body, lpOlTop))
+                lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, body, lpOlBot)
               case _ =>
                 lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encEditLit0, lpOlTop)
             }
@@ -621,7 +622,7 @@ object ModularProofEncoding {
   ////////// Extended Calculus
   ////////////////////////////////////////////////////////////////
 
-  def simplificationInfoToSteps(parent: Clause, additionalInfo: Seq[(Seq[Int],String,Term,Term)], sig: Signature):(Seq[lpProofScriptStep],Set[lpStatement])={
+  def simplificationInfoToSteps(parent: Clause, additionalInfo: Seq[(Seq[Int],Int)], sig: Signature):(Seq[lpProofScriptStep],Set[lpStatement])={
 
     // outdated
 
@@ -651,13 +652,13 @@ object ModularProofEncoding {
     (rewriteSteps,usedSymbols)
   }
 
-  def simplificationProofScript(child: Clause, parent: Clause, additionalInfo: Seq[(Seq[Int],String,Term,Term)], symbolsToUnfold: Set[Signature.Key], parentNameLpEnc: lpConstantTerm, quantifiedVars: Seq[lpUntypedVar], bVars: Map[Int, String], sig: Signature):(lpProofScript, Set[lpStatement])={
+  def simplificationProofScript(child: Clause, parent: Clause, additionalInfo: Seq[(Seq[Int],Int)], symbolsToUnfold: Set[Signature.Key], parentNameLpEnc: lpConstantTerm, quantifiedVars: Seq[lpUntypedVar], bVars: Map[Int, String], sig: Signature):(lpProofScript, Set[lpStatement])={
 
     // proof the equality between a parent and a child term given a set of rewrite rules and their positions
 
     val encParent = term2LP(Clause.asTerm(parent), bVars, sig)._1
     val encChild = term2LP(Clause.asTerm(child), bVars, sig)._1
-    print(s"Encoding simplification step: ${encParent.pretty} to ${encChild.pretty}\n")
+    //print(s"Encoding simplification step: ${encParent.pretty} to ${encChild.pretty}\n")
 
     var usedSymbols: Set[lpStatement] = Set.empty
 
@@ -823,7 +824,7 @@ object ModularProofEncoding {
   }
 
 
-  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], String, Term, Term)], parentModoluRw: Option[Clause], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Option[String]) = {
+  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], Int)], parentModoluRw: Option[Clause], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Option[String]) = {
 
     // The modular proof script can consist of the following steps:
     // 1. Abstract over free variables
@@ -907,6 +908,7 @@ object ModularProofEncoding {
             val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkBotEqNegProp_script(sourceBeforeEq.pretty).name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
             (haveTransformStep0, mkBotEqNegProp_script())
           }
+          Out.lp_debug_info(s"Transforming rewrite rule to equality...")
           //  2 b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly todo: sbustitution
           allSteps = allSteps :+ haveTransformStep
           usedSymbols = usedSymbols + usedSymbols0
@@ -916,14 +918,14 @@ object ModularProofEncoding {
           val transformationStepName = s"flip_equality_$eqFlipCounter"
           eqFlipCounter = eqFlipCounter + 1
           val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, rwRhs, rwLhs)
+          Out.lp_debug_info(s"transforming rewirte clause to ${transformedRewriteEq.pretty}")
           val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, lpFunctionApp(flipLiteral().name, Seq.empty, Seq(rwType))), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
           val (haveTransformStep, usedSymbols0) = (haveTransformStep0, flipLiteral())
           //  2 b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly todo: sbustitution
           allSteps = allSteps :+ haveTransformStep
           usedSymbols = usedSymbols + usedSymbols0
           sourceBeforeEq = lpConstantTerm(transformationStepName)
-        }
-        else throw new Exception("Error while attempting to encode rewrite step in LP: Rewrite rule is equational but not positive")
+        } else throw new Exception("Error while attempting to encode rewrite step in LP: Rewrite rule is equational but not positive")
 
         // go over all of the literals and - for each occurrence of the term that has to be rewritten, apply a rewrite rule and if necessary eqSmy
         val bVarsParentEq = clauseVars2LP(parent.implicitlyBound, sig, Set.empty)._2

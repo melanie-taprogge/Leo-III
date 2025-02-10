@@ -68,7 +68,7 @@ object lpDatastructures {
     }
   }
 
-  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], typing: lpMlType, proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier0: Seq[lpKeyword]= Seq.empty) extends lpStatement {
+  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], typing: Option[lpMlType], proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier0: Seq[lpKeyword]= Seq.empty) extends lpStatement {
     override def pretty: String = {
 
       var modifier = modifier0
@@ -93,7 +93,7 @@ object lpDatastructures {
 
       val gap1 = if (implicitArgs.isEmpty) "" else " "
       val gap2 = if (variables.isEmpty) "" else " "
-      s"${modifier.map(mod => s"${mod.pretty} ").mkString("")}symbol ${name.pretty}$gap1${typedImpArgs.mkString(" ")}$gap2${typedVars.mkString(" ")}: ${typing.pretty} ≔\n${proofEnc};\n"
+      s"${modifier.map(mod => s"${mod.pretty} ").mkString("")}symbol ${name.pretty}$gap1${typedImpArgs.mkString(" ")}$gap2${typedVars.mkString(" ")}:${if (typing.isDefined) typing.get.pretty} ≔\n${proofEnc};\n"
     }
   }
 

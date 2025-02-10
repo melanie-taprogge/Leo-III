@@ -23,12 +23,12 @@ object SimplificationEncoding {
         )
 
   // map the names of the simplification rules to the names of the functions encoding them and a boolean indicating weather or not they need to be instanciated
-  val SimpRuleMap: Map[String,(simplificationRules,Boolean)] =
-    Map("Simp1" -> (Simp1_eq, SimpNeedsTyping(Simp1_eq)),
-        "Simp9" -> (Simp9_eq, SimpNeedsTyping(Simp9_eq)),
-        "Simp10" -> (Simp10_eq, SimpNeedsTyping(Simp10_eq)),
-        "Simp16" -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)),
-        "Simp17" -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)))
+  val SimpRuleMap: Map[Int,(simplificationRules,Boolean)] =
+    Map(1 -> (Simp1_eq, SimpNeedsTyping(Simp1_eq)),
+        31 -> (Simp9_eq, SimpNeedsTyping(Simp9_eq)),
+        37 -> (Simp10_eq, SimpNeedsTyping(Simp10_eq)),
+        24 -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)),
+        26 -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)))
 
   abstract class simplificationRules extends lpStatement{
     def name: lpConstantTerm
@@ -59,7 +59,7 @@ object SimplificationEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(Simp1_eq.name,arguments,ty)
 
-    override def pretty: String = lpDefinition(Simp1_eq.name, arguments, ty, proof).pretty
+    override def pretty: String = lpDefinition(Simp1_eq.name, arguments, Some(ty), proof).pretty
   }
 
   case object Simp7_eq extends simplificationRules {
@@ -81,7 +81,7 @@ object SimplificationEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(Simp7_eq.name,arguments,ty)
 
-    override def pretty: String = lpDefinition(Simp7_eq.name, arguments, ty, proof).pretty
+    override def pretty: String = lpDefinition(Simp7_eq.name, arguments, Some(ty), proof).pretty
   }
 
   case object Simp9_eq extends simplificationRules {
@@ -104,7 +104,7 @@ object SimplificationEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(Simp9_eq.name,arguments,ty)
 
-    override def pretty: String = lpDefinition(Simp9_eq.name, arguments, ty, proof).pretty
+    override def pretty: String = lpDefinition(Simp9_eq.name, arguments, Some(ty), proof).pretty
   }
 
   case object Simp10_eq extends simplificationRules {
@@ -127,7 +127,7 @@ object SimplificationEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(Simp10_eq.name,arguments,ty)
 
-    override def pretty: String = lpDefinition(Simp10_eq.name, arguments, ty, proof).pretty
+    override def pretty: String = lpDefinition(Simp10_eq.name, arguments, Some(ty), proof).pretty
   }
 
   case object Simp16_eq extends simplificationRules {
@@ -143,7 +143,7 @@ object SimplificationEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(Simp16_eq.name,Seq.empty,ty)
 
-    override def pretty: String = lpDefinition(Simp16_eq.name, Seq.empty, ty, proof).pretty
+    override def pretty: String = lpDefinition(Simp16_eq.name, Seq.empty, Some(ty), proof).pretty
   }
 
   case object Simp17_eq extends simplificationRules {
@@ -161,7 +161,7 @@ object SimplificationEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(Simp17_eq.name, Seq(x), ty)
 
-    override def pretty: String = lpDefinition(Simp17_eq.name, Seq(x), ty, proof).pretty
+    override def pretty: String = lpDefinition(Simp17_eq.name, Seq(x), Some(ty), proof).pretty
 
     def instanciate(a: lpOlTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(a))

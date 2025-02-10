@@ -1822,7 +1822,6 @@ package inferenceControl {
 
 
     final def expandDefinitions(cl: AnnotatedClause)(implicit sig: Signature): AnnotatedClause = {
-      Out.trace(s"bingo")
       if (cl.annotation.fromRule != null && cl.annotation.fromRule == DefExpSimp) cl
       else {
         assert(Clause.unit(cl.cl))

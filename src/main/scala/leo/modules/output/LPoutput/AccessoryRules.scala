@@ -31,7 +31,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
     def transformLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
 
@@ -50,7 +50,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
     def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop)), x0, lpOlTop)
 
@@ -69,7 +69,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
     //def instanciate():lpFunctionApp =
     def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)
@@ -89,7 +89,7 @@ object AccessoryRules {
 
   override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
     //def instanciate():lpFunctionApp =
     def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop), x0, lpOlTop)
@@ -109,7 +109,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
     def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
 
@@ -131,7 +131,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
     def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
 
@@ -154,7 +154,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
     def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
 
@@ -177,7 +177,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
     def instanciate(x0: lpOlTerm) = lpFunctionApp(name, Seq(x0))
 
@@ -200,7 +200,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
   }
 
   case class mkNegPropNegEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
@@ -214,7 +214,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
   }
 
   //
@@ -229,7 +229,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
   }
 
   case class mkPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
@@ -243,7 +243,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
   }
 
   case class mkBotEqNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
@@ -258,7 +258,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
   }
 
   case class mkTopEqPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
@@ -273,7 +273,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
   }
 
   def makeLiteralEquational_proofSkript(lits: Seq[lpOlTerm], origClause: lpClause, sourceBefore: lpTerm, desiredEquational: Boolean, desiredPolarity: Boolean, nameStept: lpConstantTerm): (lpProofScriptStep, Map[lpOlTerm, (lpOlTerm, lpOlTerm, lpOlTerm)], Seq[lpOlTerm], Set[lpStatement]) = {
@@ -405,7 +405,7 @@ object AccessoryRules {
       lpRewrite(Some(rewritePatternEq),lpFunctionApp(flipLiteral().name,Seq.empty, Seq(eqType)))
     }
 
-    // first we register the two sides of the literals and wather or not the literals are negative
+    // first we register the two sides of the literals and weather or not the literals are negative
     val (lhs0, rhs0, ty0, pol0): (Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean) = lit0 match {
       case lpOlUnaryConnectiveTerm(`lpNot`,body) =>
         body match {
@@ -439,7 +439,8 @@ object AccessoryRules {
       val (necessaryRule, necessaryFlip) : (Option[lpDefinedRules], Boolean) = if (!pol0){
         if (!pol1){
           // go from neg eq to neg non-eq
-          if (Seq(lhs0,rhs0).contains(Some(lpOlTop))) {
+         //if (Seq(lhs0,rhs0).contains(Some(lpOlTop))) {
+          if ((lhs0 == lhs1 && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
             // go to top
             (Some(mkNegLitNegProp_script()),false)
           }else{
@@ -448,7 +449,8 @@ object AccessoryRules {
           }
         }else{
           // go from neg eq to pos non-eq
-          if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+          //if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+          if ((lhs0 == lhs1 && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
             // go to top
             (Some(mkNegLitPosProp_script()), false)
           } else {
@@ -459,7 +461,8 @@ object AccessoryRules {
       }else{
         if (!pol1) {
           // go from pos eq to neg non-eq
-          if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+          //if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+          if ((lhs0 == lhs1 && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
             // go to top
             (Some(mkPosLitNegProp_script()),true)
           } else {
@@ -468,7 +471,8 @@ object AccessoryRules {
           }
         }else{
           // go from pos eq to pos non-eq
-          if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+          //if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+          if ((lhs0 == lhs1 && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
             // go to top
             (Some(mkPosLitPosProp_script()), true)
 
@@ -504,8 +508,8 @@ object AccessoryRules {
       val (necessaryRule, necessaryFlip): (Option[lpDefinedRules], Boolean) = if (!pol0) {
         if (!pol1) {
           // go from neg non-eq to neg eq
-          Out.lp_debug_info("HEEERE")
-          if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkNegPropNegLit_script()), false)
           } else {
@@ -514,18 +518,20 @@ object AccessoryRules {
           }
         } else {
           // go from neg non-eq to pos eq
-          if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkNegPropPosLit_script()), false)
           } else {
             // go to bottom
-            (Some(mkNegPropEqBot_script()), false) // todo
+            (Some(mkNegPropEqBot_script()), false)
           }
         }
       } else {
         if (!pol1) {
           // go from pos non-eq to neg eq
-          if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkPosPropNegLit_script()), true)
           } else {
@@ -534,7 +540,8 @@ object AccessoryRules {
           }
         } else {
           // go from pos non-eq to pos eq
-          if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkPosPropPosLit_script()), true)
 
@@ -610,7 +617,7 @@ object AccessoryRules {
 
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T x y;\n    have H1: π(x = y) → π(y = x)\n        {assume h;\n        symmetry;\n        refine h};\n    have H2: π(y = x) → π(x = y)\n        {assume h;\n        symmetry;\n        refine h};\n    refine propExt (x = y) (y = x) H1 H2")))
 
-    override def pretty: String = lpDefinition(name, Seq(x, y), ty, proof, Seq(T)).pretty
+    override def pretty: String = lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(T)).pretty
 
     def instanciate(x0: lpOlTerm, y0: lpOlTerm, prfXeqY0: Option[lpTerm]): lpFunctionApp = {
       val prfXeqY = prfXeqY0 match {
@@ -806,7 +813,7 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty, proof).pretty
+    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
 
   }
 
