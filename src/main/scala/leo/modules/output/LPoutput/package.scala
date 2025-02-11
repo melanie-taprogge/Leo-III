@@ -44,7 +44,7 @@ package object LPoutput {
     "assume", "apply", "refine", "simplify", "rewrite", "have",
     "print", "proofterm", "assert", "assertnot", "compute",
     "constant", "injective", "commutative", "associative",
-    "in", "notation", "reflexivity", "admit") ++ lambdapiNames
+    "in", "notation", "reflexivity", "admit", "right", "left") ++ lambdapiNames
 
   def findSafeName(str: String, sig: Signature): String = {
     val newName = s"${str}_"

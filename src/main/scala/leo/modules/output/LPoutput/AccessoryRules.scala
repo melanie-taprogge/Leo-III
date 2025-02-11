@@ -514,17 +514,17 @@ object AccessoryRules {
             (Some(mkNegPropNegLit_script()), false)
           } else {
             // go to bottom
-            (Some(mkNegPropNegEqBot_script()), false) // todo
+            (Some(mkNegPropNegEqBot_script()), false)
           }
         } else {
           // go from neg non-eq to pos eq
           //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
           if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
-            (Some(mkNegPropPosLit_script()), false)
+            (Some(mkNegPropPosLit_script()), true)
           } else {
             // go to bottom
-            (Some(mkNegPropEqBot_script()), false)
+            (Some(mkNegPropEqBot_script()), true)
           }
         }
       } else {
@@ -533,10 +533,10 @@ object AccessoryRules {
           //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
           if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
-            (Some(mkPosPropNegLit_script()), true)
+            (Some(mkPosPropNegLit_script()), false)
           } else {
             // go to bottom
-            (Some(mkPosPropNegEqBot_script()), true) // todo
+            (Some(mkPosPropNegEqBot_script()), false) // todo
           }
         } else {
           // go from pos non-eq to pos eq

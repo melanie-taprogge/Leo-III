@@ -365,12 +365,22 @@ object LPoutput {
       // in the proof of the conjecture, first instanciate npp, then assume the negated conjecture
       proofSteps =  lpAssume(Seq(conjName)) +: proofSteps
       proofSteps =  lpRefine(lpFunctionApp(lpNpp.name,Seq(conjecture, lpWildcard))) +: proofSteps
-      // finally, refine with the last step.
-      val lastStepName = proofSteps.last match {
-        case lpHave(name, _,_,_) => name
+      // finally, test if the derived last clause is the empty clause or a flex-flex clause.
+      // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
+      val emptyClause = lpOlBot.prf
+      val lastStep = proofSteps.last match {
+        case lpHave(name, `emptyClause`,_,_) => lpConstantTerm(name)
+        case lpHave(name, flexFlex0,_,_) =>
+          // transformation of flex-flex to bot necessary todo
+          Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
+          val proofFun = lpMlFunctionType(Seq(flexFlex0,lpOlBot.prf))
+          val flexFlexStepName = "flexflex_to_bot"
+          val proofHave = lpHave(flexFlexStepName,proofFun,lpProofScript(Seq(lpProofScriptAdmit())))
+          proofSteps = proofSteps :+ proofHave
+          lpFunctionApp(lpConstantTerm(flexFlexStepName),Seq(lpConstantTerm(name)))
         case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last.pretty}")
       }
-      proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lpConstantTerm(lastStepName),Seq.empty))
+      proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep,Seq.empty))
       val completeProof = lpDefinition(lpConstantTerm("encodedProof"),Seq.empty,Some(conjecture.prf),lpProofScript(proofSteps))
       proofFileSB.append(completeProof.pretty)
 
