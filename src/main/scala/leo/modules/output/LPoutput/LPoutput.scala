@@ -367,7 +367,7 @@ object LPoutput {
       proofSteps =  lpRefine(lpFunctionApp(lpNpp.name,Seq(conjecture, lpWildcard))) +: proofSteps
       // finally, test if the derived last clause is the empty clause or a flex-flex clause.
       // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
-      val emptyClause = lpOlBot.prf
+      val emptyClause = lpClause(Seq(),Seq(lpOlBot))
       val lastStep = proofSteps.last match {
         case lpHave(name, `emptyClause`,_,_) => lpConstantTerm(name)
         case lpHave(name, flexFlex0,_,_) =>

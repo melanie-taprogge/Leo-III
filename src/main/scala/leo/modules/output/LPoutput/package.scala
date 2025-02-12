@@ -102,22 +102,23 @@ package object LPoutput {
 
   }
 
-  def findLitInClause(lit: Literal, parent: Clause): Int = {
+  def findLitInClause(lit: Literal, parent: Clause): Seq[Int] = {
     val indicesOfOccurrence: IndexedSeq[Int] = parent.lits.indices.filter(index => parent.lits(index) == lit)
-    val positionInClause = if (indicesOfOccurrence.length == 1) indicesOfOccurrence.head
-    else if (indicesOfOccurrence.length == 0) throw new Exception(s"literal to transform not found in clause when attempfing to generate lp encoding")
-    else throw new Exception(s"literal to transform found more than once when attempfing to generate lp encoding")
-    positionInClause
+    if (indicesOfOccurrence.length == 0) throw new Exception(s"literal to transform not found in clause when attempfing to generate lp encoding")
+    else indicesOfOccurrence
   }
 
-  def generateClausePattern(termPos:Int,clauseLen:Int, polarity:Boolean = true, patternTerm:lpOlTerm = lpOlUntypedVar(lpOlConstantTerm("x"))): lpOlUntypedBinaryConnectiveTerm_multi ={
+  def generateClausePattern(termPosSeq:Seq[Int],clauseLen:Int, polarity:Boolean = true, patternTerm:lpOlTerm = lpOlUntypedVar(lpOlConstantTerm("x"))): lpOlUntypedBinaryConnectiveTerm_multi ={
     val litPol = if (polarity) patternTerm else lpOlUnaryConnectiveTerm(lpNot,patternTerm)
-    val args = Seq.fill(clauseLen)(lpOlWildcard).updated(termPos, litPol)
+    var args : Seq[lpOlTerm] = Seq.fill(clauseLen)(lpOlWildcard)
+    termPosSeq foreach {pos =>
+      args = Seq.fill(clauseLen)(lpOlWildcard).updated(pos, litPol)
+    }
     lpOlUntypedBinaryConnectiveTerm_multi(lpOr, args)
   }
 
 
-  def generateClausePatternTerm(varPos: Int, clauseLen: Int, eqPos: Option[Int] = None, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpOlConstantTerm("x")), polarity: Boolean = true): Option[lpRewritePattern] = {
+  def generateClausePatternTerm(varPos: Seq[Int], clauseLen: Int, eqPos: Option[Int] = None, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpOlConstantTerm("x")), polarity: Boolean = true): Option[lpRewritePattern] = {
     // given the position of the literal that a rule should be applied to in a clause and weather or not this clause in embedded in an equality to be proven,
     // generate a rewrite pattern
 

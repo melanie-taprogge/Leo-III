@@ -276,6 +276,23 @@ object AccessoryRules {
     override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
   }
 
+  case class eqLift_script(patternVarName1: String = "x", patternVarName2: String = "y", typeVarName: String = "a") extends lpDefinedRules {
+    // Π [a: Set], Π x: τ a, Π y: τ a, π ((x = y) = ((x = y) = ⊤))
+
+    val a = lpOlUserDefinedType(typeVarName)
+    val x = lpOlTypedVar(lpOlConstantTerm(patternVarName1),a)
+    val y = lpOlTypedVar(lpOlConstantTerm(patternVarName2),a)
+    override def name: lpConstantTerm = lpConstantTerm("liftEqExlicit_eq")
+    // [a: Set] (x y : τ a) :(π ((x = y) = ((x = y) = ⊤)))
+    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y) , lpOlTop)).prf
+
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume a x y;\n    refine propExt (x = y) ((x = y) = ⊤) _ _ \n        {assume h1;\n        refine propExt (x = y) ⊤ _ _\n            {assume h2;\n            refine ⊤ᵢ}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        refine ind_eq h1 (λ z, z) ⊤ᵢ}")))
+
+    override def dec: lpDeclaration = lpDeclaration(name, Seq(x,y), ty, Seq(a))
+
+    override def pretty: String = lpDefinition(name, Seq(x,y), Some(ty), proof, Seq(a)).pretty
+  }
+
   def makeLiteralEquational_proofSkript(lits: Seq[lpOlTerm], origClause: lpClause, sourceBefore: lpTerm, desiredEquational: Boolean, desiredPolarity: Boolean, nameStept: lpConstantTerm): (lpProofScriptStep, Map[lpOlTerm, (lpOlTerm, lpOlTerm, lpOlTerm)], Seq[lpOlTerm], Set[lpStatement]) = {
 
     // Takes a literal and an desired polarity and returns the transformed versions
@@ -304,7 +321,7 @@ object AccessoryRules {
 
     orderedLits foreach { lit =>
 
-      val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None)
+      val rewritePattern = generateClausePatternTerm(Seq(positionsInClause(lit)), origClause.lits.length, None)
 
       Out.lp_debug_info(s"Considering literal ${lit.pretty} ${if (rewritePattern.isDefined) s"at positions ${rewritePattern.get.pretty}"}")
 
@@ -389,6 +406,11 @@ object AccessoryRules {
     (haveStep, transformations.toMap, clauseAfter.lits, usedSymbols)
   }
 
+  def flipStep(litCount: Int, clauseLen: Int, pol: Boolean, eqType: lpOlType) = {
+    val rewritePatternEq = lpRewritePattern(generateClausePattern(Seq(litCount), clauseLen, pol))
+    lpRewrite(Some(rewritePatternEq), lpFunctionApp(flipLiteral().name, Seq.empty, Seq(eqType)))
+  }
+
   def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
     Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
 
@@ -398,12 +420,7 @@ object AccessoryRules {
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     var canEncode = false
     var flip: Boolean = false
-    val rewritePattern = Some(lpRewritePattern(generateClausePattern(litCount, clauseLen)))
-
-    def flipStep(pol: Boolean, eqType: lpOlType) = {
-      val rewritePatternEq = lpRewritePattern(generateClausePattern(litCount, clauseLen,pol))
-      lpRewrite(Some(rewritePatternEq),lpFunctionApp(flipLiteral().name,Seq.empty, Seq(eqType)))
-    }
+    val rewritePattern = Some(lpRewritePattern(generateClausePattern(Seq(litCount), clauseLen)))
 
     // first we register the two sides of the literals and weather or not the literals are negative
     val (lhs0, rhs0, ty0, pol0): (Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean) = lit0 match {
@@ -486,7 +503,7 @@ object AccessoryRules {
         case Some(rule) =>
           if (flip) {
             usedSymbols = usedSymbols + flipLiteral()
-            allSteps = allSteps :+ flipStep(necessaryFlip,ty0.get)
+            allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty0.get)
             Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           }
           usedSymbols = usedSymbols + rule
@@ -558,7 +575,7 @@ object AccessoryRules {
           Out.lp_debug_info(s"Applying ${rule.name} to transform non-equational literal to equational form")
           if (flip) {
             usedSymbols = usedSymbols + flipLiteral()
-            allSteps = allSteps :+ flipStep(necessaryFlip,ty1.get)
+            allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty1.get)
             Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           }
           true
@@ -574,15 +591,21 @@ object AccessoryRules {
         if (lhs0 != lhs1){
           val necessaryFlip = if (pol0) true else false
           usedSymbols = usedSymbols + flipLiteral()
-          allSteps = allSteps :+ flipStep(necessaryFlip,ty0.get)
+          allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty0.get)
           Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           true
         }else {
           Out.lp_debug_info(s"Literals are already identical")
           true
         } // In this case, the sides are already the same
+      } else if ((lhs1.get == lit0) && (rhs1.get == lpOlTop)){
+        // transformation to equality literal for positive case
+        usedSymbols = usedSymbols + eqLift_script()
+        allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(eqLift_script().name,Seq(lhs0.get,rhs0.get)))
+        Out.lp_debug_info(s"Applying ${eqLift_script().name.pretty} to un-lift literal ${lit0.pretty}")
+        true
       } else {
-        Out.lp_debug_info(s"Unencoded transformation between equational literals")
+        Out.lp_debug_info(s"Unencoded transformation between equational literals, $lit0")
         false
       }
     } else {
@@ -680,7 +703,7 @@ object AccessoryRules {
 
       }
 
-      val rewritePattern = generateClausePatternTerm(positionsInClause(lit), origClause.lits.length, None, lpOlUntypedVar(lpConstantTerm("x")), ispos)
+      val rewritePattern = generateClausePatternTerm(Seq(positionsInClause(lit)), origClause.lits.length, None, lpOlUntypedVar(lpConstantTerm("x")), ispos)
 
       usedSymbols = usedSymbols + flipLiteral()
       rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, lpFunctionApp(flipLiteral().name, Seq(), Seq(litType)))
@@ -706,7 +729,7 @@ object AccessoryRules {
 
   def permutationStepSkript(literals0: Seq[lpOlTerm], literals1: Seq[lpOlTerm],before:lpTerm)={
     val permutation = literals0.map(item => literals1.indexOf(item))
-    lpRefine(metaPermutation.instanciate(permutation,literals0,before))
+    metaPermutation.instanciate(permutation,literals0,before)
   }
 
   /*

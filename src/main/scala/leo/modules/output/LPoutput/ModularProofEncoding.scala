@@ -68,7 +68,8 @@ object ModularProofEncoding {
             // ii) Rewrite the Literal
             val posInClause = findLitInClause(transfLit,child.cl)
             val patternVar = lpOlUntypedVar(lpOlConstantTerm("x"))
-            val rewritePattern = generateClausePatternTerm(posInClause,child.cl.lits.length,None,patternVar)
+            assert(posInClause.length == 1, "application to more than once literals not encoded yet, should already work though, remove Seq in position argument and test")
+            val rewritePattern = generateClausePatternTerm(Seq(posInClause.head),child.cl.lits.length,None,patternVar)
             val rewriteStep = lpRewrite(rewritePattern,lpConstantTerm(polaritySwitchName))
             allRewriteSteps = allRewriteSteps :+ rewriteStep
 
@@ -93,7 +94,8 @@ object ModularProofEncoding {
 
           // ii) Rewrite the Literal
           val posInClause = findLitInClause(transfLit, child.cl)
-          val rewritePattern = generateClausePatternTerm(posInClause, child.cl.lits.length, None)
+          assert(posInClause.length == 1, "application to more than once literals not encoded yet,, should already work though, remove Seq in position argument and test")
+          val rewritePattern = generateClausePatternTerm(Seq(posInClause.head), child.cl.lits.length, None)
           val rewriteStep = lpRewrite(rewritePattern, lpConstantTerm(polaritySwitchName))
           allRewriteSteps = allRewriteSteps :+ rewriteStep
 
@@ -372,20 +374,37 @@ object ModularProofEncoding {
     val otherLitEnc = term2LP(asTerm(otherLit),bVarMap,sig)._1
     val maxLitEnc = term2LP(asTerm(maxLit),bVarMap,sig)._1
     val parentEnc = clause2LP(parent,Set.empty,sig)._1
+
+    // infer weather a permutation will be needed
+    val posMaxLit0 = findLitInClause(maxLit,parent)
+    val posOtherLit0 = findLitInClause(otherLit,parent)
+    assert(posMaxLit0.length == 1 && posOtherLit0.length == 1, "multiple occurences of max or alternative literal found in lpEncoidng") //todo: what does Leo do here?
+    var (posMaxLit, posOtherLit) = (posMaxLit0.head, posOtherLit0.head)
+    Out.lp_debug_info(s"index of max lit: $posMaxLit, index of other Lit: $posOtherLit")
+    // construct the permutation necessary to move the max and other lit to the end in the right order
+    val indices = parent.lits.indices.toList
+    val permutaion = indices.filterNot(n => n == posMaxLit || n == posOtherLit) ++ Seq(posOtherLit,posMaxLit)
+    posOtherLit = permutaion.length - 2
+    var parentLits = parentEnc.lits
+
     assert(otherLit.right.ty == maxLit.right.ty)
     val eqTypeEnc = type2LP(otherLit.right.ty,sig)._1
     Out.lp_debug_info(s"Applying to parent ${parentEnc.pretty}")
     Out.lp_debug_info(s"MaxLit is ${maxLitEnc.pretty}, OtherLit is ${otherLitEnc.pretty}")
 
     // the values that we will pass on to the instantiation of the actual rule will be defined during this step and only need to be instantiated here
-    var otherLit_l: lpOlTerm = lpOlNothing
-    var otherLit_r: lpOlTerm = lpOlNothing
+    var otherLit_l0: lpOlTerm = lpOlNothing
+    var otherLit_r0: lpOlTerm = lpOlNothing
     var maxLit_l: lpOlTerm = lpOlNothing
     var maxLit_r: lpOlTerm = lpOlNothing
+    val ty = if (maxLit.equational) maxLit.left.ty else asTerm(maxLit).ty
+    val encType = type2LP(ty, sig)._1
 
     // Identify the two literals to be unified and compose a function proving the rule application including all necessary transformations:
     //    a) If the order of the left- and right-hand sides in either of the literals has to changed in order for the encoded equal factoring rule to associate the sides correctly, apply eqSym_eq
     //    b) If either of the literals is not equational, transform to the equational form with the correct polarity
+    //    b.5) apply permutation if necessary
+    //    b.8) flip the other lither if necessary
     //    c) Apply the appropriate version of equal factoring (EqFact_p or EqFact_n)
     //    d) Prove the transformation to non-equational literals of any literals that are non-equational
     //    e) If the order within any of the equality literals has changed after the rule application as a result of the term ordering, proof the transformation using eqSym_eq
@@ -422,21 +441,22 @@ object ModularProofEncoding {
       if (literalsToTransform.nonEmpty) {
         val nameTransfStep = lpConstantTerm("TransformToEqLits")
         val (transformationStep,litMap,_,usedSymbolsNew) = makeLiteralEquational_proofSkript(literalsToTransform,parentEnc,lastStepName,true,polarityOfRule,nameTransfStep)
+        parentLits = parentLits.map(lit => if (litMap.keySet.contains(lit)) litMap(lit)._1 else lit)
         allSteps = allSteps :+ transformationStep
         Out.lp_debug_info(s"Transformation steps generated successfully: \n${transformationStep.pretty}")
         lastStepName = nameTransfStep
         if (transformOtherLit){
           val otherLitTrans = litMap(otherLitEnc)
           otherLitAsEq = otherLitTrans._1
-          otherLit_l = otherLitTrans._2
-          otherLit_r = otherLitTrans._3
+          otherLit_l0 = otherLitTrans._2
+          otherLit_r0 = otherLitTrans._3
           usedSymbols = usedSymbolsNew
           literalsToTransform2 = literalsToTransform2 :+ otherLitAsEq
           Out.lp_debug_info(s"transformed other lit to ${otherLitAsEq.pretty}")
         } else{
           otherLitAsEq = otherLitEnc
-          otherLit_l = term2LP(otherLit.left,bVarMap,sig)._1
-          otherLit_r = term2LP(otherLit.right,bVarMap,sig)._1
+          otherLit_l0 = term2LP(otherLit.left,bVarMap,sig)._1
+          otherLit_r0 = term2LP(otherLit.right,bVarMap,sig)._1
         }
         if (transformMaxLit) {
           val maxLitTrans = litMap(maxLitEnc)
@@ -453,23 +473,55 @@ object ModularProofEncoding {
       }else throw new Exception("In the LP encoding of EqFact, non-equational literlas were detected but no transformation to equality literals could be performed")
     } else {
       otherLitAsEq = otherLitEnc
-      otherLit_l = term2LP(otherLit.left, bVarMap, sig)._1
-      otherLit_r = term2LP(otherLit.right, bVarMap, sig)._1
+      otherLit_l0 = term2LP(otherLit.left, bVarMap, sig)._1
+      otherLit_r0 = term2LP(otherLit.right, bVarMap, sig)._1
       maxLitAsEq = otherLitEnc
       maxLit_l = term2LP(maxLit.left, bVarMap, sig)._1
       maxLit_r = term2LP(maxLit.right, bVarMap, sig)._1
       Out.lp_debug_info(s"no transformation to equational form necessary")
     }
 
+    // b.5) apply permutation if necessary
+    if (indices != permutaion){
+      Out.lp_debug_info(s"need to apply permutatin: $permutaion")
+      val permStepName = "Permutation"
+      val permutedParents = permutaion.map(parentLits(_))
+      val permutationApp = permutationStepSkript(parentLits,permutedParents, lastStepName)
+      val permutationStep = lpHave("Permutation",lpOlUntypedBinaryConnectiveTerm_multi(lpOr,permutedParents).prf,lpProofScript(Seq(lpRefine(permutationApp))))
+      allSteps = allSteps :+ permutationStep
+      lastStepName = lpConstantTerm(permStepName)
+      Out.lp_debug_info(s"permutation applied")
+      parentLits = permutedParents
+    }
+
+    // b.8)
+    // test which sides of the other lit and the max lit were combined to form the unification constraints
+    // if the lhs of the other lit ends up in the second unification constraint and the rhs in the first one, the other lit needs to be flipped
+    // todo: update for case where other lit is negative in negative EqFactor
+    var haveEqFactSteps: Seq[lpProofScriptStep] = Seq.empty
+    val (otherLit_l, otherLit_r) = if ((otherLit.right == uc1Orig.left||otherLit.right == uc1Orig.right)&&(otherLit.left == cc2Orig.left||otherLit.left == cc2Orig.right)){
+      val rewriteStep = flipStep(posOtherLit,parent.lits.length,otherLit.polarity,eqTypeEnc)
+      //val otherLitFlipStepName = "OtherLitSym"
+      val flippedOtherLit = lpOlTypedBinaryConnectiveTerm(lpEq,encType,otherLit_r0,otherLit_l0)
+      //val otherLitFlipStep = lpHave(otherLitFlipStepName,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,parentLits.updated(posOtherLit,flippedOtherLit)).prf,lpProofScript(Seq(rewriteStep)))
+      haveEqFactSteps = haveEqFactSteps :+ rewriteStep
+      //lastStepName = lpConstantTerm(otherLitFlipStepName)
+      usedSymbols = usedSymbols + flipLiteral()
+      Out.lp_debug_info(s"flipped other literal to ${flippedOtherLit.pretty}")
+      (otherLit_r0,otherLit_l0)
+    }else (otherLit_l0,otherLit_r0)
+
     // c) Apply the appropriate version of equal factoring (EqFact_p or EqFact_n)
-    val ty = if (maxLit.equational) maxLit.left.ty else asTerm(maxLit).ty
-    val encType = type2LP(ty, sig)._1
     val encEqFact : lpTerm = lpInferenceRuleEncoding.eqFactoring_script(polarityOfRule).instanciate(otherLit_l, otherLit_r, maxLit_l, maxLit_r,encType.lift2Poly)
     lastStepLits = lpInferenceRuleEncoding.eqFactoring_script(polarityOfRule).result(otherLit_l, otherLit_r, maxLit_l, maxLit_r,encType.lift2Poly)
+    // if we flipped the sides of the other lit to associate them correctly, we need to apply the operation here
+    if (otherLit_l0 != otherLit_l) lastStepLits = lastStepLits.updated(0,lpOlTypedBinaryConnectiveTerm(lpEq,encType,otherLit_l0,otherLit_r0))
+    // now we can instanciate and apply equal factoring
     val afterEqFacAp : lpMlType = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,lastStepLits).prf
     usedSymbols = usedSymbols + lpInferenceRuleEncoding.eqFactoring_script(polarityOfRule)
     val nameEqFactoringStep = lpConstantTerm("EqFact")
-    val eqFactStep = lpHave(nameEqFactoringStep.name,afterEqFacAp,lpProofScript(Seq(lpRefine(lpFunctionApp(encEqFact,Seq(lastStepName))))))
+    haveEqFactSteps = haveEqFactSteps :+ lpRefine(lpFunctionApp(encEqFact,Seq(lastStepName)))
+    val eqFactStep = lpHave(nameEqFactoringStep.name,afterEqFacAp,lpProofScript(haveEqFactSteps))
     Out.lp_debug_info(s"generated equal factoring step:\n${eqFactStep.pretty}")
     allSteps = allSteps :+ eqFactStep
     lastStepName = nameEqFactoringStep
@@ -480,9 +532,14 @@ object ModularProofEncoding {
     var uc2: lpOlTerm = lpOlNothing
     var uc2Eq: lpOlTerm = lpOlNothing
 
+    // if necessary, flip back the other lit
+
+
     // e) and f) If the order within any of the equality literals has changed after the rule application as a result of the term ordering, proof the transformation using eqSym_eq
     var needsFlipping:  Seq[(lpOlTerm, lpOlType)] = Seq.empty
-    val otherLitL = if (otherLit.equational) otherLit.left else asTerm(otherLit)
+    val otherLitL = if (otherLit_l0 == otherLit_l){
+      if (otherLit.equational) otherLit.left else asTerm(otherLit)
+    }  else  otherLit.right
     if (otherLitL == uc1Orig.left) {
       // In this case, the order is already correct
       uc1 = lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, eqTypeEnc.lift2Poly, otherLit_l, maxLit_r))
@@ -749,6 +806,7 @@ object ModularProofEncoding {
       var allSteps: Seq[lpProofScriptStep] = Seq.empty
       var usedRules: Set[lpStatement] = Set.empty
       var liftedLits: Seq[lpOlTerm] = Seq.empty
+      var canEncode: Option[String] = None
 
       // 1. Abstract over free variables
       val bVars = clauseVars2LP(parents.head.cl.implicitlyBound, sig, Set.empty)._2
@@ -766,7 +824,7 @@ object ModularProofEncoding {
           val encLhs = term2LP(lhs, bVars, sig)._1
           val encType = type2LP(lhs.ty, sig)._1
           val litPol = lit.polarity
-          val rwPattern = generateClausePatternTerm(permutation.indexOf(indx), indices.length, None, lpOlUntypedVar(lpOlConstantTerm("x")), litPol)
+          val rwPattern = generateClausePatternTerm(Seq(permutation.indexOf(indx)), indices.length, None, lpOlUntypedVar(lpOlConstantTerm("x")), litPol)
           if (rwPattern.isDefined) Out.lp_debug_info(s"generated pattern for rewrite operation: ${rwPattern.get.pretty}")
           var finalLit: lpOlTerm = lpOlNothing
           if (litsPosLift.contains(indx)) {
@@ -790,14 +848,32 @@ object ModularProofEncoding {
           }
            */
           }
-          Out.lp_debug_info(s"lifting to ${finalLit.pretty}")
+          Out.lp_debug_info(s"constructed Literal ${finalLit.pretty}")
           val lit_cl = cl.cl.lits(permutation.indexOf(indx))
+          val encCorrespondingLit = term2LP(asTerm(lit_cl),bVars,sig)._1
+          if (finalLit != encCorrespondingLit){
+            // transformation to or from bottom or order has changed
+            Out.lp_debug_info(s"corresponding lit in child: ${encCorrespondingLit.pretty}, transformation necessary")
+            val (transformationSteps, usedSymbols0, canEncode0) = transformLiteral(encCorrespondingLit,finalLit,permutation.indexOf(indx), indices.length)
+            if (canEncode0){
+              allSteps = allSteps ++ transformationSteps
+              usedRules = usedRules ++ usedSymbols0
+              Out.lp_debug_info(s"transformation successful")
+              //finalLit = encCorrespondingLit
+            }
+            else canEncode = {
+              Out.lp_debug_info(s"transformation unsuccessful")
+              Some("unencoded transformation necessary")
+            }
+          }
+          /*
           if (lhs != lit_cl.left) {
             // 2 b) for the new equality literlas, the order within the equality may have changed, if so: apply rewrite tactic
             allSteps = allSteps :+ lpRewrite(rwPattern, flipLiteral().instanciate(encRhs, encLhs, None))
             finalLit = flipLiteral().res(litPol, encType.lift2Poly, encRhs, encLhs)
             usedRules = usedRules + flipLiteral()
           }
+           */
           liftedLits = liftedLits :+ finalLit
         } else {
           val lit = parents.head.cl.lits(indx)
@@ -819,7 +895,7 @@ object ModularProofEncoding {
 
       val finishedProof = lpProofScript(allSteps)
 
-      (finishedProof, usedRules, None)
+      (finishedProof, usedRules, canEncode)
     }
   }
 
@@ -938,7 +1014,7 @@ object ModularProofEncoding {
           } else if (counter != 0) {
             rewriteenLits = rewriteenLits.updated(litCount,rewrittenLit)
             Out.lp_debug_info(s"Trying to apply to literal of the parent clause: ${encLit.pretty}")
-            val rewritePattern = lpRewritePattern(generateClausePattern(litCount, clauseLen, true, patternTerm))
+            val rewritePattern = lpRewritePattern(generateClausePattern(Seq(litCount), clauseLen, true, patternTerm))
 
             // 4. Use the (transformed) rewrite-clause to rewrite the focused goal
             Out.lp_debug_info(s"rewrite pattern is ${rewritePattern.pretty} and the rewritten literal is ${rewrittenLit.pretty}")
@@ -1008,7 +1084,6 @@ object ModularProofEncoding {
         }
       } else var0
     }
-
     t match{
       case `lpOlTop` =>
         lpOlTop
@@ -1032,9 +1107,11 @@ object ModularProofEncoding {
         var encArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
         args foreach {arg =>
           arg match{
-            case a : lpOlTerm => encArgs = encArgs :+ Left(substituteVarTerm(a, subsMap))
+            case Left(term) => encArgs = encArgs :+ Left(substituteVarTerm(term, subsMap))
             // if the argument is e.g. a type we do not need to substitute anything
-            case _ => encArgs :+ arg
+            case Right(ty) => encArgs :+ arg
+            //case a : Left[lpOlTerm, lpOlType] => encArgs = encArgs :+ Left(substituteVarTerm(a, subsMap))
+            //case _ => encArgs :+ arg
           }
         }
         lpOlFunctionApp(substituteVarTerm(f, subsMap), encArgs)
@@ -1054,19 +1131,23 @@ object ModularProofEncoding {
     var usedSymbols: Set[lpStatement] = Set.empty
 
     // identify the position of the unification literals in parent clause
-    val positionInClause = findLitInClause(uniC,parent)
+    val positionsInClause = findLitInClause(uniC,parent)
+    val position = if (positionsInClause.length != 1){
+      positionsInClause.last //todo: this is justified since the unification constraints get added at the end ... right?
+    } else positionsInClause.head
+
     val patternVar = lpOlUntypedVar(lpOlConstantTerm("x"))
 
     var rewriteSteps: Seq[lpProofScriptStep] = Seq.empty
 
     // in both cases, the second step is the removal of ⊥ from the clause. This can be done using Simp7:
-    val rewritePattern_step2 = generateClausePatternTerm(positionInClause - 1, parent.lits.length - 1, None, patternVar)
+    val rewritePattern_step2 = generateClausePatternTerm(Seq(position - 1), parent.lits.length - 1, None, patternVar)
     val rewriteStep_step2 = lpRewrite(rewritePattern_step2, SimplificationEncoding.Simp7_eq.name)
     rewriteSteps = rewriteSteps :+ rewriteStep_step2
     usedSymbols = usedSymbols + SimplificationEncoding.Simp7_eq
 
     // proof the first transformation depending on the form of the unification constraint
-    val rewritePattern_step1 = generateClausePatternTerm(positionInClause, parent.lits.length, None, patternVar)
+    val rewritePattern_step1 = generateClausePatternTerm(Seq(position), parent.lits.length, None, patternVar)
     if (uniC.equational){
       if (!uniC.polarity){
         // in this case, we need to first show that both sides are equal modulo simplification and then apply a Simp Rule that postulates that x≠x = ⊥
@@ -1145,7 +1226,8 @@ object ModularProofEncoding {
             // Depending on that, the second element of the tuple is either a term or a String
             termUni._2 match {
               case var0: String =>
-                throw new Exception("binding by variables not yet encoded (only terms so far)") //todo: is it really variables? I suppose so, but bound ones, no?
+                subsMap += (lpUnboundVar -> lpOlUntypedVar(lpConstantTerm(var0)))
+                //throw new Exception(s"binding by variables not yet encoded (only terms so far) $var0") //todo: is it really variables? I suppose so, but bound ones, no?
               case t: Term =>
                 val encBindTerm = term2LP(t, termUni._4, sig)._1 //todo: dont i need the offset? was it an oversight not to use it in term2lp?
                 subsMap += (lpUnboundVar -> encBindTerm)
@@ -1154,7 +1236,11 @@ object ModularProofEncoding {
           }
 
           // Proof the substitution by applying the terms to be substituted to the parent quanififying over the respective variables
-          val encSubstLits = parent.cl.lits.map(lit => substituteVarTerm(term2LP(asTerm(lit), bVars, sig)._1, subsMap.toMap))
+          val encLits = parent.cl.lits.map(lit => term2LP(asTerm(lit), bVars, sig)._1)
+          Out.lp_debug_info(s"substituting variables in terms: ${encLits.map(_.pretty)}")
+          Out.lp_debug_info(s"substitution: $subsMap")
+          val encSubstLits = encLits.map(encLit => substituteVarTerm(encLit, subsMap.toMap))
+          Out.lp_debug_info(s"substitution result: ${encSubstLits.map(_.pretty)}")
           // The application that instanciates the quantified variables with the substituted Terms in lp
           val applyToParent = unboundVarsParent.map(var0 => subsMap.getOrElse(var0.name.pretty, var0))
           val substitution = lpProofScript(Seq(lpRefine(lpFunctionApp(parentNameLpEnc, applyToParent))))
@@ -1195,8 +1281,9 @@ object ModularProofEncoding {
         // permutation? todo: figure out why this can even happen
         if (containsLpLits(encParentLiterals, encChildLiterals)) {
           val permutationStep = permutationStepSkript(encParentLiterals, encChildLiterals, lpFunctionApp(parentNameLpEnc, unboundVarsChild))
+
           Out.lp_debug_info(s"Permutation step: ${permutationStep.pretty}")
-          allSteps = allSteps :+ permutationStep
+          allSteps = allSteps :+ lpRefine(permutationStep)
         }
 
         val proofScript = lpProofScript(allSteps)
