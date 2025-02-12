@@ -293,6 +293,25 @@ object AccessoryRules {
     override def pretty: String = lpDefinition(name, Seq(x,y), Some(ty), proof, Seq(a)).pretty
   }
 
+  def equationalForm(lit: lpOlTerm, desiredPolarity: Boolean): (lpOlTerm, lpOlTerm, lpOlTerm) = {
+    lit match {
+      case lpOlUnaryConnectiveTerm(lpNot, t) =>
+        if (desiredPolarity == true) {
+          mkPosLitNegProp_script().origLit(t)
+        } else {
+          mkNegLitNegProp_script().origLit(t)
+        }
+      case _ =>
+        if (desiredPolarity == true) {
+          val instRule = lpFunctionApp(mkPosLitPosProp_script().name, Seq(lit))
+          mkPosLitPosProp_script().origLit(lit)
+        } else {
+          val instRule = lpFunctionApp(mkNegLitPosProp_script().name, Seq(lit))
+          mkNegLitPosProp_script().origLit(lit)
+        }
+    }
+  }
+
   def makeLiteralEquational_proofSkript(lits: Seq[lpOlTerm], origClause: lpClause, sourceBefore: lpTerm, desiredEquational: Boolean, desiredPolarity: Boolean, nameStept: lpConstantTerm): (lpProofScriptStep, Map[lpOlTerm, (lpOlTerm, lpOlTerm, lpOlTerm)], Seq[lpOlTerm], Set[lpStatement]) = {
 
     // Takes a literal and an desired polarity and returns the transformed versions
@@ -439,7 +458,7 @@ object AccessoryRules {
           case _ => (Some(body), None, None, false)
         }
       case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs),Some(rhs),Some(ty), true)
-      case _ => (Some(lit0), None, None, true)
+      case _ => (Some(lit1), None, None, true)
     }
 
     // then we detect which transformations to apply
@@ -449,14 +468,14 @@ object AccessoryRules {
       Out.lp_debug_info(s"lhs0: ${lhs0.get.pretty}, rhs0: ${rhs0.get.pretty}, lhs1: ${lhs1.get.pretty}")
       Out.lp_debug_info(s"Seq(lhs0,rhs0).contains(lhs1): ${Seq(lhs0,rhs0).contains(lhs1)}, Seq(lhs0,rhs0).contains(lpOlBot): ${Seq(lhs0,rhs0).contains(Some(lpOlBot))}, Seq(lhs0,rhs0).contains(lpOlTop): ${Seq(lhs0,rhs0).contains(Some(lpOlTop))}")
       // first we detect if we want to transform from bottom or to top
-      assert(Seq(lhs0,rhs0).contains(lhs1) && (Seq(lhs0,rhs0).contains(Some(lpOlBot)) || Seq(lhs0,rhs0).contains(Some(lpOlTop))))
+      assert((Seq(lhs0,rhs0).contains(lhs1) || Seq(lhs0.get,rhs0.get).contains(lpOlUnaryConnectiveTerm(lpNot,lhs1.get))) && (Seq(lhs0,rhs0).contains(Some(lpOlBot)) || Seq(lhs0,rhs0).contains(Some(lpOlTop))))
       // detect if we need to swap sides
       flip = (rhs0 == lhs1)
       // we need to transform to non-equational literal
       val (necessaryRule, necessaryFlip) : (Option[lpDefinedRules], Boolean) = if (!pol0){
         if (!pol1){
           // go from neg eq to neg non-eq
-         //if (Seq(lhs0,rhs0).contains(Some(lpOlTop))) {
+         // // x: (π ((¬ (x = ⊤)) = (¬ x)))
           if ((lhs0 == lhs1 && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
             // go to top
             (Some(mkNegLitNegProp_script()),false)
@@ -466,8 +485,8 @@ object AccessoryRules {
           }
         }else{
           // go from neg eq to pos non-eq
-          //if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
-          if ((lhs0 == lhs1 && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
+          // x: (π ((¬ ((¬ x) = ⊤)) = x))
+          if ((lhs0.get == lpOlUnaryConnectiveTerm(lpNot,lhs1.get) && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
             // go to top
             (Some(mkNegLitPosProp_script()), false)
           } else {
@@ -478,8 +497,8 @@ object AccessoryRules {
       }else{
         if (!pol1) {
           // go from pos eq to neg non-eq
-          //if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
-          if ((lhs0 == lhs1 && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
+          // x: (π (((¬ x) = ⊤) = (¬ x)))
+          if ((lhs0.get == lpOlUnaryConnectiveTerm(lpNot,lhs1.get) && rhs0 == Some(lpOlTop)) || (rhs0.get == lpOlUnaryConnectiveTerm(lpNot,lhs1.get))  && lhs0 == Some(lpOlTop)){
             // go to top
             (Some(mkPosLitNegProp_script()),true)
           } else {
@@ -488,7 +507,7 @@ object AccessoryRules {
           }
         }else{
           // go from pos eq to pos non-eq
-          //if (Seq(lhs0, rhs0).contains(Some(lpOlTop))) {
+          // x: (π ((x = ⊤) = x))
           if ((lhs0 == lhs1 && rhs0 == Some(lpOlTop)) || (rhs0 == lhs1 && lhs0 == Some(lpOlTop))){
             // go to top
             (Some(mkPosLitPosProp_script()), true)
@@ -507,26 +526,27 @@ object AccessoryRules {
             Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           }
           usedSymbols = usedSymbols + rule
-          allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name,Seq(lhs0.get)))
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name,Seq()))
           Out.lp_debug_info(s"Applying ${rule.name} to transform equational literal to non-equational form")
           true
         case None =>
-          Out.lp_debug_info(s"Unencoded transformation")
+          Out.lp_debug_info(s"Unencoded transformation 1")
           false
       }
     } else if (!ty0.isDefined && ty1.isDefined) {
       // we need to transform to equational literal
       Out.lp_debug_info(s"Transformation from non-equational to equational form neccesary...")
+      Out.lp_debug_info(s"lhs0: ${lhs0.get.pretty}, lhs1: ${lhs1.get.pretty}, rhs1: ${rhs1.get.pretty},")
       // analogous to the previous case
-      assert(Seq(lhs1, rhs1).contains(lhs0) && (Seq(lhs1, rhs1).contains(Some(lpOlBot)) || Seq(lhs1, rhs1).contains(Some(lpOlTop))))
+      assert((Seq(lhs1, rhs1).contains(lhs0) || Seq(lhs1.get, rhs1.get).contains(lpOlUnaryConnectiveTerm(lpNot,lhs0.get))) && (Seq(lhs1, rhs1).contains(Some(lpOlBot)) || Seq(lhs1, rhs1).contains(Some(lpOlTop))))
       // detect if we need to swap sides
       flip = (lhs0 == rhs1)
 
       val (necessaryRule, necessaryFlip): (Option[lpDefinedRules], Boolean) = if (!pol0) {
         if (!pol1) {
           // go from neg non-eq to neg eq
-          //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
-          if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
+          // x: (π ((¬ x) = (¬ (x = ⊤))))
+          if ((lhs1.get == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkNegPropNegLit_script()), false)
           } else {
@@ -535,8 +555,8 @@ object AccessoryRules {
           }
         } else {
           // go from neg non-eq to pos eq
-          //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
-          if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
+          // x: (π ((¬ x) = ((¬ x) = ⊤)))
+          if ((lhs1.get == lpOlUnaryConnectiveTerm(lpNot,lhs0.get) && rhs1 == Some(lpOlTop)) || (rhs1 == lpOlUnaryConnectiveTerm(lpNot,lhs0.get) && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkNegPropPosLit_script()), true)
           } else {
@@ -547,8 +567,8 @@ object AccessoryRules {
       } else {
         if (!pol1) {
           // go from pos non-eq to neg eq
-          //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
-          if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
+          // x: (π (x = (¬ ((¬ x) = ⊤))))
+          if ((lpOlUnaryConnectiveTerm(lpNot,lhs0.get) == lhs1.get && rhs1 == Some(lpOlTop)) || (lpOlUnaryConnectiveTerm(lpNot,lhs0.get) == rhs1.get && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkPosPropNegLit_script()), false)
           } else {
@@ -557,7 +577,7 @@ object AccessoryRules {
           }
         } else {
           // go from pos non-eq to pos eq
-          //if (Seq(lhs1, rhs1).contains(Some(lpOlTop))) {
+          // Prf(= [o] a (= [o] a ⊤))
           if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkPosPropPosLit_script()), true)
@@ -571,7 +591,7 @@ object AccessoryRules {
       necessaryRule match {
         case Some(rule) =>
           usedSymbols = usedSymbols + rule
-          allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name, Seq(lhs0.get)))
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name, Seq()))
           Out.lp_debug_info(s"Applying ${rule.name} to transform non-equational literal to equational form")
           if (flip) {
             usedSymbols = usedSymbols + flipLiteral()
@@ -580,7 +600,7 @@ object AccessoryRules {
           }
           true
         case None =>
-          Out.lp_debug_info(s"Unencoded transformation")
+          Out.lp_debug_info(s"Unencoded transformation 2")
           false
       }
 
@@ -615,7 +635,7 @@ object AccessoryRules {
       // maybe transform bot to not top and vice versa?
       true
     }
-
+    Out.lp_debug_info(s"success")
     (allSteps,usedSymbols,canEncode)
   }
 
