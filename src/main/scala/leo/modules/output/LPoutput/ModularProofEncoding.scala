@@ -1473,18 +1473,24 @@ object ModularProofEncoding {
               // only add the rewrite steps, this is less complicated but should have the same result
               allSteps = allSteps ++ removeUniC2 ++ removeUniC1
 
+              // it is necessary to potentially flip literals
+
+
               // Now the last step is refining with the last proven term after removal of the last unification constraint
               val refineStep = lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName), Seq())) //lpRefine(lpFunctionApp(lpConstantTerm(nameStep2Removal),Seq()))
 
               allSteps = allSteps :+ refineStep
             }
             // permutation? todo: figure out why this can even happen
+            // sometimes all that happens is a permutation and nothing else
             if (containsLpLits(encParentLiterals, encChildLiterals)) {
               val permutationStep = permutationStepSkript(encParentLiterals, encChildLiterals, lpFunctionApp(parentNameLpEnc, unboundVarsChild))
 
               Out.lp_debug_info(s"Permutation step: ${permutationStep.pretty}")
               allSteps = allSteps :+ lpRefine(permutationStep)
             }
+
+            // if necessary, we apply transformations to flip sides of literals etc.
 
             val proofScript = lpProofScript(allSteps)
             (proofScript, usedSymbols, None)

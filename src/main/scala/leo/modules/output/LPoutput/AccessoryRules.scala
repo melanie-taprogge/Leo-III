@@ -546,7 +546,7 @@ object AccessoryRules {
         if (!pol1) {
           // go from neg non-eq to neg eq
           // x: (π ((¬ x) = (¬ (x = ⊤))))
-          if ((lhs1.get == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
+          if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))){
             // go to top
             (Some(mkNegPropNegLit_script()), false)
           } else {

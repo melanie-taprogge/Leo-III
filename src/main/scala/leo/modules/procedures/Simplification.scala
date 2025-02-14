@@ -70,291 +70,219 @@ object Simplification extends Function1[Term, Term] {
   // TODO: Check if the four simplifications are really "extensional" and not just straight-forward
   // Boolean (with equality) identities
 
-  private[this] final def apply0(term: Term, extensional: Boolean): Term = {
-    val (t,_) = applyAndTrack (term, extensional)
-    t
-  }
 
   final def track(term: Term): (Term, Seq[(Seq[Int], Int)]) = {
-    val (restult, addInfo) = applyAndTrack(term.betaNormalize, true)
-    // we want to reverse the order of the positional encoding sequence so that the first step is the first integer
-    val addInfoReverseOrder = addInfo.map(tuple => (tuple._1.reverse,tuple._2))
-    (restult.betaNormalize,addInfoReverseOrder)
+    val (restult) = apply0(term.betaNormalize, true)
+    (restult.betaNormalize,Seq.empty)
   }
-  private[this] final def applyAndTrack(term: Term, extensional: Boolean): (Term, Seq[(Seq[Int], Int)]) = {
-    import leo.datastructures.Term.{:::>, TypeLambda, Bound, Symbol, ∙, Rational, Real}
-    import leo.modules.HOLSignature.{Exists, Forall, TyForall, &, |||, LitTrue, LitFalse, ===, !===, Not, Impl, <=>,
-      HOLDifference, HOLUnaryMinus, HOLSum, HOLLess, HOLLessEq, HOLGreaterEq, HOLGreater}
 
-    //@inline def simpTermOrType(arg: Either[Term, Type]): Either[(Term,Seq[(Seq[Int],String,Term)]), (Type,Seq[(Seq[Int],String,Term)])] = arg match {
-    @inline def simpTermOrType(arg: Either[Term, Type]): (Either[Term, Type],Seq[(Seq[Int],Int)]) = arg match {
-      case Left(arg0) =>
-        val intermediate = applyAndTrack(arg0, extensional)
-        (Left(intermediate._1),intermediate._2)
-      case Right(arg0) => (Right(arg0),Seq.empty)
+  private[this] final def apply0(term: Term, extensional: Boolean): Term = {
+    import leo.datastructures.Term.{:::>, TypeLambda, Bound, Symbol, ∙, Rational, Real}
+    import leo.modules.HOLSignature.{
+      Exists, Forall, TyForall, &, |||, LitTrue, LitFalse, ===, !===, Not, Impl, <=>,
+      HOLDifference, HOLUnaryMinus, HOLSum, HOLLess, HOLLessEq, HOLGreaterEq, HOLGreater
     }
+
+    @inline def simpTermOrType(arg: Either[Term, Type]): Either[Term, Type] = arg match {
+      case Left(arg0) => Left(apply0(arg0, extensional))
+      case Right(arg0) => Right(arg0)
+    }
+
     term match {
-      case Bound(_, _) => (term,Seq.empty)
-      case Symbol(_) => (term,Seq.empty)
-      case ty :::> body =>
-        val (simpBody, addInfo) = applyAndTrack(body, extensional)
-        (mkTermAbs(ty, simpBody), addInfo.map(tuple => (tuple._1 :+ 1,tuple._2)))
-      case TypeLambda(body) =>
-        val (simpBody, addInfo) = applyAndTrack(body, extensional)
-        (mkTypeAbs(simpBody), addInfo.map(tuple => (tuple._1 :+ 1,tuple._2)))
-      case Rational(n, d) => ((mkRational _).tupled(normalizeRat(n, d)), Seq.empty)
-      case Real(w,d,e) => ((mkReal _).tupled(normalizeReal(w,d,e)), Seq.empty)
+      case Bound(_, _) => term
+      case Symbol(_) => term
+      case ty :::> body => mkTermAbs(ty, apply0(body, extensional))
+      case TypeLambda(body) => mkTypeAbs(apply0(body, extensional))
+      case Rational(n, d) => (mkRational _).tupled(normalizeRat(n, d))
+      case Real(w, d, e) => (mkReal _).tupled(normalizeReal(w, d, e))
       case f ∙ args if f.isConstant && args.length <= 3 =>
         (f: @unchecked) match {
           case Symbol(id) =>
             (id: @switch) match {
               case |||.key =>
-                val (left,right) = |||.unapply(term).get
-                val (simpLeft,addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight,addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
+                val (left, right) = |||.unapply(term).get
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
                 (simpLeft, simpRight) match {
                   // - `s \/ s -> s`
-                  case (l, r) if l == r       => (l,newAddInfoL ++ newAddInfoR :+ (Seq.empty,1))
+                  case (l, r) if l == r => l
                   // - `~s \/ s -> T`
-                  case (l, Not(r)) if l == r  => (LitTrue,newAddInfoL ++ newAddInfoR :+ (Seq.empty,2))
-                  case (Not(l), r) if l == r  => (LitTrue,newAddInfoL ++ newAddInfoR :+ (Seq.empty,3))
+                  case (l, Not(r)) if l == r => LitTrue
+                  case (Not(l), r) if l == r => LitTrue
                   // - `s \/ T -> T`
-                  case (_, LitTrue())         => (LitTrue,newAddInfoL ++ newAddInfoR :+ (Seq.empty,4))
-                  case (LitTrue(), _)         => (LitTrue,newAddInfoL ++ newAddInfoR :+ (Seq.empty,5))
+                  case (_, LitTrue()) => LitTrue
+                  case (LitTrue(), _) => LitTrue
                   // - `s \/ F -> s`
-                  case (l, LitFalse())        => (l,newAddInfoL ++ newAddInfoR :+ (Seq.empty,6))
-                  case (LitFalse(), r)        => (r,newAddInfoL ++ newAddInfoR :+ (Seq.empty,7))
-                  case (l, r)                 => (mkTermApp(f, Seq(l,r)),newAddInfoL ++ newAddInfoR)
+                  case (l, LitFalse()) => l
+                  case (LitFalse(), r) => r
+                  case (l, r) => mkTermApp(f, Seq(l, r))
                 }
               case &.key =>
-                val (left,right) = &.unapply(term).get
-                val (simpLeft,addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight,addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
+                val (left, right) = &.unapply(term).get
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
                 (simpLeft, simpRight) match {
                   // - `s /\ s -> s`
-                  case (l, r) if l == r       => (l,newAddInfoL ++ newAddInfoR :+ (Seq.empty,8))
+                  case (l, r) if l == r => l
                   //  - `~s /\ s -> F`
-                  case (l, Not(r)) if l == r  => (LitFalse, newAddInfoL ++ newAddInfoR :+ (Seq.empty,9))
-                  case (Not(l), r) if l == r  => (LitFalse, newAddInfoL ++ newAddInfoR :+ (Seq.empty,10))
+                  case (l, Not(r)) if l == r => LitFalse
+                  case (Not(l), r) if l == r => LitFalse
                   // - `s /\ T -> s`
-                  case (l, LitTrue())         => (l, newAddInfoL ++ newAddInfoR :+ (Seq.empty,11))
-                  case (LitTrue(), r)         => (r, newAddInfoL ++ newAddInfoR :+ (Seq.empty,12))
+                  case (l, LitTrue()) => l
+                  case (LitTrue(), r) => r
                   // - `s /\ F -> F`
-                  case (_, LitFalse())        => (LitFalse, newAddInfoL ++ newAddInfoR :+ (Seq.empty,13))
-                  case (LitFalse(), _)        => (LitFalse, newAddInfoL ++ newAddInfoR :+ (Seq.empty,14))
-                  case (l, r)                 => (mkTermApp(f, Seq(l,r)), newAddInfoL ++ newAddInfoR)
+                  case (_, LitFalse()) => LitFalse
+                  case (LitFalse(), _) => LitFalse
+                  case (l, r) => mkTermApp(f, Seq(l, r))
                 }
               case Impl.key =>
-                val (left,right) = Impl.unapply(term).get
-                val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight, addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
+                val (left, right) = Impl.unapply(term).get
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
                 (simpLeft, simpRight) match {
-                  // - `s => T -> T`
-                  case (_, LitTrue())   => (LitTrue, newAddInfoL ++ newAddInfoR :+ (Seq.empty, 15))
-                  // - `F => s -> T`
-                  case (LitFalse(), _)  => (LitTrue, newAddInfoL ++ newAddInfoR :+ (Seq.empty,16))
-                  // - `T => s -> s`
-                  case (LitTrue(), r) =>  (r, newAddInfoL ++ newAddInfoR :+ (Seq.empty,17))
-                  // - `s => F -> ~s`
+                  case (_, LitTrue()) => LitTrue
+                  case (LitFalse(), _) => LitTrue
+                  case (LitTrue(), r) => r
                   case (_, LitFalse()) =>
-                    val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft) // needs not be encoded in Lambdapi since negation is rewritetn to implication of bot
-                    applyAndTrack(intermediate, extensional)
-                  // - `s => s -> T`
-                  case (l, r) if l == r => (LitTrue(), newAddInfoL ++ newAddInfoR :+ (Seq.empty,18))
-                  case (l, r)           => (mkTermApp(f, Seq(l,r)), newAddInfoL ++ newAddInfoR)
+                    val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft)
+                    apply0(intermediate, extensional)
+                  case (l, r) if l == r => LitTrue()
+                  case (l, r) => mkTermApp(f, Seq(l, r))
                 }
               case <=>.key =>
-                val (left,right) = <=>.unapply(term).get
-                val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight, addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
+                val (left, right) = <=>.unapply(term).get
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
                 (simpLeft, simpRight) match {
-                  // - `s <=> T -> s`
-                  case (l, LitTrue())   => (l, newAddInfoL ++ newAddInfoR :+ (Seq.empty,19))
-                  case (LitTrue(), r)   =>  (r, newAddInfoL ++ newAddInfoR :+ (Seq.empty,20))
-                  // - `F <=> s -> ~s`
-                  case (LitFalse(), _)  =>
+                  case (l, LitTrue()) => l
+                  case (LitTrue(), r) => r
+                  case (LitFalse(), _) =>
                     val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpRight)
-                    val (simpIntermediate, addInfoInt) = applyAndTrack(intermediate, extensional)
-                    val newAddInfoInt = addInfoInt.map(tuple => (tuple._1 :+ 2, tuple._2))
-                    (simpIntermediate, newAddInfoInt :+ (Seq.empty, 21))
-                  case (_, LitFalse())  =>
+                    apply0(intermediate, extensional)
+                  case (_, LitFalse()) =>
                     val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft)
-                    val (simpIntermediate, addInfoInt) = applyAndTrack(intermediate, extensional)
-                    val newAddInfoInt = addInfoInt.map(tuple => (tuple._1 :+ 1, tuple._2))
-                    (simpIntermediate, newAddInfoInt :+ (Seq.empty, 22))
-                  // - `s <=> s -> T`
-                  case (l, r) if l == r => (LitTrue(), newAddInfoL ++ newAddInfoR :+ (Seq.empty, 23))
-                  case (l, r)           => (mkTermApp(f, Seq(l,r)), newAddInfoL ++ newAddInfoR)
+                    apply0(intermediate, extensional)
+                  case (l, r) if l == r => LitTrue()
+                  case (l, r) => mkTermApp(f, Seq(l, r))
                 }
               case Not.key =>
                 val body = Not.unapply(term).get
-                val (simpBody, addInfo) = applyAndTrack(body, extensional)
-                val newAddInfo = addInfo.map(tuple => (tuple._1 :+ 1, tuple._2))
+                val simpBody = apply0(body, extensional)
                 simpBody match {
                   // - `~T -> F`
-                  case LitTrue()  => (LitFalse, newAddInfo :+ (Seq.empty, 24))
+                  case LitTrue() => LitFalse
                   // - `~F -> T`
-                  case LitFalse() => (LitTrue, newAddInfo :+ (Seq.empty, 25))
+                  case LitFalse() => LitTrue
                   // - `~ ~s -> s`
-                  case Not(body0) => (body0, newAddInfo :+ (Seq.empty, 26))
-                  case _          => (mkTermApp(f, simpBody), newAddInfo)
+                  case Not(body0) => body0
+                  case _ => mkTermApp(f, simpBody)
                 }
               case ===.key =>
-                val (left,right) = ===.unapply(term).get
-                val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight, addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
+                val (left, right) = ===.unapply(term).get
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
                 if (extensional) {
                   (simpLeft, simpRight) match {
                     // - `s = T -> s`
-                    case (_, LitTrue()) => (simpLeft, newAddInfoL ++ newAddInfoR :+ (Seq.empty,27))
-                    case (LitTrue(), _) => (simpRight, newAddInfoL ++ newAddInfoR :+ (Seq.empty,28))
+                    case (_, LitTrue()) => simpLeft
+                    case (LitTrue(), _) => simpRight
                     // - `s = F -> ~s`
                     case (_, LitFalse()) =>
                       val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft)
-                      val (simpIntermediate, addInfoInt) = applyAndTrack(intermediate, extensional)
-                      val newAddInfoInt = addInfoInt.map(tuple => (tuple._1 :+ 1, tuple._2))
-                      (simpIntermediate, newAddInfoInt :+ (Seq.empty, 29))
+                      apply0(intermediate, extensional)
                     case (LitFalse(), _) =>
                       val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpRight)
-                      val (simpIntermediate, addInfoInt) = applyAndTrack(intermediate, extensional)
-                      val newAddInfoInt = addInfoInt.map(tuple => (tuple._1 :+ 2, tuple._2))
-                      (simpIntermediate, newAddInfoInt :+ (Seq.empty, 30))
+                      apply0(intermediate, extensional)
                     // - `t = t -> T`
-                    case (l, r) if l == r => (LitTrue, newAddInfoL ++ newAddInfoR :+ (Seq.empty,31))
-                    case (l, r) => (mkApp(f, Seq(Right(l.ty), Left(l), Left(r))), newAddInfoL ++ newAddInfoR)
+                    case (l, r) if l == r => LitTrue
+                    case (l, r) => mkApp(f, Seq(Right(l.ty), Left(l), Left(r)))
                   }
                 } else {
                   (simpLeft, simpRight) match {
                     // - `t = t -> T`
-                    case (l, r) if l == r => (LitTrue, newAddInfoL ++ newAddInfoR :+ (Seq.empty,32))
-                    case (l, r) => (mkApp(f, Seq(Right(l.ty), Left(l), Left(r))), newAddInfoL ++ newAddInfoR)
+                    case (l, r) if l == r => LitTrue
+                    case (l, r) => mkApp(f, Seq(Right(l.ty), Left(l), Left(r)))
                   }
                 }
               case !===.key =>
-                val (left,right) = !===.unapply(term).get
-                val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight, addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
+                val (left, right) = !===.unapply(term).get
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
                 if (extensional) {
                   (simpLeft, simpRight) match {
                     // - `s != F -> s`
-                    case (_, LitFalse()) => (simpRight, newAddInfoL ++ newAddInfoR :+ (Seq.empty, 33))
-                    case (LitFalse(), _) => (simpLeft, newAddInfoL ++ newAddInfoR :+ (Seq.empty,34))
+                    case (_, LitFalse()) => simpRight
+                    case (LitFalse(), _) => simpLeft
                     // - `s != T -> ~s`
                     case (_, LitTrue()) =>
-                      val intermediate = (mkTermApp(mkAtom(Not.key, Not.ty), simpLeft))
-                      val (simpIntermediate, addInfoInt) = applyAndTrack(intermediate, extensional)
-                      val newAddInfoInt = addInfoInt.map(tuple => (tuple._1 :+ 1, tuple._2))
-                      (simpIntermediate, newAddInfoInt :+ (Seq.empty, 35))
+                      val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft)
+                      apply0(intermediate, extensional)
                     case (LitTrue(), _) =>
                       val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpRight)
-                      val (simpIntermediate, addInfoInt) = applyAndTrack(intermediate, extensional)
-                      val newAddInfoInt = addInfoInt.map(tuple => (tuple._1 :+ 2, tuple._2))
-                      (simpIntermediate, newAddInfoInt :+ (Seq.empty, 36))
+                      apply0(intermediate, extensional)
                     // - `t != t -> F`
-                    case (l, r) if l == r => (LitFalse, newAddInfoL ++ newAddInfoR :+ (Seq.empty, 37))
-                    case (l, r) =>( mkApp(f, Seq(Right(l.ty), Left(l), Left(r))),newAddInfoL ++ newAddInfoR)
+                    case (l, r) if l == r => LitFalse
+                    case (l, r) => mkApp(f, Seq(Right(l.ty), Left(l), Left(r)))
                   }
                 } else {
                   (simpLeft, simpRight) match {
                     // - `t != t -> F`
-                    case (l, r) if l == r => (LitFalse, newAddInfoL ++ newAddInfoR :+ (Seq.empty,38))
-                    case (l, r) => (mkApp(f, Seq(Right(l.ty), Left(l), Left(r))), newAddInfoL ++ newAddInfoR)
+                    case (l, r) if l == r => LitFalse
+                    case (l, r) => mkApp(f, Seq(Right(l.ty), Left(l), Left(r)))
                   }
                 }
               case Forall.key =>
                 val body = Forall.unapply(term).get
-                val (simpBody, addInfo) = applyAndTrack(body, extensional)
-                val newAddInfo = addInfo.map(tuple => (tuple._1 :+ 1, tuple._2))
+                val simpBody = apply0(body, extensional)
                 simpBody match {
                   // - ∀x. s -> s if x not free in s
                   // - ∃x. s -> s if x not free in s
-                  case _ :::> absBody if !absBody.looseBounds.contains(1) => (absBody.lift(-1), newAddInfo :+ (Seq.empty,13))
-                  case _ => (mkApp(f, Seq(Right(simpBody.ty._funDomainType), Left(simpBody))), newAddInfo)
+                  case _ :::> absBody if !absBody.looseBounds.contains(1) => absBody.lift(-1)
+                  case _ => mkApp(f, Seq(Right(simpBody.ty._funDomainType), Left(simpBody)))
                 }
               case Exists.key =>
                 val body = Exists.unapply(term).get
-                val (simpBody, addInfo) = applyAndTrack(body, extensional)
-                val newAddInfo = addInfo.map(tuple => (tuple._1 :+ 1, tuple._2))
+                val simpBody = apply0(body, extensional)
                 simpBody match {
                   // - ∀x. s -> s if x not free in s
                   // - ∃x. s -> s if x not free in s
-                  case _ :::> absBody if !absBody.looseBounds.contains(1) => (absBody.lift(-1), newAddInfo :+ (Seq.empty,40))
-                  case _ => (mkApp(f, Seq(Right(simpBody.ty._funDomainType), Left(simpBody))), newAddInfo)
+                  case _ :::> absBody if !absBody.looseBounds.contains(1) => absBody.lift(-1)
+                  case _ => mkApp(f, Seq(Right(simpBody.ty._funDomainType), Left(simpBody)))
                 }
               case TyForall.key =>
                 val body = TyForall.unapply(term).get
-                val (simpBody, addInfo) = applyAndTrack(body, extensional)
-                val newAddInfo = addInfo.map(tuple => (tuple._1 :+ 1, tuple._2))
+                val simpBody = apply0(body, extensional)
                 simpBody match {
                   // - Πx. s -> s if x is not free in s
-                  case TypeLambda(absBody) if !absBody.tyFV.contains(1) => (absBody.lift(0, -1), newAddInfo :+ (Seq.empty,41))
-                  case _ => (mkTermApp(f, simpBody), newAddInfo)
+                  case TypeLambda(absBody) if !absBody.tyFV.contains(1) => absBody.lift(0, -1)
+                  case _ => mkTermApp(f, simpBody)
                 }
               case HOLDifference.key =>
                 val (left, right) = HOLDifference.unapply(term).get
-                val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight, addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
-                (mkTermApp(mkTypeApp(HOLSum, simpLeft.ty), Seq(simpLeft, mkTermApp(mkTypeApp(HOLUnaryMinus, simpRight.ty), simpRight))), newAddInfoL ++ newAddInfoR)
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
+                mkTermApp(mkTypeApp(HOLSum, simpLeft.ty), Seq(simpLeft, mkTermApp(mkTypeApp(HOLUnaryMinus, simpRight.ty), simpRight)))
               case HOLLessEq.key =>
                 val (left, right) = HOLLessEq.unapply(term).get
-                val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight, addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
-                (mkTermApp(mkAtom(|||.key, |||.ty), Seq(mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpLeft, simpRight)), ===(simpLeft, simpRight))), newAddInfoL ++ newAddInfoR)
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
+                mkTermApp(mkAtom(|||.key, |||.ty), Seq(mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpLeft, simpRight)), ===(simpLeft, simpRight)))
               case HOLGreater.key =>
                 val (left, right) = HOLGreater.unapply(term).get
-                val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight, addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
-                (mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpRight, simpLeft)), newAddInfoL ++ newAddInfoR)
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
+                mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpRight, simpLeft))
               case HOLGreaterEq.key =>
                 val (left, right) = HOLGreaterEq.unapply(term).get
-                val (simpLeft, addInfoL) = applyAndTrack(left, extensional)
-                val newAddInfoL = addInfoL.map(tuple => (tuple._1 :+ 1, tuple._2))
-                val (simpRight, addInfoR) = applyAndTrack(right, extensional)
-                val newAddInfoR = addInfoR.map(tuple => (tuple._1 :+ 2, tuple._2))
-                (mkTermApp(mkAtom(|||.key, |||.ty), Seq(mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpRight, simpLeft)), ===(simpLeft, simpRight))), newAddInfoL ++ newAddInfoR)
-              case _ =>
-                val simpArgs0 = args.map(simpTermOrType) //.map(tuple => (tuple._1 :+ 1,tuple._2, tuple._3))
-                (mkApp(f, simpArgs0.map(arg => arg._1)), simpArgs0.map(arg0 => arg0._2.map(arg => (arg._1 :+ simpArgs0.indexOf(arg0), arg._2))).flatten)
+                val simpLeft = apply0(left, extensional)
+                val simpRight = apply0(right, extensional)
+                mkTermApp(mkAtom(|||.key, |||.ty), Seq(mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpRight, simpLeft)), ===(simpLeft, simpRight)))
+              case _ => mkApp(f, args.map(simpTermOrType))
             }
         }
       case f ∙ args =>
         // f is a variable or a constant because `term` is in beta nf.
-        val simpArgs0 = args.map(simpTermOrType)
-        //var simpArgs: Seq[Either[Term,Type]] = Seq.empty
-        //var addInfoArgs: Seq[(Seq[Int],String,Term)] = Seq.empty
-        /*
-        simpArgs0 foreach( arg => arg match {
-          case Left((te, addInfoTe)) =>
-            simpArgs = simpArgs :+ te
-          case Right((ty, addInfoTy)) =>
-        })
-
-         */
-        //val simpArgs: ((Term,(Seq[Int],String,Term))) = simpArgs0.map {
-        //  case Left((te, addInfoTe)) => (te, addInfoTe)
-        //  case Right((ty, addInfoTy)) => (ty, addInfoTy)})
-        //(mkApp(f, simpArgs), addInfoArgs)
-
-        //(mkApp(f, simpArgs0.map(arg => arg._1)), simpArgs0.map(arg => arg._2).flatten)
-        (mkApp(f, simpArgs0.map(arg => arg._1)), simpArgs0.map(arg0 => arg0._2.map(arg => (arg._1 :+ simpArgs0.indexOf(arg0), arg._2))).flatten)
+        mkApp(f, args.map(simpTermOrType))
     }
   }
 

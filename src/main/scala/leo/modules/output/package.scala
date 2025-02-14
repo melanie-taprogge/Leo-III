@@ -23,7 +23,7 @@ package object output {
     * 25 ---> "Z",
     * 26 ---> "ZA", ... etc.
     */
-  protected[output] final def intToName(i: Int): String = i match {
+  final def intToName(i: Int): String = i match {
     case n if n <= range => s"${intToChar(i)}"
     case n if n > range => s"Z${intToName(i-range-1)}"
   }

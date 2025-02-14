@@ -144,7 +144,7 @@ object LPoutput {
           case leo.modules.calculus.Simp =>
             //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
             // todo: eta expansion
-            //val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
+            val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
             //("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
             (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, Option("Formula simplification not encoded yet"))
 
@@ -391,22 +391,34 @@ object LPoutput {
 
       // initiate a lambdapi package
 
-      val command = Seq("/bin/bash", "-c", s"cd $lpOutputPath0 && lambdapi init $nameLpOutputFolder")
+      val Initcommand = Seq("/bin/bash", "-c", s"cd $lpOutputPath0 && lambdapi init $nameLpOutputFolder")
 
-      val initLP = Try(command.!)
+      val initLP = Try(Initcommand.!)
 
       initLP match {
-        case Success(_) =>
+        case Success(0) =>
           val makeCommand = Seq("/bin/bash", "-c", s"cd $lpOutputPath0/$nameLpOutputFolder && make")
           val makeResult = Try(makeCommand.!)
 
           makeResult match {
             case Success(_) => Out.lp_debug_info("Make command for Lambdapi executed successfully.")
-            case Failure(exception) => Out.lp_debug_info(s"Make command failed: ${exception.getMessage}")
+            case Failure(exception) =>
+              Out.lp_debug_info(s"Make command failed: ${exception.getMessage}")
           }
 
-        case Failure(exception) =>
-          Out.lp_debug_info(s"lambdapi init failed: ${exception.getMessage}")
+        case Success(1) =>
+          Out.lp_debug_info(s"lambdapi package already exists, overwriting")
+
+        case _ =>
+          Out.lp_debug_info(s"lambdapi init failed")
+          val mkdirCommand = s"mkdir $lpOutputPath0/$nameLpOutputFolder"
+          val mkDirRes = Try(mkdirCommand.!)
+          mkDirRes match {
+            case Success(_) =>
+              Out.lp_debug_info("Saving Lambdapi files in given directory")
+            case Failure(exception) =>
+              Out.lp_debug_info(s"Unable to create directory for output files")
+          }
       }
 
       // write the files
