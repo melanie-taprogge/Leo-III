@@ -5,7 +5,7 @@ import leo.datastructures.Term.∙
 import leo.datastructures.{Clause, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature.{===, HOLBinaryConnective, Not, |||}
 import leo.modules.output.LPoutput.Encodings.type2LP
-import leo.modules.output.LPoutput.lpDatastructures.{lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlFunctionApp, lpOlLambdaTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
+import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedTermVar, lpOlTypedTyVar, lpOlTypedVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
 
@@ -44,7 +44,14 @@ package object LPoutput {
     "assume", "apply", "refine", "simplify", "rewrite", "have",
     "print", "proofterm", "assert", "assertnot", "compute",
     "constant", "injective", "commutative", "associative",
-    "in", "notation", "reflexivity", "admit", "right", "left") ++ lambdapiNames
+    "in", "notation", "reflexivity", "admit", "right", "left",
+    "induction", "focus", "generalize", "orelse", "remove",
+    "repeat", "set", "solve", "symmetry", "try", "why3", "with",
+    "abort", "admitted", "fail", "search", "type", "as", "begin",
+    "debug", "end", "flag", "infix", "off", "on", "postfix",
+    "prefix", "private", "protected", "prover", "prover_timeout",
+    "quantifier", "sequential", "TYPE"
+  ) ++ lambdapiNames
 
   def findSafeName(str: String, sig: Signature): String = {
     val newName = s"${str}_"
@@ -52,25 +59,43 @@ package object LPoutput {
     else findSafeName(newName, sig)
   }
 
-  private final val partiallyAlliedTPTPmap = //Vector("=", "!=", "&", "|", "~", "!", "?")
+  private final val partiallyAlliedTPTPmap : Map[String, (String,lpOlConstantTerm, lpOlConstantTerm) => lpOlLambdaTerm] = //Vector("=", "!=", "&", "|", "~", "!", "?")
   // symbol =_part (a : Set) ≔ λ (x y : τ a), x = y;
-    Map.apply("~" -> "¬_part", "=" -> "=_part", "!=" -> "!=_part", "&" -> "∧_part", "|" -> "∨_part", "!" -> "∀_part", "?" -> "∃_part")
+    Map.apply("~" -> ((_, x, _) => lpOlLambdaTerm(Seq(lpOlTypedTermVar(x,lpOtype)),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedTermVar(x,lpOtype)))),
+      "=" -> ((a, x, y) => lpOlLambdaTerm(Seq(lpOlTypedTyVar(lpOlConstantTerm(a)),lpOlTypedTermVar(x,lpOlUserDefinedType(a)),lpOlTypedTermVar(y,lpOlUserDefinedType(a))),lpOlTypedBinaryConnectiveTerm(lpEq,lpOlUserDefinedType(a),lpOlTypedTermVar(x,lpOlUserDefinedType(a)),lpOlTypedTermVar(y,lpOlUserDefinedType(a))))),
+      "!=" -> ((a, x, y) => lpOlLambdaTerm(Seq(lpOlTypedTyVar(lpOlConstantTerm(a)),lpOlTypedTermVar(x,lpOlUserDefinedType(a)),lpOlTypedTermVar(y,lpOlUserDefinedType(a))),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOlUserDefinedType(a),lpOlTypedTermVar(x,lpOlUserDefinedType(a)),lpOlTypedTermVar(y,lpOlUserDefinedType(a)))))),
+      "&" -> ((_, x, y) => lpOlLambdaTerm(Seq(lpOlTypedTermVar(x,lpOtype),lpOlTypedTermVar(y,lpOtype)),lpOlUntypedBinaryConnectiveTerm(lpAnd,lpOlTypedTermVar(x,lpOtype),lpOlTypedTermVar(y,lpOtype)))),
+      "|" -> ((_, x, y) => lpOlLambdaTerm(Seq(lpOlTypedTermVar(x,lpOtype),lpOlTypedTermVar(y,lpOtype)),lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlTypedTermVar(x,lpOtype),lpOlTypedTermVar(y,lpOtype)))),
+      "!" -> ((a, x, _) => lpOlLambdaTerm(Seq(lpOlTypedTyVar(lpOlConstantTerm(a)),lpOlTypedTermVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype)))),lpOlMonoQuantifiedTerm(lpOlForAll,lpOlTypedTermVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))),x,true))),
+      "?" -> ((a, x, _) => lpOlLambdaTerm(Seq(lpOlTypedTyVar(lpOlConstantTerm(a)),lpOlTypedTermVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype)))),lpOlMonoQuantifiedTerm(lpOlExists,lpOlTypedTermVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))),x,true))))
+      // todo: the other connectives
 
-  final def lpEscapeName(str: String,sig: Signature): String = {
+  final def lpEscapeName(str: String, sig: Signature): String = {
     if (partiallyAlliedTPTPmap.keySet.contains(str)) {
-      return partiallyAlliedTPTPmap(str)
+      throw new Exception(s"trying to escape name for parially applied connective, this should not happen")
     } //throw new Exception(s"found illegal $str")
     else if (lpKeywords.contains(str)) {
-      val newName = findSafeName(str,sig)
+      val newName = findSafeName(str, sig)
       //Out.lp_debug_info(s"renamed $str to $newName")
       return newName
     }
-    if (!str.matches(lpAllowedRegEx)){
+    if (!str.matches(lpAllowedRegEx)) {
       val newName = s"{|$str|}"
       Out.lp_debug_info(s"renamed $str to $newName")
       newName
     }
     else str
+  }
+
+  final def lpEscapeTerm(str: String,sig: Signature): lpOlTerm = {
+    if (partiallyAlliedTPTPmap.keySet.contains(str)) {
+      // todo: eventhough lambdapi can handle reusing of variable names, we should make sure to generate some fresh variable names for our new anonomus functions
+      return partiallyAlliedTPTPmap(str)("a",lpOlConstantTerm("x"),lpOlConstantTerm("y"))
+    }
+    else {
+      val safeName = lpEscapeName(str, sig)
+      lpOlConstantTerm(safeName)
+    }
   }
 
   def nestedLorIlApp(lhs: Seq[lpOlTerm], rhs: Seq[lpOlTerm], prfRhs: lpTerm): lpFunctionApp = {
@@ -194,17 +219,18 @@ package object LPoutput {
       }
     }
   }
-  def findRWTerm(searchFor:lpOlTerm, searchIn:lpOlTerm, replaceWith:lpOlTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))): (lpRewritePattern, lpOlTerm) = {
-    val (patternTerm, rewrittenTerm,counter, rwUnderBinder) = findRWTerm0(searchFor,searchIn,replaceWith, false, patternVar,0)
-    if (counter != 1) throw new Exception(s"when trying to locate ${searchFor.pretty} in ${searchIn.pretty}, ${counter} occurrences were found")
+  def findRWTerm(rwMap:Map[lpOlTerm, lpOlTerm], searchIn:lpOlTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))): (lpRewritePattern, lpOlTerm) = {
+    val (patternTerm, rewrittenTerm,counter, rwUnderBinder) = findRWTerm0(rwMap,searchIn, false, patternVar,0)
+    if (counter != 1) throw new Exception(s"when trying to locate ${rwMap.keySet.map(_.pretty)} in ${searchIn.pretty}, ${counter} occurrences were found")
     val rewritePattern = lpRewritePattern(patternTerm,patternVar)
     (rewritePattern,rewrittenTerm)
   }
-  def findRWTerm0(searchFor:lpOlTerm, searchIn:lpOlTerm, replaceWith:lpOlTerm, rwUnderBinder:Boolean = false, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x")), currentX:Int = 0): (lpOlTerm, lpOlTerm, Int, Boolean) = {
+
+  def findRWTerm0(rwMap:Map[lpOlTerm, lpOlTerm], searchIn:lpOlTerm, rwUnderBinder:Boolean = false, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x")), currentX:Int = 0): (lpOlTerm, lpOlTerm, Int, Boolean) = {
     // find a specific subterm for the application of a rewrite operation
     // this function returns: The rewrite-pattern, the term modulo rewriting and an integer signaling how often the pattern was found.
 
-    if (searchIn == searchFor) (patternVar,replaceWith, currentX + 1, rwUnderBinder)
+    if (rwMap.keySet.contains(searchIn)) (patternVar,rwMap(searchIn), currentX + 1, rwUnderBinder)
     else {
       searchIn match {
         case `lpOlTop` =>
@@ -213,36 +239,38 @@ package object LPoutput {
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlConstantTerm(_) =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
-      case lpOlTypedVar(_,_) =>
+      case lpOlTypedTermVar(_,_) =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
+      case lpOlTypedTyVar(_) =>
+          (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlUntypedVar(lpConstantTerm(_)) =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlLambdaTerm(vars,body) =>
-        val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(searchFor, body, replaceWith, rwUnderBinder, patternVar, 0)
+        val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(rwMap, body, rwUnderBinder, patternVar, 0)
         val pattern = if (counter == 0) lpOlWildcard else lpOlLambdaTerm(vars, patternbody)
         val rewrittenTerm = lpOlLambdaTerm(vars, rewrittenbody0)
         (pattern, rewrittenTerm, counter, true)
       case lpOlQuantifiedTerm(quantifier, vars, body) =>
-        val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(searchFor, body, replaceWith, rwUnderBinder, patternVar, 0)
+        val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(rwMap, body, rwUnderBinder, patternVar, 0)
         val pattern = if (counter == 0) lpOlWildcard else lpOlQuantifiedTerm(quantifier, vars, patternbody)
         val rewrittenTerm = lpOlQuantifiedTerm(quantifier, vars, rewrittenbody0)
         (pattern, rewrittenTerm, counter, true)
       case lpOlUnaryConnectiveTerm(con, term) =>
-          val (patternTerm, rewrittenTerm0, counter, rwUnderBinder0) = findRWTerm0(searchFor, term, replaceWith, rwUnderBinder, patternVar, 0)
+          val (patternTerm, rewrittenTerm0, counter, rwUnderBinder0) = findRWTerm0(rwMap, term, rwUnderBinder, patternVar, 0)
           // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
           val pattern = if (counter == 0) lpOlWildcard else lpOlUnaryConnectiveTerm(con, patternTerm)
           val rewrittenTerm = lpOlUnaryConnectiveTerm(con, rewrittenTerm0)
           (pattern, rewrittenTerm, counter, rwUnderBinder0)
         case lpOlUntypedBinaryConnectiveTerm(con,lhs,rhs) =>
-          val (patternLhs, rewrittenLhs, counterLhs, rwUnderBinderLhs) = findRWTerm0(searchFor, lhs, replaceWith, rwUnderBinder, patternVar, 0)
-          val (patternRhs, rewrittenRhs, counterRhs, rwUnderBinderRhs) = findRWTerm0(searchFor, rhs, replaceWith, rwUnderBinder, patternVar, 0)
+          val (patternLhs, rewrittenLhs, counterLhs, rwUnderBinderLhs) = findRWTerm0(rwMap, lhs, rwUnderBinder, patternVar, 0)
+          val (patternRhs, rewrittenRhs, counterRhs, rwUnderBinderRhs) = findRWTerm0(rwMap, rhs, rwUnderBinder, patternVar, 0)
           // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
           val newCounter = counterLhs + counterRhs
           val pattern = if (newCounter == 0) lpOlWildcard else lpOlUntypedBinaryConnectiveTerm(con,patternLhs,patternRhs)
           val rewrittenTerm = lpOlUntypedBinaryConnectiveTerm(con,rewrittenLhs,rewrittenRhs)
           (pattern, rewrittenTerm, newCounter, rwUnderBinderLhs || rwUnderBinderRhs)
         case lpOlUntypedBinaryConnectiveTerm_multi(con, args) =>
-          val intermediateResult = args.map(arg => findRWTerm0(searchFor, arg, replaceWith, rwUnderBinder, patternVar, 0))
+          val intermediateResult = args.map(arg => findRWTerm0(rwMap, arg, rwUnderBinder, patternVar, 0))
           // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
           val newCounter = intermediateResult.map(_._3).sum
           val pattern = if (newCounter == 0) lpOlWildcard else lpOlUntypedBinaryConnectiveTerm_multi(con, intermediateResult.map(_._1))
@@ -250,15 +278,15 @@ package object LPoutput {
           val rwUnderBinder0 = intermediateResult.map(_._4).contains(true)
           (pattern, rewrittenTerm, newCounter, rwUnderBinder0)
         case lpOlTypedBinaryConnectiveTerm(con, ty, lhs, rhs) =>
-          val (patternLhs, rewrittenLhs, counterLhs, rwUnderBinderLhs) = findRWTerm0(searchFor, lhs, replaceWith, rwUnderBinder, patternVar, 0)
-          val (patternRhs, rewrittenRhs, counterRhs, rwUnderBinderRhs) = findRWTerm0(searchFor, rhs, replaceWith, rwUnderBinder, patternVar, 0)
+          val (patternLhs, rewrittenLhs, counterLhs, rwUnderBinderLhs) = findRWTerm0(rwMap, lhs, rwUnderBinder, patternVar, 0)
+          val (patternRhs, rewrittenRhs, counterRhs, rwUnderBinderRhs) = findRWTerm0(rwMap, rhs, rwUnderBinder, patternVar, 0)
           // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
           val newCounter = counterLhs + counterRhs
           val pattern = if (newCounter == 0) lpOlWildcard else lpOlTypedBinaryConnectiveTerm(con, ty, patternLhs, patternRhs)
           val rewrittenTerm = lpOlTypedBinaryConnectiveTerm(con, ty, rewrittenLhs, rewrittenRhs)
           (pattern, rewrittenTerm, newCounter, rwUnderBinderLhs || rwUnderBinderRhs)
         case lpOlFunctionApp(head,args) =>
-          val (patternHead, termHead, counterHead, rwUnderBinderHead) = findRWTerm0(searchFor, head, replaceWith, rwUnderBinder, patternVar, 0)
+          val (patternHead, termHead, counterHead, rwUnderBinderHead) = findRWTerm0(rwMap, head, rwUnderBinder, patternVar, 0)
           var patternsArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
           var termsArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
           var rwUnderBinderArg = false
@@ -266,7 +294,7 @@ package object LPoutput {
           args foreach{ arg =>
             arg match {
               case Left(term) =>
-                val (patternArg0, termArg, counterArg, rwUnderBinderArg0) = findRWTerm0(searchFor, term, replaceWith, rwUnderBinder, patternVar, 0)
+                val (patternArg0, termArg, counterArg, rwUnderBinderArg0) = findRWTerm0(rwMap, term, rwUnderBinder, patternVar, 0)
                 val patternArg = if (counterArg == 0) lpOlWildcard else patternArg0
                 patternsArgs = patternsArgs :+ Left(patternArg)
                 termsArgs = termsArgs :+ Left(termArg)
@@ -282,10 +310,25 @@ package object LPoutput {
           (pattern,rewtrittenTerm,countersArgs, rwUnderBinderArg || rwUnderBinderHead)
 
           // just for testing
-        case _ => throw new Exception(s"encountered unexptcted term $searchIn when trying to find term ${searchFor.pretty} in ${searchIn.pretty}")
+        case _ => throw new Exception(s"encountered unexptcted term $searchIn when trying to find terms ${rwMap.keySet.map(_.pretty)} in ${searchIn.pretty}")
       }
     }
   }
+/* todo: in order to implmement this I need proper type substitution implementation
+  def betaReduceLpApplication(term0:lpOlTerm):lpTerm ={
+    term0 match {
+      case lpOlFunctionApp(lpOlLambdaTerm(vars,body), args) =>
+        assert(vars.length >= args.length)
+        val args0: Seq[lpOlTerm] = args.map(arg => arg match {
+          case Left(term) => term
+          case Right(ty) => ty
+        })
+        val substDict : Map[lpOlTerm,lpOlTerm] = vars.zip(args0).toMap
+
+        val reduced = findRWTerm0(substDict,body)
+    }
+  }
+ */
 
   def wholeHaveRewriteStep(rewriteSteps: Seq[lpProofScriptStep], nameStep: String, nameSubStep: String, before: lpOlTerm, sourceBefore: lpTerm, after: lpOlTerm): lpHave = {
     //todo: use this in my simplification steps?
@@ -301,7 +344,7 @@ package object LPoutput {
     // 2. Proof the "after" given the equality
     //val stepProof = lpProofScript(Seq(subStep,lpRefine(lpFunctionApp(lpConstantTerm(nameSubStep),Seq(lpUseful.Identity,sourceBefore)))))
     //val stepProof = lpProofScript(Seq(subStep,lpRefine(lpUseful.applyToEqualityTerm(lpOtype,after,before,lpOlConstantTerm(nameSubStep),lpOlLambdaTerm(Seq(lpOlTypedVar(lpOlConstantTerm("x"),lpOtype)),lpOlConstantTerm("x")),Some(sourceBefore)))))
-    val stepProof = lpProofScript(Seq(subStep, lpRefine(NaturalDeductionRules.eqDef().instanciate(lpOtype.lift2Poly, after, before, Some(lpOlConstantTerm(nameSubStep)), Some(lpOlLambdaTerm(Seq(lpOlTypedVar(lpOlConstantTerm("x"), lpOtype)), lpOlConstantTerm("x"))), Some(sourceBefore)))))
+    val stepProof = lpProofScript(Seq(subStep, lpRefine(NaturalDeductionRules.eqDef().instanciate(lpOtype.lift2Poly, after, before, Some(lpOlConstantTerm(nameSubStep)), Some(lpOlLambdaTerm(Seq(lpOlTypedTermVar(lpOlConstantTerm("x"), lpOtype)), lpOlConstantTerm("x"))), Some(sourceBefore)))))
 
     // the whole Have step:
     lpHave(nameStep, after.prf, stepProof)

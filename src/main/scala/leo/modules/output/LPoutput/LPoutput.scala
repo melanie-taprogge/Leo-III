@@ -8,7 +8,7 @@ import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{calculus, symbolsInProof, userSignature}
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpNpp, permLib}
+import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpDne, permLib}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
@@ -37,7 +37,7 @@ object LPoutput {
 
     val rulesFileSB: mutable.StringBuilder = new StringBuilder()
     // todo: once lambdapi is fixed, remove the declaration here
-    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool ${nameLpOutputFolder}.$nameLogicFile;\nnotation ∨ infix right 6;\n\n") // maybe it will be necessary for now to add \nnotation ∨ infix right 6;
+    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool ${nameLpOutputFolder}.$nameLogicFile;\n\n") // maybe it will be necessary for now to add \nnotation ∨ infix right 6;
 
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
@@ -144,7 +144,7 @@ object LPoutput {
           case leo.modules.calculus.Simp =>
             //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
             // todo: eta expansion
-            val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
+            //val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
             //("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
             (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, Option("Formula simplification not encoded yet"))
 
@@ -180,7 +180,7 @@ object LPoutput {
       if (inclduePermLib) f"${nameLpOutputFolder}.${permlibFile}"
       else ""
     }
-    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\nnotation ∨ infix right 6;\nsymbol el a : τ a;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
     var proofSteps: Seq[lpProofScriptStep] = Seq.empty
 
     def extractNecessaryFormulas(state:LocalState):Unit={
@@ -362,9 +362,9 @@ object LPoutput {
       proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
 
       // construct the proof based on all the individual steps
-      // in the proof of the conjecture, first instanciate npp, then assume the negated conjecture
+      // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
       proofSteps =  lpAssume(Seq(conjName)) +: proofSteps
-      proofSteps =  lpRefine(lpFunctionApp(lpNpp.name,Seq(conjecture, lpWildcard))) +: proofSteps
+      proofSteps =  lpRefine(lpFunctionApp(lpDne.name,Seq(conjecture, lpWildcard))) +: proofSteps
       // finally, test if the derived last clause is the empty clause or a flex-flex clause.
       // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
       val emptyClause = lpClause(Seq(),Seq(lpOlBot))

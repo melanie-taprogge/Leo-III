@@ -225,7 +225,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlBot))).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt x (¬ (x = ⊥)) _ _\n\t\t{assume h1 h2;\n\t\trefine ind_eq (h2) (λ z, z ⇒ ⊥) (λ y : π (⊥), y) h1}\n\t\t{assume h1;\n\t\trefine npp (x) _;\n\t\tassume h2;\n\t\thave H1: π (x = ⊥)\n\t\t\t{refine propExt x ⊥ _ _\n\t\t\t\t{assume h3;\n\t\t\t\trefine h2 h3}\n\t\t\t\t{assume h3;\n\t\t\t\trefine ⊥ₑ h3}};\n\t\trefine h1 H1}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt x (¬ (x = ⊥)) _ _\n\t\t{assume h1 h2;\n\t\trefine ind_eq (h2) (λ z, z ⇒ ⊥) (λ y : π (⊥), y) h1}\n\t\t{assume h1;\n\t\trefine dne (x) _;\n\t\tassume h2;\n\t\thave H1: π (x = ⊥)\n\t\t\t{refine propExt x ⊥ _ _\n\t\t\t\t{assume h3;\n\t\t\t\trefine h2 h3}\n\t\t\t\t{assume h3;\n\t\t\t\trefine ⊥ₑ h3}};\n\t\trefine h1 H1}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -239,7 +239,7 @@ object AccessoryRules {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlBot)).prf
 
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt x (¬ x = ⊥) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊥ _ _\n            {assume h2;\n            refine h2 h1}\n            {assume h2;\n            refine ⊥ₑ h2}}\n        {assume h1;\n        refine npp x (ind_eq h1 (λ y, ¬ y) (λ h : π ⊥, h))}")))
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume x;\n\trefine propExt x (¬ x = ⊥) _ _\n        {assume h1;\n        refine propExt (¬ x) ⊥ _ _\n            {assume h2;\n            refine h2 h1}\n            {assume h2;\n            refine ⊥ₑ h2}}\n        {assume h1;\n        refine dne x (ind_eq h1 (λ y, ¬ y) (λ h : π ⊥, h))}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
@@ -280,8 +280,8 @@ object AccessoryRules {
     // Π [a: Set], Π x: τ a, Π y: τ a, π ((x = y) = ((x = y) = ⊤))
 
     val a = lpOlUserDefinedType(typeVarName)
-    val x = lpOlTypedVar(lpOlConstantTerm(patternVarName1),a)
-    val y = lpOlTypedVar(lpOlConstantTerm(patternVarName2),a)
+    val x = lpOlTypedTermVar(lpOlConstantTerm(patternVarName1),a)
+    val y = lpOlTypedTermVar(lpOlConstantTerm(patternVarName2),a)
     override def name: lpConstantTerm = lpConstantTerm("liftEqExlicit_eq")
     // [a: Set] (x y : τ a) :(π ((x = y) = ((x = y) = ⊤)))
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y) , lpOlTop)).prf
@@ -647,8 +647,8 @@ object AccessoryRules {
     // [T] (x y : τ T) : π((x = y) = (y = x))
 
     val T = lpOlUserDefinedMonoType("T")
-    val x = lpOlTypedVar(lpOlConstantTerm("x"),T)
-    val y = lpOlTypedVar(lpOlConstantTerm("y"),T)
+    val x = lpOlTypedTermVar(lpOlConstantTerm("x"),T)
+    val y = lpOlTypedTermVar(lpOlConstantTerm("y"),T)
 
     override def name: lpConstantTerm = lpConstantTerm("eqSym_eq")
 

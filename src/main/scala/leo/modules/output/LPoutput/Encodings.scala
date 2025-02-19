@@ -151,7 +151,7 @@ object Encodings {
       val name = intToName(fvCount - i - 1)
       val (encType, usedSymbolsUpdated) = type2LP(ty,sig,usedSymbols)
       usedSymbols = usedSymbolsUpdated
-      boundVars = boundVars :+ lpOlTypedVar(lpOlConstantTerm(name),encType)
+      boundVars = boundVars :+ lpOlTypedTermVar(lpOlConstantTerm(name),encType)
       resultBindingMap = resultBindingMap + (scope -> name)
 
       curImplicitlyQuantified = curImplicitlyQuantified.tail
@@ -212,7 +212,7 @@ object Encodings {
       var quantifiedVars: Seq[lpOlTypedVar] = Seq.empty
       // todo: add the T vars to counted here
       //  and: is it right to just make these things Set types? It should be since we can only quantify over mono types right?
-      quantifiedVars = quantifiedVars ++ (cl.typeVars.reverse.map(i => lpOlTypedVar(lpOlConstantTerm(s"T${intToName(i - 1)}"), lpSet)))
+      quantifiedVars = quantifiedVars ++ (cl.typeVars.reverse.map(i => lpOlTypedTyVar(lpOlConstantTerm(s"T${intToName(i - 1)}"))))
       // Add implicitly quantified typed variables
       val (namedFVEnumerationLP, bVarMap, usedSymbolsUpdated) = clauseVars2LP(cl.implicitlyBound, sig, usedSymbols)
       quantifiedVars = quantifiedVars ++ namedFVEnumerationLP
@@ -242,7 +242,7 @@ object Encodings {
     t match {
       // Constant symbols
       case Symbol(id) => val name = sig(id).name
-        val symbol = tptpDefinedSymbolMap.getOrElse(name, lpOlConstantTerm(lpEscapeName(name,sig)))
+        val symbol = tptpDefinedSymbolMap.getOrElse(name, lpEscapeTerm(name,sig))
         (symbol, usedSymbols+symbol)
       // Numbers
       case Integer(n) => throw new Error(s"integers are not encoded yet ${t.pretty}") //n.toString
@@ -251,7 +251,7 @@ object Encodings {
       // Give Bound variables names
       case Bound(_, scope) =>
         val (encType, usedSymbolsUpdated) = type2LP(t.ty, sig, usedSymbols)
-        (lpOlTypedVar(lpOlConstantTerm(bVars(scope)),encType),usedSymbolsUpdated) //throw new Error(s"bound vars are not encoded yet ${t.pretty}") //bVars(scope)
+        (lpOlTypedTermVar(lpOlConstantTerm(bVars(scope)),encType),usedSymbolsUpdated) //throw new Error(s"bound vars are not encoded yet ${t.pretty}") //bVars(scope)
 
       // Unary connectives
       case Not(t2) =>
@@ -266,7 +266,7 @@ object Encodings {
         newBVars foreach { s_ty =>
           val (encType, usedSymbolsTyNew) = type2LP(s_ty._2, sig, usedSymbolsQuant)
           usedSymbolsQuant = usedSymbolsTyNew
-          quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType)
+          quantifiedVars = quantifiedVars :+ lpOlTypedTermVar(lpOlConstantTerm(s_ty._1),encType)
         }
         (lpOlQuantifiedTerm(lpOlForAll,quantifiedVars,encBody), usedSymbolsQuant+lpOlForAll)
       case Exists(_) =>
@@ -279,7 +279,7 @@ object Encodings {
         newBVars foreach { s_ty =>
           val (encType, usedSymbolsTyNew) = type2LP(s_ty._2, sig, usedSymbolsQuant)
           usedSymbolsQuant = usedSymbolsTyNew
-          quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1), encType)
+          quantifiedVars = quantifiedVars :+ lpOlTypedTermVar(lpOlConstantTerm(s_ty._1), encType)
         }
         (lpOlQuantifiedTerm(lpOlExists, quantifiedVars, encBody), usedSymbolsQuant + lpOlExists)
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet 3 ${t.pretty}")
@@ -310,7 +310,11 @@ object Encodings {
         val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
         val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
         (lpOlUntypedBinaryConnectiveTerm(lpImp,encodedTl,encodedTr), updatedUsedSymbolsR + lpImp)
-      case t1 <= t2 => throw new Error(s"encountered un-encoded connective <= ${t.pretty}")
+      case tr <= tl =>
+        //throw new Error(s"encountered un-encoded connective <= ${t.pretty}")
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
+        (lpOlUntypedBinaryConnectiveTerm(lpImp, encodedTl, encodedTr), updatedUsedSymbolsR + lpImp)
       case t1 <=> t2 => throw new Error(s"encountered un-encoded connective <=> ${t.pretty}")
       case t1 ~& t2 => throw new Error(s"encountered un-encoded connective ~& ${t.pretty}")
       case t1 ~||| t2 => throw new Error(s"encountered un-encoded connective ~||| ${t.pretty}")
@@ -329,7 +333,7 @@ object Encodings {
           newBVars foreach { s_ty =>
             val (encType, updatedUsedSymbols0) = type2LP(s_ty._2, sig, updatedUsedSymbols)
             updatedUsedSymbols = updatedUsedSymbols0
-            abstractions = abstractions :+ (lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType)) //todo: for polymorphy we might also need to use Scheme types here
+            abstractions = abstractions :+ (lpOlTypedTermVar(lpOlConstantTerm(s_ty._1),encType)) //todo: for polymorphy we might also need to use Scheme types here
             // todo: summarize same types into one bracket
           }
           (lpOlLambdaTerm(abstractions,encBody), updatedUsedSymbols)

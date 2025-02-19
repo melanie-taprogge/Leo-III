@@ -4,7 +4,7 @@ import leo.datastructures.Literal.{asTerm, mkLit}
 import leo.modules.output.LPoutput.Encodings._
 import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term}
 import leo.modules.HOLSignature._
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.lpDatastructures.{lpSet, _}
 import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
@@ -251,7 +251,10 @@ object ModularProofEncoding {
                   Seq.empty
               }
               Out.lp_debug_info(s"Witness-Term is needed to apply funext to ${encOrigLit.pretty} for types ${encTypes.map(_.pretty)}")
-              appliedVars = appliedVars ++ encTypes.map(lpWitness(_))
+              appliedVars = appliedVars ++ encTypes.map(ty => ty match {
+                case ty0 : lpOlType => lpWitness(ty0)
+                case _ => throw new Exception(s"trying to generate witness term for a type that is not an encoded HOL type")
+              })
             }
 
             appliedVars foreach { appliedVar =>
@@ -1205,7 +1208,7 @@ object ModularProofEncoding {
         val bVarsParentEq = clauseVars2LP(parent.implicitlyBound, sig, Set.empty)._2
         var litCount = 0
         rewriteenLits.foreach {encLit =>
-          val (patternTerm, rewrittenLit, counter, rwUnderBinder) = findRWTerm0(rwLhs, encLit, rwRhs)
+          val (patternTerm, rewrittenLit, counter, rwUnderBinder) = findRWTerm0(Seq((rwLhs, rwRhs)).toMap, encLit)
           if (rwUnderBinder) {
             allTransformationsEncoded = false
             Out.lp_debug_info(s"Rewriting-Tactic can not be used on literal of the parent clause: ${encLit} since term is under binder")
@@ -1275,26 +1278,42 @@ object ModularProofEncoding {
       // apply substitution to a typed variable
       if (subsMap.contains(var0.name.pretty)) {
         subsMap(var0.name.pretty) match {
-          case lpOlTypedVar(name1, _) => lpOlTypedVar(name1, var0.ty)
-          case lpOlUntypedVar(name1) => lpOlTypedVar(lpOlConstantTerm(name1.pretty), var0.ty)
-          case lpOlConstantTerm(name1) => lpOlTypedVar(lpOlConstantTerm(name1), var0.ty)
+          case lpOlTypedTermVar(name1, ty1) => lpOlTypedTermVar(name1, ty1)
+          case lpOlTypedTyVar(name1) => lpOlTypedTyVar(name1)
+          case lpOlUntypedVar(lpOlConstantTerm(name1)) =>
+            var0.ty match {
+              case ty0 : lpOlType => lpOlTypedTermVar(lpOlConstantTerm(name1), ty0)
+              case `lpSet` => lpOlTypedTyVar(lpOlConstantTerm(name1))
+              case _  => throw new Exception(s"LP encoding: trying to substitute expected OL variable ${var0.pretty}, but type is ${var0.ty.pretty}")
+            }
+          case lpOlConstantTerm(name1) =>
+            var0.ty match {
+              case ty0: lpOlType => lpOlTypedTermVar(lpOlConstantTerm(name1), ty0)
+              case `lpSet` => lpOlTypedTyVar(lpOlConstantTerm(name1))
+              case _ => throw new Exception(s"LP encoding: trying to substitute expected OL variable ${var0.pretty}, but type is ${var0.ty.pretty}")
+            }
           case _ => throw new Exception(s"Error in lp Encoding: trying to substitute variable ${var0.pretty} with ${subsMap(var0.name.pretty)}")
         }
       } else var0
     }
+
     t match{
       case `lpOlTop` =>
         lpOlTop
       case `lpOlBot` => lpOlBot
       case lpOlConstantTerm(name) =>
         subsMap.getOrElse(name,lpOlConstantTerm(name))
-      case lpOlTypedVar(name, ty) =>
+      case lpOlTypedTermVar(name, ty) =>
+        // when we encounter the typed var that was quantified in the body, we want to replace it!
+        subsMap.getOrElse(name.a, t)
+      case lpOlTypedTyVar(name) =>
         // when we encounter the typed var that was quantified in the body, we want to replace it!
         subsMap.getOrElse(name.a, t)
       case lpOlUntypedVar(lpConstantTerm(name)) =>
         if (subsMap.contains(name)) {
           subsMap(name) match {
-            case lpOlTypedVar(name1,_) => lpOlUntypedVar(name1)
+            case lpOlTypedTermVar(name1,_) => lpOlUntypedVar(name1)
+            case lpOlTypedTyVar(name1) => lpOlUntypedVar(name1)
             case lpOlUntypedVar(name1) => lpOlUntypedVar(lpOlConstantTerm(name1.pretty))
             case lpOlConstantTerm(name1) => lpOlUntypedVar(lpOlConstantTerm(name1))
             case _ => throw new Exception(s"Error in lp Encoding: trying to substitute variable ${t.pretty} with ${subsMap(name).pretty}")

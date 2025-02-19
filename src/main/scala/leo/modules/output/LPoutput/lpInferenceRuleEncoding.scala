@@ -35,10 +35,10 @@ object lpInferenceRuleEncoding {
     }
 
     val T = lpOlUserDefinedPolyType("T")
-    val x = lpOlTypedVar(lpOlConstantTerm("x"),T)
-    val y = lpOlTypedVar(lpOlConstantTerm("y"),T)
-    val z = lpOlTypedVar(lpOlConstantTerm("z"),T)
-    val v = lpOlTypedVar(lpOlConstantTerm("v"),T)
+    val x = lpOlTypedTermVar(lpOlConstantTerm("x"),T)
+    val y = lpOlTypedTermVar(lpOlConstantTerm("y"),T)
+    val z = lpOlTypedTermVar(lpOlConstantTerm("z"),T)
+    val v = lpOlTypedTermVar(lpOlConstantTerm("v"),T)
 
     override def ty: lpMlType = {
       if (polarity) {
@@ -98,9 +98,9 @@ object lpInferenceRuleEncoding {
 
     val T = lpOlUserDefinedMonoType("T")
     val S = lpOlUserDefinedMonoType("S")
-    val f = lpOlTypedVar(lpOlConstantTerm("f"),lpOlFunctionType(Seq(S,T)))
-    val g = lpOlTypedVar(lpOlConstantTerm("g"),lpOlFunctionType(Seq(S,T)))
-    val x = lpOlTypedVar(lpOlConstantTerm("x"),S)
+    val f = lpOlTypedTermVar(lpOlConstantTerm("f"),lpOlFunctionType(Seq(S,T)))
+    val g = lpOlTypedTermVar(lpOlConstantTerm("g"),lpOlFunctionType(Seq(S,T)))
+    val x = lpOlTypedTermVar(lpOlConstantTerm("x"),S)
 
     override def ty: lpMlType = lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g).prf,lpOlTypedBinaryConnectiveTerm(lpEq,S,lpOlFunctionApp(f,Seq(Left(x))),lpOlFunctionApp(g,Seq(Left(x)))).prf))
 
@@ -161,7 +161,7 @@ object lpInferenceRuleEncoding {
       } else if (polarity & lhsNeg) {
         lpProofScript(Seq(lpProofScriptStringProof("assume x y h;\n    have em_sym: π(¬ y ∨ y)\n        {refine ∨ₑ(em y)  _ _ \n            {assume h2;\n            refine ∨ᵢ₂ h2}\n            {assume h2;\n            refine ∨ᵢ₁ h2}};\n    refine ind_eq h (λ z, ¬ z ∨ y) em_sym;")))
       } else if (!polarity & lhsNeg) {
-        lpProofScript(Seq(lpProofScriptStringProof("assume x y h1;\n    refine ∨ₑ (em x) _ _\n        {assume h2;\n        refine ∨ᵢ₁ h2}\n        {assume h2;\n        have H1: π y\n            {have H2: π (¬ y) → π ⊥\n                {assume h3;\n                have H3: π x → π y\n                    {assume h4;\n                    refine ⊥ₑ (h2 h4)};\n                have H4: π y → π x\n                    {assume h4;\n                    refine ⊥ₑ (h3 h4)};\n                refine h1 (propExt x y H3 H4)};\n            refine npp (y) H2};\n        refine ∨ᵢ₂ H1};")))
+        lpProofScript(Seq(lpProofScriptStringProof("assume x y h1;\n    refine ∨ₑ (em x) _ _\n        {assume h2;\n        refine ∨ᵢ₁ h2}\n        {assume h2;\n        have H1: π y\n            {have H2: π (¬ y) → π ⊥\n                {assume h3;\n                have H3: π x → π y\n                    {assume h4;\n                    refine ⊥ₑ (h2 h4)};\n                have H4: π y → π x\n                    {assume h4;\n                    refine ⊥ₑ (h3 h4)};\n                refine h1 (propExt x y H3 H4)};\n            refine dne (y) H2};\n        refine ∨ᵢ₂ H1};")))
       } else {
         lpProofScript(Seq(lpProofScriptStringProof("assume x y h1;\n    refine ∨ₑ (em x) _ _\n        {assume h2;\n        have H1: π (y) → π ⊥\n            {assume h3;\n            have H2: π(x) → π(y)\n                {assume h4;\n                refine h3};\n            have H3: π(y) → π(x)\n                {assume h4;\n                refine h2};\n            refine h1 (propExt x y H2 H3)};\n        refine ∨ᵢ₂ H1}\n        {assume h2;\n        refine ∨ᵢ₁ h2}")))
       }
@@ -219,8 +219,8 @@ object lpInferenceRuleEncoding {
     }
 
     val a = lpOlUserDefinedMonoType("a")
-    val x = lpOlTypedVar(lpOlConstantTerm("x"),a)
-    val y = lpOlTypedVar(lpOlConstantTerm("y"),a)
+    val x = lpOlTypedTermVar(lpOlConstantTerm("x"),a)
+    val y = lpOlTypedTermVar(lpOlConstantTerm("y"),a)
     // do i need to do this differently such that I can type x and y?
 
     override def ty: lpMlType =

@@ -110,7 +110,7 @@ object SimplificationEncoding {
   case object Simp10_eq extends simplificationRules {
 
     val T = lpOlUserDefinedType("T")
-    val x1 = lpOlTypedVar(lpOlConstantTerm("x"),T)
+    val x1 = lpOlTypedTermVar(lpOlConstantTerm("x"),T)
 
     override def name: lpConstantTerm = lpConstantTerm("simp10_eq")
 
@@ -156,7 +156,7 @@ object SimplificationEncoding {
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x, lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,x))).prf
 
     override def proof: lpProofScript = {
-      lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt x (¬ ¬ x) _ _ \n        {assume h1 h2;\n        refine h2 h1}\n        {assume h1;\n        refine npp x h1}")))
+      lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt x (¬ ¬ x) _ _ \n        {assume h1 h2;\n        refine h2 h1}\n        {assume h1;\n        refine dne x h1}")))
     }
 
     override def dec: lpDeclaration = lpDeclaration(Simp17_eq.name, Seq(x), ty)
