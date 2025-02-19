@@ -12,7 +12,7 @@ import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpDne, permLib}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
-import java.nio.file.{Files, Paths}
+import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
 import scala.sys.process._
@@ -170,10 +170,58 @@ object LPoutput {
     else ("no role or conjecture?", lpProofScript(Seq.empty), Set.empty, Option("no role or conjecture?"))
   }
 
+  def createLambdapiFiles(outputFolderPath: Path, nameLpOutputFolder:String, pkgFileName: String, proofFileName: String): Unit = {
+
+    val pkgFileContent =
+      s"""package_name = $nameLpOutputFolder
+         |root_path    = $nameLpOutputFolder
+         |""".stripMargin
+
+    // Write the package file
+    val pkgFilePath = outputFolderPath.resolve(pkgFileName)
+    Files.write(
+      pkgFilePath,
+      pkgFileContent.getBytes(StandardCharsets.UTF_8),
+      StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+    )
+
+    // Create the makefile
+    val makefileContent = s"""|.POSIX:
+                              |SRC = $proofFileName.lp
+                              |OBJ = $${SRC:.lp=.lpo}
+                              |.SUFFIXES:
+                              |
+                              |all: $${OBJ}
+                              |
+                              |install: $${OBJ} $pkgFileName
+                              |\tlambdapi install $pkgFileName $${OBJ} $${SRC}
+                              |
+                              |uninstall:
+                              |\tlambdapi uninstall $pkgFileName
+                              |
+                              |clean:
+                              |\trm -f $${OBJ}
+                              |
+                              |.SUFFIXES: .lp .lpo
+                              |
+                              |.lp.lpo:
+                              |\tlambdapi check --gen-obj $$<
+                              |""".stripMargin
+
+
+    // Write the Makefile using Files.write
+    val makefilePath = outputFolderPath.resolve("Makefile")
+    Files.write(
+      makefilePath,
+      makefileContent.getBytes(StandardCharsets.UTF_8),
+      StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+    )
+    println(s"Makefile written to: ${makefilePath.toAbsolutePath}")
+  }
 
   def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String):Unit={
 
-    val lpOutputPath = s"${lpOutputPath0}${nameLpOutputFolder}/"
+    val lpOutputPath = Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)//s"${lpOutputPath0}${nameLpOutputFolder}/"
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
     val permLibStr: String ={
@@ -389,54 +437,33 @@ object LPoutput {
       Out.info("Generating Signature")
       val rulesFileSB = generateSignature(usedSymbols, nameLpOutputFolder)
 
-      // initiate a lambdapi package
-
-      val Initcommand = Seq("/bin/bash", "-c", s"cd $lpOutputPath0 && lambdapi init $nameLpOutputFolder")
-
-      val initLP = Try(Initcommand.!)
-
-      initLP match {
-        case Success(0) =>
-          val makeCommand = Seq("/bin/bash", "-c", s"cd $lpOutputPath0/$nameLpOutputFolder && make")
-          val makeResult = Try(makeCommand.!)
-
-          makeResult match {
-            case Success(_) => Out.lp_debug_info("Make command for Lambdapi executed successfully.")
-            case Failure(exception) =>
-              Out.lp_debug_info(s"Make command failed: ${exception.getMessage}")
-          }
-
-        case Success(1) =>
-          Out.lp_debug_info(s"lambdapi package already exists, overwriting")
-
-        case _ =>
-          Out.lp_debug_info(s"lambdapi init failed")
-          val mkdirCommand = s"mkdir $lpOutputPath0/$nameLpOutputFolder"
-          val mkDirRes = Try(mkdirCommand.!)
-          mkDirRes match {
-            case Success(_) =>
-              Out.lp_debug_info("Saving Lambdapi files in given directory")
-            case Failure(exception) =>
-              Out.lp_debug_info(s"Unable to create directory for output files")
-          }
+      // create a folder for the lambdapi package
+      // Create the output directory if it doesn't exist
+      if (!Files.exists(lpOutputPath)) {
+        Files.createDirectory(lpOutputPath)
+        println(s"Folder '$nameLpOutputFolder' created.")
+      } else {
+        println(s"Folder '$nameLpOutputFolder' already exists.")
       }
 
       // write the files
       Out.info("Writing the Lambdapi files")
 
-      val exttFilePath = Paths.get(s"${lpOutputPath}${nameLogicFile}.lp")
+      val exttFilePath = lpOutputPath.resolve(s"$nameLogicFile.lp")
       Files.write(exttFilePath, ExTTenc.getBytes(StandardCharsets.UTF_8))
 
-      //
-      val permLibFilePath = Paths.get(s"${lpOutputPath}${permlibFile}.lp")
+      val permLibFilePath = lpOutputPath.resolve(s"$permlibFile.lp")
       Files.write(permLibFilePath, permLib.getBytes(StandardCharsets.UTF_8))
 
-      val rulesFilePath = Paths.get(s"${lpOutputPath}${nameRulesFile}.lp")
+      val rulesFilePath = lpOutputPath.resolve(s"$nameRulesFile.lp")
       Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
-      val proofFilePath = Paths.get(s"${lpOutputPath}${nameProofFile}.lp")
+      val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
+      // create the Makefile and the pkg file
+      val pkgFileName = "lambdapi.pkg"
+      createLambdapiFiles(lpOutputPath, nameLpOutputFolder, pkgFileName, nameProofFile)
 
       /*
       if (lpInitSuccess) {
