@@ -163,7 +163,7 @@ object LPoutput {
             ("LiftEq", encodingLiftEq._1, encodingLiftEq._2, encodingLiftEq._3)
           case _ =>
             val parentIDs = parentInLpEncID.map(id => id.name)
-            ("", lpProofScript(Seq.empty), Set.empty, Option(s"Rule ${rule.name} not encoded yet, parents are: ${parentIDs.mkString(", ")}"))
+            ("", lpProofScript(Seq.empty), Set.empty, Option(s"Unencoded rule ${rule.name} applied to ${parentIDs.mkString(", ")}"))
         }
       }
     } //todo: either introduce else or filter out conj before!
@@ -216,7 +216,7 @@ object LPoutput {
       makefileContent.getBytes(StandardCharsets.UTF_8),
       StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
     )
-    println(s"Makefile written to: ${makefilePath.toAbsolutePath}")
+    Out.lp_debug_info(s"Makefile written to: ${makefilePath.toAbsolutePath}")
   }
 
   def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String):Unit={
@@ -238,8 +238,6 @@ object LPoutput {
 
       var usedSymbols:Set[lpStatement] = Set.empty // always add them because they are necessary for equality tactics. Todo: handle differently
       var parameters: (Int,Int,Int,Int) = (0,0,0,0)
-
-      proofFileSB.append("// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
 
       // add symbols of the user defined TPTP problem signature if necessary
 
@@ -305,7 +303,11 @@ object LPoutput {
           }
         }
       }
-      proofFileSB.append(typeDecSB).append(defSB)
+      val objectDecSB = typeDecSB.append(defSB)
+      if (objectDecSB.length != 0){
+        proofFileSB.append("// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
+        proofFileSB.append(objectDecSB)
+      }
 
       // encode the clauses representing the steps
       // todo: Also make it possible to just output one long lambda-term
@@ -316,7 +318,7 @@ object LPoutput {
         var axCounter = 0
         val conjName = lpConstantTerm(s"negatedConjecture")
 
-      proofFileSB.append("\n\n// PROBLEM ENCODING //////////////////////////////////////\n\n")
+      val problemEncSB: mutable.StringBuilder = new StringBuilder()
 
         var conjecture : lpOlTerm = lpOlNothing
 
@@ -338,7 +340,7 @@ object LPoutput {
             val (encClause, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
             usedSymbols = usedSymbolsNew
             val axName = lpConstantTerm(s"axiom$axCounter")
-            proofFileSB.append(lpDeclaration(axName, Seq.empty, encClause).pretty)
+            problemEncSB.append(lpDeclaration(axName, Seq.empty, encClause).pretty)
             identicalSteps += (stepId -> axName)
             axCounter = axCounter + 1
           }else {
@@ -397,13 +399,18 @@ object LPoutput {
               } else {
                 Out.lp_debug_info(s"Encoding finished!\n")
                 // add the encoded proofs to the overall proof as substeps
-                proofSteps = proofSteps :+ lpProofScriptCommentLine(s"${step.annotation.fromRule}")
+                proofSteps = proofSteps :+ lpProofScriptCommentLine(ruleName)
                 proofSteps = proofSteps :+ lpHave(stepName,encStep,proofTerm)
                 // and add the necessary symbols to the generated Signature
                 usedSymbols = usedSymbols ++ updatedUsedSymbols
               }
             }
           }
+      }
+
+      if (problemEncSB.length != 0) {
+        proofFileSB.append("\n\n// PROBLEM ENCODING //////////////////////////////////////\n\n")
+        proofFileSB.append(problemEncSB)
       }
       Out.info("Done enocoding the inference rules")
 
@@ -443,7 +450,7 @@ object LPoutput {
         Files.createDirectory(lpOutputPath)
         println(s"Folder '$nameLpOutputFolder' created.")
       } else {
-        println(s"Folder '$nameLpOutputFolder' already exists.")
+        println(s"Folder '$nameLpOutputFolder' already exists, overwriting files.")
       }
 
       // write the files

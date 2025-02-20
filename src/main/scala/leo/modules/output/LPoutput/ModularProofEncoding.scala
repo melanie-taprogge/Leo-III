@@ -4,6 +4,7 @@ import leo.datastructures.Literal.{asTerm, mkLit}
 import leo.modules.output.LPoutput.Encodings._
 import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term}
 import leo.modules.HOLSignature._
+import leo.modules.calculus.freshVarGen
 import leo.modules.output.LPoutput.lpDatastructures.{lpSet, _}
 import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
@@ -29,7 +30,6 @@ object ModularProofEncoding {
     var usedSymbols: Set[lpStatement] = Set.empty
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     var allRewriteSteps: Seq[lpProofScriptStep] = Seq.empty
-    var polaritySwitchCount: Int = 0
 
     // The modular proof script can consist of the following steps:
     // 1. Abstract over free variables
@@ -47,6 +47,7 @@ object ModularProofEncoding {
     if (freeVarsChild.nonEmpty) allSteps = allSteps :+ lpAssume(freeVarsChild)
 
     // 2. Apply polarity switch to the literals of the parent if applicable
+    var litCount = 0
     parent.cl.lits foreach { origLit =>
       if (origLit.equational){
         (origLit.left, origLit.right) match{
@@ -59,8 +60,7 @@ object ModularProofEncoding {
             // i)  Define an equality term to rewrite (¬ a) = (¬ b) to a = b using the have tactic
             val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,encLeft,encRight),term2LP(asTerm(origLit),bVarMap,sig)._1)
             val polaritySwitchStep = lpRefine(polaritySwitchEqLit.instanciate(encLeft,encRight))
-            val polaritySwitchName = s"PolaritySwitch_$polaritySwitchCount"
-            polaritySwitchCount = polaritySwitchCount + 1
+            val polaritySwitchName = s"PolaritySwitch_lit$litCount"
             val havePolaritySwitchStep = lpHave(polaritySwitchName,equalityToProve.prf,lpProofScript(Seq(polaritySwitchStep)))
             allSteps = allSteps :+ havePolaritySwitchStep
             usedSymbols = usedSymbols + polaritySwitchEqLit
@@ -86,8 +86,7 @@ object ModularProofEncoding {
           // i)  Define an equality term to rewrite (¬ ¬ a) to a using the have tactic
           val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encLeft, lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,encLeft)))
           val polaritySwitchStep = lpRefine(Simp17_eq.instanciate(encLeft))
-          val polaritySwitchName = s"PolaritySwitch$polaritySwitchCount"
-          polaritySwitchCount = polaritySwitchCount + 1
+          val polaritySwitchName = s"PolaritySwitch_lit$litCount"
           val havepolaritySwitchStep = lpHave(polaritySwitchName, equalityToProve.prf, lpProofScript(Seq(polaritySwitchStep)))
           allSteps = allSteps :+ havepolaritySwitchStep
           usedSymbols = usedSymbols + Simp17_eq
@@ -101,6 +100,7 @@ object ModularProofEncoding {
 
         case _ => // nothing happens in this case
       }
+      litCount = litCount + 1
     }
     allSteps = allSteps ++ allRewriteSteps
 
@@ -193,6 +193,11 @@ object ModularProofEncoding {
         val edLit = editedLiteralsMap.getOrElse(origLit, origLit)
 
         if (edLit != origLit) {
+
+          // test if the application of funExt to the literal changes the sides of the literal todo: replace by builtin beta reduction and comparison modulo
+          //val vargen = freshVarGen(parent.cl)
+          //val newVar = vargen(edLit.left.ty._funDomainType)
+          //val appliedLeft = Term.mkTermApp()
 
           val encOrigLitLhs = term2LP(origLit.left, bVarMap, sig)._1
           val encOrigLitRhs = term2LP(origLit.right, bVarMap, sig)._1
@@ -1172,8 +1177,8 @@ object ModularProofEncoding {
         assert(rewriteEqClause.lits.length == 1, s"trying to encode RW rule application with RW clause of length ${rewriteEqClause.lits.length}")
         if (!rewriteEq.equational) {
           // 2 a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
-          val transformationStepName = s"TransformToEqLits_$transformationsRwCounter"
           transformationsRwCounter = transformationsRwCounter + 1
+          val transformationStepName = if (transformationsRwCounter == 1) s"TransformToEqLits_${transformationsRwCounter}" else "TransformToEqLits"
           // Choose the fitting rule for the transformation todo: aso use the general skript here
           val (haveTransformStep, usedSymbols0) = if (rwPol) {
             val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTop, rwLhs)

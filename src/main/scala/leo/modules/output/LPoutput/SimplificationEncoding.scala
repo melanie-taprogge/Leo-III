@@ -66,7 +66,7 @@ object SimplificationEncoding {
 
     val x1 = lpOlConstantTerm("x")
 
-    override def name: lpConstantTerm = lpConstantTerm("simp7_eq")
+    override def name: lpConstantTerm = lpConstantTerm("simp7")
 
     // π (x = (x ∨ ⊥))
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x1,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,lpOlBot)).prf
@@ -112,7 +112,7 @@ object SimplificationEncoding {
     val T = lpOlUserDefinedType("T")
     val x1 = lpOlTypedTermVar(lpOlConstantTerm("x"),T)
 
-    override def name: lpConstantTerm = lpConstantTerm("simp10_eq")
+    override def name: lpConstantTerm = lpConstantTerm("simp10")
 
     // (T : Set) (x : τ T): (π (⊥ = (¬ (x = x))))
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlTypedBinaryConnectiveTerm(lpInEq, T, x1.name, x1.name)).prf
@@ -132,7 +132,7 @@ object SimplificationEncoding {
 
   case object Simp16_eq extends simplificationRules {
 
-    override def name: lpConstantTerm = lpConstantTerm("simp16_eq")
+    override def name: lpConstantTerm = lpConstantTerm("simp16")
 
     // (π (⊥ = (¬ ⊤)))
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype, lpOlBot, lpOlUnaryConnectiveTerm(lpNot,lpOlTop)).prf

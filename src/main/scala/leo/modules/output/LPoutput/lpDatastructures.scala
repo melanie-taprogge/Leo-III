@@ -135,7 +135,7 @@ object lpDatastructures {
   case class lpMlDependType(vars: Seq[lpVariable], body: lpMlType) extends lpMlType {
     override def pretty: String = {
       val quantification = if (vars.nonEmpty) s"${lpPi.pretty} ${vars.map(var0 => var0.pretty).mkString(s", ${lpPi.pretty} ")}, " else ""
-      s"($quantification${body.pretty})"
+      s"$quantification${body.pretty}"
     }
     //change nothing when lifting to meta type
     override def lift2Meta: lpMlType = lpMlDependType(vars, body)
@@ -337,7 +337,7 @@ object lpDatastructures {
   }
 
   case class liftedProp(t: lpOlTerm) extends lpMlType {
-    override def pretty: String = s"(${lpPrf.pretty} ${t.pretty})"
+    override def pretty: String = s"${lpPrf.pretty} ${t.pretty}"
 
     // change nothing when encoding as meta type
     override def lift2Meta: lpMlType = liftedProp(t)
@@ -555,7 +555,10 @@ object lpDatastructures {
   }
 
   case class lpOlUntypedBinaryConnectiveTerm_multi(connective: lpOlBinaryConnective, args: Seq[lpOlTerm]) extends lpOlConnectiveTerm {
-    override def pretty: String = s"(${args.map(arg => arg.pretty).mkString(s" ${connective.pretty} ")})"
+    override def pretty: String = {
+      val term = s"${args.map(arg => arg.pretty).mkString(s" ${connective.pretty} ")}"
+      if (args.length == 1) term else s"($term)"
+    }
     override def prf: liftedProp = liftedProp(lpOlUntypedBinaryConnectiveTerm_multi(connective, args))
   }
 
