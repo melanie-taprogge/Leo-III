@@ -371,11 +371,12 @@ object ModularProofEncoding {
   ////////// Primary Inference Rules
   ////////////////////////////////////////////////////////////////
 
-  def encEqFactLiterals(otherLit: Literal, maxLit: Literal, uc1Orig: Literal, uc2Orig: Literal, parent: Clause, child: Clause, bVarMap: Map[Int, String], sourceBefore: lpTerm, nameStep: lpOlTerm, sig: Signature): (lpProofScriptStep, Set[lpStatement]) = {
+  def encEqFactLiterals(otherLit: Literal, maxLit: Literal, uc1Orig: Literal, uc2Orig: Literal, parent: Clause, child: Clause, bVarMap: Map[Int, String], sourceBefore: lpTerm, nameStep: lpOlTerm, sig: Signature): (lpProofScriptStep, Set[lpStatement], Boolean) = {
     var usedSymbols: Set[lpStatement] = Set.empty
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     val nameAssumption = lpOlConstantTerm("h1")
     var lastStepName: lpTerm = nameAssumption
+    var canEncode: Boolean = true
 
 
     var otherLit_l0: lpOlTerm = term2LP(otherLit.left, bVarMap, sig)._1
@@ -463,7 +464,10 @@ object ModularProofEncoding {
         val (newSteps, newUsedSymbols, newCanEncode) = transformLiteral(transformOtherLit0._1,otherLitEnc,permutaion(posOtherLit),lenParent)
         allTransformSteps =  allTransformSteps ++ newSteps
         usedSymbols = usedSymbols ++ newUsedSymbols
-        if (!newCanEncode) throw new Exception(s"unable to do eqFactoring transformation for other lit")
+        if (!newCanEncode) {
+          canEncode = false
+          Out.lp_debug_info(s"unable to do eqFactoring transformation for other lit")
+        }
         Out.lp_debug_info(s"transformed other literal to ${transformOtherLit0._1.pretty}")
         transformOtherLit0
       }else{
@@ -490,7 +494,10 @@ object ModularProofEncoding {
         val (newSteps, newUsedSymbols, newCanEncode) = transformLiteral(transformMaxLit0._1,maxLitEnc, permutaion(posMaxLit), lenParent)
         allTransformSteps = allTransformSteps ++ newSteps
         usedSymbols = usedSymbols ++ newUsedSymbols
-        if (!newCanEncode) throw new Exception(s"unable to do eqFactoring transformation for maxLit")
+        if (!newCanEncode) {
+          canEncode = false
+          Out.lp_debug_info(s"unable to do eqFactoring transformation for maxLit")
+        }
         Out.lp_debug_info(s"transformed max literal to ${transformMaxLit0._1.pretty}")
         transformMaxLit0
       } else {
@@ -529,7 +536,10 @@ object ModularProofEncoding {
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       usedSymbols = usedSymbols ++ newUsedSymbols
       currentLits = currentLits.updated(0,childOtherLitEnc)
-      if (!newCanEncode) throw new Exception(s"unable to do back transformation for other lit")
+      if (!newCanEncode) {
+        canEncode = false
+        Out.lp_debug_info(s"unable to do back transformation for other lit")
+      }
       Out.lp_debug_info(s"transformed other literal to ${childOtherLitEnc.pretty}")
     }
     if (currentLits(1) != childUc1Enc){
@@ -537,7 +547,10 @@ object ModularProofEncoding {
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       usedSymbols = usedSymbols ++ newUsedSymbols
       currentLits = currentLits.updated(1,childUc1Enc)
-      if (!newCanEncode) throw new Exception(s"unable to do back transformation for UC1")
+      if (!newCanEncode) {
+        canEncode = false
+        Out.lp_debug_info(s"unable to do back transformation for UC1")
+      }
       Out.lp_debug_info(s"transformed UC1 to ${childUc1Enc.pretty}")
     }
     if (currentLits(2) != childUc2Enc) {
@@ -545,7 +558,10 @@ object ModularProofEncoding {
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       usedSymbols = usedSymbols ++ newUsedSymbols
       currentLits = currentLits.updated(2,childUc2Enc)
-      if (!newCanEncode) throw new Exception(s"unable to do back transformation for UC2")
+      if (!newCanEncode) {
+        canEncode = false
+        Out.lp_debug_info(s"unable to do back transformation for UC2")
+      }
       Out.lp_debug_info(s"transformed UC2 to ${childUc2Enc.pretty}")
     }
 
@@ -565,7 +581,7 @@ object ModularProofEncoding {
 
     val completeHaveStep = lpHave(nameStep.pretty,typeOfWholeProof,lpProofScript(allSteps))
 
-    (completeHaveStep,usedSymbols)
+    (completeHaveStep,usedSymbols, canEncode)
 
   }
   def encEqFactLiteralsOld(otherLit: Literal, maxLit: Literal, uc1Orig: Literal, cc2Orig: Literal, parent: Clause, child: Clause, bVarMap: Map[Int, String], sourceBefore: lpTerm, nameStep: lpOlTerm, sig: Signature): (lpProofScriptStep, Set[lpStatement]) = {
@@ -857,7 +873,7 @@ object ModularProofEncoding {
       // 2. Identify the two literals to be unified and compose a function proving the rule application including all necessary transformations:
       val factStepName = lpOlConstantTerm("WholeEqFactStep")
       if (parent.cl.lits.length == 2) {
-        val (encFactoring, usedSymbolsNew) = encEqFactLiterals(otherLit, maxLit, ur1, ur2, parent.cl, child.cl, bVarMap, lastStep, factStepName, sig)
+        val (encFactoring, usedSymbolsNew, canEncode) = encEqFactLiterals(otherLit, maxLit, ur1, ur2, parent.cl, child.cl, bVarMap, lastStep, factStepName, sig)
         allSteps = allSteps :+ encFactoring
         lastStep = factStepName
         usedSymbols = usedSymbols ++ usedSymbolsNew
@@ -865,7 +881,8 @@ object ModularProofEncoding {
         allSteps = allSteps :+ lpRefine(lpFunctionApp(lastStep, Seq(lpFunctionApp(parentNameLpEnc, applySymbolsToParent))))
         val wholeProof = lpProofScript(allSteps)
 
-        (wholeProof, usedSymbols, None)
+        if (canEncode) (wholeProof, usedSymbols, None)
+        else (lpProofScript(Seq(lpProofScriptAdmit())), Set.empty, Some("The LP encoding of EqFact requires some unencoded transformation"))
       } else {
         (lpProofScript(Seq(lpProofScriptAdmit())), Set.empty, Some("The LP encoding of EqFact is not implemented for the application to clauses of length more than two yet"))
         //throw new Exception(s"The LP encoding of EqFact is not implemented for the application to clauses of length more than two yet")
@@ -1177,8 +1194,8 @@ object ModularProofEncoding {
         assert(rewriteEqClause.lits.length == 1, s"trying to encode RW rule application with RW clause of length ${rewriteEqClause.lits.length}")
         if (!rewriteEq.equational) {
           // 2 a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
+          val transformationStepName = s"TransformToEqLits_${transformationsRwCounter}"
           transformationsRwCounter = transformationsRwCounter + 1
-          val transformationStepName = if (transformationsRwCounter == 1) s"TransformToEqLits_${transformationsRwCounter}" else "TransformToEqLits"
           // Choose the fitting rule for the transformation todo: aso use the general skript here
           val (haveTransformStep, usedSymbols0) = if (rwPol) {
             val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTop, rwLhs)

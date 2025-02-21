@@ -187,7 +187,7 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
       case Atom(key,_)             =>  fuseSymbolMap(Map(key -> (1,1)), args.symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap)
       case HeadClosure(Atom(key,_), _) => fuseSymbolMap(Map(key -> (1,1)), args.symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap)
       case HeadClosure(BoundIndex(_, scope), subs) => subs._1.substBndIdx(scope) match {
-        case BoundFront(_) => Map()
+        case BoundFront(_) => args.symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap
         case TermFront(t) => fuseSymbolMap(t.asInstanceOf[TermImpl].symbolMap, args.symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap)
         case TypeFront(_) => throw new IllegalArgumentException("Type substitute found in term substition") // This should never happen
       }

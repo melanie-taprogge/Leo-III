@@ -137,10 +137,25 @@ package object modules {
     val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof)
 
     val sb: StringBuilder = new StringBuilder()
-    (relevantSymbols union additionalSymbols).foreach { key =>
-      val name = sig.apply(key).name
-      sb.append(ToTPTP(key, typeOnly = additionalSymbols.contains(key)))
+    val allRelevantSymbols = relevantSymbols union additionalSymbols
+    val (userTypes, otherSymbols) = allRelevantSymbols.partition(key => sig(key).hasKind)
+    // first print all user types (sorts)
+    userTypes.foreach { key =>
+      sb.append(ToTPTP(key))
       sb.append("\n")
+    }
+    // then print all type declarations
+    otherSymbols.foreach { key =>
+      sb.append(ToTPTP(key, typeOnly = true))
+      sb.append("\n")
+    }
+
+    // then print definitions (except for additional symbols)
+    otherSymbols.foreach { key =>
+      if (sig(key).hasDefn && !additionalSymbols.contains(key)) {
+        sb.append(ToTPTP.definitionToTPTP(key))
+        sb.append("\n")
+      }
     }
     sb.dropRight(1).toString()
   }
