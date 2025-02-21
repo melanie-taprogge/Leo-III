@@ -229,7 +229,7 @@ package object LPoutput {
   def findRWTerm0(rwMap:Map[lpOlTerm, lpOlTerm], searchIn:lpOlTerm, rwUnderBinder:Boolean = false, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x")), currentX:Int = 0): (lpOlTerm, lpOlTerm, Int, Boolean) = {
     // find a specific subterm for the application of a rewrite operation
     // this function returns: The rewrite-pattern, the term modulo rewriting and an integer signaling how often the pattern was found.
-
+    Out.lp_debug_info(s"is ${rwMap.keySet} in $searchIn ? ${rwMap.keySet.contains(searchIn)}")
     if (rwMap.keySet.contains(searchIn)) (patternVar,rwMap(searchIn), currentX + 1, rwUnderBinder)
     else {
       searchIn match {
@@ -314,21 +314,50 @@ package object LPoutput {
       }
     }
   }
-/* todo: in order to implmement this I need proper type substitution implementation
-  def betaReduceLpApplication(term0:lpOlTerm):lpTerm ={
+
+//todo: in order to implmement this I need proper type substitution implementation
+  def betaReduceLpApplication(term0:lpOlTerm):lpOlTerm ={
     term0 match {
+      // only in this case can we reduce
       case lpOlFunctionApp(lpOlLambdaTerm(vars,body), args) =>
         assert(vars.length >= args.length)
+        Out.lp_debug_info(s"it is happending for ${term0.pretty}")
         val args0: Seq[lpOlTerm] = args.map(arg => arg match {
           case Left(term) => term
-          case Right(ty) => ty
+          case Right(ty) => throw new Exception(s"can not currently encode subst of type variables")
         })
         val substDict : Map[lpOlTerm,lpOlTerm] = vars.zip(args0).toMap
+        Out.lp_debug_info(s"rewriting with dictionary $substDict")
+        Out.lp_debug_info(s"searching in $body")
 
-        val reduced = findRWTerm0(substDict,body)
+        val reduced = findRWTerm0(substDict,body)._2
+        Out.lp_debug_info(s"reduced to ${reduced.pretty}")
+        reduced
+      // in all other cases we need to search substructures for reducable terms
+      case lpOlLambdaTerm(vars,body) =>
+        lpOlLambdaTerm(vars,betaReduceLpApplication(body))
+      case lpOlQuantifiedTerm(quantifier, vars, body) =>
+        lpOlQuantifiedTerm(quantifier, vars, betaReduceLpApplication(body))
+      case lpOlUnaryConnectiveTerm(con, term) =>
+        lpOlUnaryConnectiveTerm(con, betaReduceLpApplication(term))
+      case lpOlUntypedBinaryConnectiveTerm(con,lhs,rhs) =>
+        lpOlUntypedBinaryConnectiveTerm(con,betaReduceLpApplication(lhs),betaReduceLpApplication(rhs))
+      case lpOlUntypedBinaryConnectiveTerm_multi(con, args) =>
+        val reducedArgs = args.map(betaReduceLpApplication(_))
+        lpOlUntypedBinaryConnectiveTerm_multi(con, reducedArgs)
+      case lpOlTypedBinaryConnectiveTerm(con, ty, lhs, rhs) =>
+        lpOlTypedBinaryConnectiveTerm(con, ty, betaReduceLpApplication(lhs), betaReduceLpApplication(rhs))
+      case lpOlFunctionApp(head,args) =>
+        val reducedArgs = args.map {
+          case Left(term) => Left(betaReduceLpApplication(term))
+          case other => other
+        }
+        lpOlFunctionApp(head,args)
+      // all other possible terms should be constants
+      case _ => term0
     }
   }
- */
+
 
   def wholeHaveRewriteStep(rewriteSteps: Seq[lpProofScriptStep], nameStep: String, nameSubStep: String, before: lpOlTerm, sourceBefore: lpTerm, after: lpOlTerm): lpHave = {
     //todo: use this in my simplification steps?

@@ -435,11 +435,13 @@ object lpDatastructures {
     override def prf: liftedProp = throw new Exception(s"trying to lift ${lpElWitness.pretty} to meta")
   }
 
-  case class lpWitness(ty: lpOlType) extends lpOlTerm {
+  case class lpWitness(ty: lpType) extends lpOlTerm {
+
+    if (! ty.isInstanceOf[lpOlType]) {throw new Exception(s"trying to create a witness of meta-level type ${ty.pretty}")}
     override def pretty: String = s"(${lpElWitness.pretty} ${ty.pretty})"
     override def prf: liftedProp =
-      if (ty == lpOtype) liftedProp(lpWitness(ty: lpOlType))
-      else throw new Exception(s"trying to encode ${lpWitness(ty: lpOlType).pretty} as a proof")
+      if (ty == lpOtype) liftedProp(lpWitness(ty))
+      else throw new Exception(s"trying to encode ${lpWitness(ty).pretty} as a proof")
   }
 
   case object lpOlNothing extends lpOlTerm {

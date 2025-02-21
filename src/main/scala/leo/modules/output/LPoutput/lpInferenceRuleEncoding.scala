@@ -90,7 +90,7 @@ object lpInferenceRuleEncoding {
   ////////////////////////////////////////////////////////////////
 
   case class funExtPosEq_rev() extends inferenceRules {
-    // [T] [S] (f : (τ (S × T))) (g : (τ (S × T))) (x : (τ S)): ((π (f = g)) → (π ((f x) = (g x))))
+    // Π T: Set, Π S: Set, Π f: τ (S ⤳ T), Π g: τ (S ⤳ T), Π x: τ S, π (f = g) → π (f x = g x)
 
     override val proofIsDefined = true
 
@@ -116,6 +116,12 @@ object lpInferenceRuleEncoding {
         case None => Seq.empty
       }
       lpFunctionApp(name,Seq(f,g):+x,ImpArgs)
+    }
+
+    def premAndRes(T: lpOlType, S: lpOlType, f : lpOlTerm, g : lpOlTerm, x : lpOlTerm) = {
+      val prem = lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g)
+      val res = lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),lpOlFunctionApp(f,Seq(Left(x))),lpOlFunctionApp(g,Seq(Left(x))))
+      (prem, res)
     }
   }
 

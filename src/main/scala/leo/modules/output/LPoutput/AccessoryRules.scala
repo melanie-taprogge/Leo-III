@@ -430,6 +430,27 @@ object AccessoryRules {
     lpRewrite(Some(rewritePatternEq), lpFunctionApp(flipLiteral().name, Seq.empty, Seq(eqType)))
   }
 
+  def extractSides(lit0:lpOlTerm):(Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean, Boolean)={
+    lit0 match {
+      case lpOlUnaryConnectiveTerm(`lpNot`, body) =>
+        body match {
+          case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs), Some(rhs), Some(ty), false, true)
+          case _ => (Some(body), None, None, false, false)
+        }
+      case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs), Some(rhs), Some(ty), true, true)
+      case _ => (Some(lit0), None, None, true, false)
+    }
+  }
+  def isFlippedVersion(lit0: lpOlTerm, lit1: lpOlTerm, litCount: Int, clauseLen: Int): (Option[lpRewrite]) = {
+    val (lhs0, rhs0, ty0, pol0, eq0) = extractSides(lit0)
+    val (lhs1, rhs1, _, pol1, eq1) = extractSides(lit1)
+    if ((eq0 == eq1) && (pol0 == pol1) && (rhs0 == lhs1) && (lhs0 == rhs1)) {
+      val rewriteStep = flipStep(litCount,clauseLen,pol0,ty0.get)
+      Some(rewriteStep)
+    }
+    else None
+  }
+
   def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
     Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
 
@@ -442,24 +463,8 @@ object AccessoryRules {
     val rewritePattern = Some(lpRewritePattern(generateClausePattern(Seq(litCount), clauseLen)))
 
     // first we register the two sides of the literals and weather or not the literals are negative
-    val (lhs0, rhs0, ty0, pol0): (Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean) = lit0 match {
-      case lpOlUnaryConnectiveTerm(`lpNot`,body) =>
-        body match {
-          case lpOlTypedBinaryConnectiveTerm(`lpEq`,ty, lhs,rhs) => (Some(lhs),Some(rhs),Some(ty),false)
-          case _ => (Some(body),None,None,false)
-        }
-      case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs),Some(rhs),Some(ty), true)
-      case _ => (Some(lit0), None, None, true)
-    }
-    val (lhs1, rhs1, ty1, pol1): (Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean) = lit1 match {
-      case lpOlUnaryConnectiveTerm(`lpNot`, body) =>
-        body match {
-          case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs),Some(rhs),Some(ty), false)
-          case _ => (Some(body), None, None, false)
-        }
-      case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) => (Some(lhs),Some(rhs),Some(ty), true)
-      case _ => (Some(lit1), None, None, true)
-    }
+    val (lhs0, rhs0, ty0, pol0, _) = extractSides(lit0)
+    val (lhs1, rhs1, ty1, pol1, _) = extractSides(lit1)
 
     // then we detect which transformations to apply
     canEncode = if (ty0.isDefined && !ty1.isDefined) {

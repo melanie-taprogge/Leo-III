@@ -194,15 +194,11 @@ object ModularProofEncoding {
 
         if (edLit != origLit) {
 
-          // test if the application of funExt to the literal changes the sides of the literal todo: replace by builtin beta reduction and comparison modulo
-          //val vargen = freshVarGen(parent.cl)
-          //val newVar = vargen(edLit.left.ty._funDomainType)
-          //val appliedLeft = Term.mkTermApp()
-
           val encOrigLitLhs = term2LP(origLit.left, bVarMap, sig)._1
           val encOrigLitRhs = term2LP(origLit.right, bVarMap, sig)._1
           val encOrigLit = term2LP(asTerm(origLit), bVarMap, sig)._1
           val encEditLit0 = term2LP(asTerm(edLit), bVarMap, sig)._1
+          val encEditLitTy = type2LP(edLit.left.ty, sig)._1
           Out.lp_debug_info(s"applying FunExt to literal ${encOrigLit.pretty}, resulting in ${encEditLit0.pretty}")
 
           val encEditedLit: lpOlTerm = if (!edLit.equational) {
@@ -226,8 +222,6 @@ object ModularProofEncoding {
             encEditedLit00
 
           } else encEditLit0
-          litsAfterFunext = litsAfterFunext :+ encEditedLit
-
           // 2. If the order within the literal was changed, apply eqSym_eq
           // todo
 
@@ -262,11 +256,36 @@ object ModularProofEncoding {
               })
             }
 
+            var (resLhs, resRhs) = (encOrigLitLhs, encOrigLitRhs)
             appliedVars foreach { appliedVar =>
               val refineWithFunExt = lpRefine(funExtPosEq_rev().instanciate(None, encOrigLitLhs, encOrigLitRhs, appliedVar))
               allSteps = allSteps :+ lpHave(namefunExtStep, impToProve, lpProofScript(Seq(refineWithFunExt)))
               Out.lp_debug_info(s"Proving instancion of PFE to prove ${impToProve.pretty}")
+
+              // test if the application of funExt to the literal changes the sides of the literal todo: replace by builtin beta reduction and comparison modulo
+              //val vargen = freshVarGen(parent.cl)
+              //val newVar = vargen(edLit.left.ty._funDomainType)
+              //val appliedLeft = Term.mkTermApp()
+              // we need to compare what we are deriving with funExt to the type we have to actually derive and changes sides if applicable
+              // the term we derive needs to be constructed based on
+              resLhs = lpOlFunctionApp(resLhs,Seq(Left(appliedVar)))
+              resRhs = lpOlFunctionApp(resRhs,Seq(Left(appliedVar)))
             }
+            // we compute the term that results from our rule application
+            val reducedLhs = betaReduceLpApplication(resLhs)
+            val reducedRhs = betaReduceLpApplication(resRhs)
+
+            Out.lp_debug_info(s"comparing ${encEditedLit} to ${lpOlTypedBinaryConnectiveTerm(lpEq,encEditLitTy,reducedRhs,reducedLhs)}")
+            val funExRes =
+              if (encEditedLit.pretty == lpOlTypedBinaryConnectiveTerm(lpEq,encEditLitTy,reducedRhs,reducedLhs).pretty){ //todo: sometimes one side is encoded as an untyped var and the other as a typed one, hence comparison of pretty terms, fix it
+                Out.lp_debug_info(s"it is necessary to flip roigi, this is however not yet encoded")
+                cantEncode = cantEncode :+ "requires flip of orignial lit"
+                lpOlTypedBinaryConnectiveTerm(lpEq,encEditLitTy,reducedLhs,reducedRhs)}
+              else encEditedLit
+
+            //throw new Exception(s"reduced ${resLhs.pretty} to ${reducedLhs.pretty} and ${resRhs.pretty} to ${reducedRhs.pretty}")
+
+            litsAfterFunext = litsAfterFunext :+ funExRes
           }
         }
       }
@@ -1493,7 +1512,8 @@ object ModularProofEncoding {
 
             // Depending on the mode of Unification, additional steps like the removal of unification constraints have to be proven
             // we carry out the substitution todo would there be an advantage to passing on the substitution in its original form after all and doing the actual substitution here instead of doing it as lambda terms?
-            if (Seq("uniAfterFactoring").contains(mode)) { // uniAfterFactoring is eqFact
+            var allRemovalSteps: Seq[lpProofScriptStep] = Seq.empty
+            val finalLits = if (Seq("uniAfterFactoring").contains(mode)) { // uniAfterFactoring is eqFact
               // in this case the unification constraints were fulfilled and removed, we thus need to prove that they can be removed
               // Remove the first unification constraint
               val uniC1 = addInfoUniRule._2._1
@@ -1512,7 +1532,7 @@ object ModularProofEncoding {
               val proofStepUc2 = lpHave(nameStep2Removal, clauseWighoutUC.prf, lpProofScript(removeUniC2 :+ lpRefine(lpFunctionApp(lpConstantTerm(nameStep1Removal), Seq()))))
 
               // only add the rewrite steps, this is less complicated but should have the same result
-              allSteps = allSteps ++ removeUniC2 ++ removeUniC1
+              allRemovalSteps = allRemovalSteps ++ removeUniC2 ++ removeUniC1
 
               // it is necessary to potentially flip literals
 
@@ -1520,8 +1540,28 @@ object ModularProofEncoding {
               // Now the last step is refining with the last proven term after removal of the last unification constraint
               val refineStep = lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName), Seq())) //lpRefine(lpFunctionApp(lpConstantTerm(nameStep2Removal),Seq()))
 
-              allSteps = allSteps :+ refineStep
+              allRemovalSteps = allRemovalSteps :+ refineStep
+
+              encSubstLits.init.init
+            } else encSubstLits
+
+            // compare the literals to see if we need to change any sides
+            finalLits.foreach{ lit =>
+              // find associated literal in parent
+              val indexInChild = finalLits.indexOf(lit)
+              val associatedChildLit = encChildLiterals(indexInChild)
+              val reducedLit = betaReduceLpApplication(lit)
+              // if they are not equal, the sides must have switchen.
+              val flipRewriteStep = isFlippedVersion(reducedLit,associatedChildLit,indexInChild,finalLits.length)
+              if (flipRewriteStep.isDefined){
+                Out.lp_debug_info(s"need to flip sides of ${reducedLit.pretty}")
+                allSteps = allSteps :+ flipRewriteStep.get
+              }
             }
+
+            allSteps = allSteps ++ allRemovalSteps
+
+
             // permutation? todo: figure out why this can even happen
             // sometimes all that happens is a permutation and nothing else
             if (containsLpLits(encParentLiterals, encChildLiterals)) {

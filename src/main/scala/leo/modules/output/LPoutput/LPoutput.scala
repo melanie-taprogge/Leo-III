@@ -430,9 +430,16 @@ object LPoutput {
           Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
           val proofFun = lpMlFunctionType(Seq(flexFlex0,lpOlBot.prf))
           val flexFlexStepName = "flexflex_to_bot"
+          val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
+            case lpClause(vars,lits) =>
+              val appliedVars = vars.map(var0 => lpWitness(var0.ty))
+              (lpFunctionApp(lpConstantTerm(flexFlexStepName),appliedVars),(lpFunctionApp(lpConstantTerm(name),appliedVars)))
+            case _ => (lpConstantTerm(flexFlexStepName), lpConstantTerm(name))
+          }
+          //throw new Exception(s"vars are ${variablesToApply.map(_.pretty)}")
           val proofHave = lpHave(flexFlexStepName,proofFun,lpProofScript(Seq(lpProofScriptAdmit())))
           proofSteps = proofSteps :+ proofHave
-          lpFunctionApp(lpConstantTerm(flexFlexStepName),Seq(lpConstantTerm(name)))
+          lpFunctionApp(appliedflexFlexStepName,Seq(appliedStepName))
         case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last.pretty}")
       }
       proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep,Seq.empty))
