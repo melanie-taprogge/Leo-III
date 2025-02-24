@@ -1517,20 +1517,32 @@ object ModularProofEncoding {
               // in this case the unification constraints were fulfilled and removed, we thus need to prove that they can be removed
               // Remove the first unification constraint
               val uniC1 = addInfoUniRule._2._1
-              if (parent.cl.lits.last != uniC1) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 1 in unexpected position")
+              val encUniC1 = term2LP(asTerm(uniC1),bVars,sig)._1
               val nameStep1Removal = "RemoveUC1"
-              val (removeUniC1, usedSymbolsUc1) = removeUnificationConstraint(uniC1, parent.cl, encSubstLits.last, sig)
-              usedSymbols = usedSymbols ++ usedSymbolsUc1
-              val proofStepUc1 = lpHave(nameStep1Removal, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init).prf, lpProofScript(removeUniC1 :+ lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName), Seq()))))
+              val removeUniC1: Seq[lpProofScriptStep] = if (parent.cl.lits.last != uniC1) {
+                canEncode = false
+                Seq.empty
+              } //throw new Exception(s"encoding unification following eqFactoring and found unification constraint 1 in unexpected position, unic1 and last lit are....:\n${encUniC1.pretty}\n${parent.cl.lits.last}")
+              else {
+                val (removeUniC1_0, usedSymbolsUc1) = removeUnificationConstraint(uniC1, parent.cl, encSubstLits.last, sig)
+                usedSymbols = usedSymbols ++ usedSymbolsUc1
+                val proofStepUc1 = lpHave(nameStep1Removal, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init).prf, lpProofScript(removeUniC1_0 :+ lpRefine(lpFunctionApp(lpConstantTerm(substitutionStepName), Seq()))))
+                removeUniC1_0
+              }
               // Remove the second unification constraint
               val uniC2 = addInfoUniRule._2._2
-              if (parent.cl.lits.init.last != uniC2) throw new Exception(s"encoding unification following eqFactoring and found unification constraint 2 in unexpected position")
               val nameStep2Removal = "RemoveUC2"
-              val clauseWighoutUC = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init.init)
-              val (removeUniC2, usedSymbolsUc2) = removeUnificationConstraint(uniC2, Clause(parent.cl.lits.init), encSubstLits.init.last, sig)
-              usedSymbols = usedSymbols ++ usedSymbolsUc2
-              val proofStepUc2 = lpHave(nameStep2Removal, clauseWighoutUC.prf, lpProofScript(removeUniC2 :+ lpRefine(lpFunctionApp(lpConstantTerm(nameStep1Removal), Seq()))))
-
+              val removeUniC2: Seq[lpProofScriptStep] = if (parent.cl.lits.init.last != uniC2) {
+                canEncode = false
+                Seq.empty
+              } //throw new Exception(s"encoding unification following eqFactoring and found unification constraint 2 in unexpected position")
+              else {
+                val clauseWighoutUC = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits.init.init)
+                val (removeUniC2_0, usedSymbolsUc2) = removeUnificationConstraint(uniC2, Clause(parent.cl.lits.init), encSubstLits.init.last, sig)
+                usedSymbols = usedSymbols ++ usedSymbolsUc2
+                val proofStepUc2 = lpHave(nameStep2Removal, clauseWighoutUC.prf, lpProofScript(removeUniC2_0 :+ lpRefine(lpFunctionApp(lpConstantTerm(nameStep1Removal), Seq()))))
+                removeUniC2_0
+              }
               // only add the rewrite steps, this is less complicated but should have the same result
               allRemovalSteps = allRemovalSteps ++ removeUniC2 ++ removeUniC1
 
@@ -1574,7 +1586,8 @@ object ModularProofEncoding {
             // if necessary, we apply transformations to flip sides of literals etc.
 
             val proofScript = lpProofScript(allSteps)
-            (proofScript, usedSymbols, None)
+            if (canEncode) (proofScript, usedSymbols, None)
+            else (lpProofScript(Seq.empty),Set.empty,  Option(s"permutation necessary for the encodng (See problem lpProof_SYO885^1_033_003)"))
           } else (lpProofScript(Seq.empty),Set.empty,  Option(s"instanciation with variables not encoded yet"))
         } else (lpProofScript(Seq.empty),Set.empty,  Option(s"no term unifications to encode"))
       }

@@ -1125,12 +1125,12 @@ package inferenceControl {
         while (uniResultIt.hasNext) {
           val uniRes = uniResultIt.next()
           uniResult = uniResult union defaultUnify(freshVarGen, uniRes)(state)
-          // add the information about the kind of unification
-          uniResult foreach {aCl =>
-            val addInfo = aCl.furtherInfo
-            addInfo.addInfoUniRule = ("uniAfterFactoring",(uniLit1, uniLit2))
-            newResult = newResult + AnnotatedClause(aCl.cl,aCl.role,aCl.annotation,aCl.properties,addInfo)
-          }
+        }
+        // add the information about the kind of unification
+        uniResult foreach { aCl =>
+          val addInfo = aCl.furtherInfo
+          addInfo.addInfoUniRule = ("uniAfterFactoring", (uniLit1, uniLit2))
+          newResult = newResult + AnnotatedClause(aCl.id, aCl.cl, aCl.role, aCl.annotation, aCl.properties, addInfo)
         }
         newResult
       }
