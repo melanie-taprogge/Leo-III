@@ -11,6 +11,7 @@ import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpDne, permLib}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
+import leo.modules.output.LPoutput.lpInferenceRuleEncoding.metaPermutation
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
@@ -31,7 +32,7 @@ object LPoutput {
   val nameRulesFile = "rules"
   val nameProofFile = "encodedProof"
 
-  var inclduePermLib = true
+  var inclduePermLib = false
 
   def generateSignature(usedSymbols: Set[lpStatement], nameLpOutputFolder: String): (mutable.StringBuilder) = {
 
@@ -52,7 +53,12 @@ object LPoutput {
         case simpRule: SimplificationEncoding.simplificationRules =>
           simplificationRules = simplificationRules + simpRule
         case infRule: lpInferenceRuleEncoding.inferenceRules =>
-          if (infRule.proofRWfree) infRulesRWfree = infRulesRWfree + infRule
+          Out.lp_debug_info(s"used rule: $infRule")
+          if (infRule == metaPermutation) {
+            Out.lp_debug_info(s"Permutation-Lib is needed")
+            inclduePermLib = true
+          }
+          else if (infRule.proofRWfree) infRulesRWfree = infRulesRWfree + infRule
           else infRules = infRules + infRule
         case defRule: lpDefinedRules =>
           otherRules = otherRules + defRule
@@ -224,11 +230,6 @@ object LPoutput {
     val lpOutputPath = Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)//s"${lpOutputPath0}${nameLpOutputFolder}/"
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
-    val permLibStr: String ={
-      if (inclduePermLib) f"${nameLpOutputFolder}.${permlibFile}"
-      else ""
-    }
-    proofFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
     var proofSteps: Seq[lpProofScriptStep] = Seq.empty
 
     def extractNecessaryFormulas(state:LocalState):Unit={
@@ -242,9 +243,6 @@ object LPoutput {
       // add symbols of the user defined TPTP problem signature if necessary
 
       val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof(proof))(sig)
-
-      Out.lp_debug_info(s"additional symbols: ${additionalSymbols.map(sig.apply(_).name)}")
-      Out.lp_debug_info(s"relevant symbols: ${relevantSymbols.map(sig.apply(_).name)}")
 
       val typeDecSB: mutable.StringBuilder = new StringBuilder()
       val defSB: mutable.StringBuilder = new StringBuilder()
@@ -448,8 +446,15 @@ object LPoutput {
 
       // generate the signature
 
-      Out.info("Generating Signature")
+      Out.lp_debug_info("Generating Signature")
       val rulesFileSB = generateSignature(usedSymbols, nameLpOutputFolder)
+
+      val permLibStr: String = {
+        if (inclduePermLib) f"${nameLpOutputFolder}.${permlibFile}"
+        else ""
+      }
+      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+
 
       // create a folder for the lambdapi package
       // Create the output directory if it doesn't exist
@@ -467,7 +472,7 @@ object LPoutput {
       Files.write(exttFilePath, ExTTenc.getBytes(StandardCharsets.UTF_8))
 
       val permLibFilePath = lpOutputPath.resolve(s"$permlibFile.lp")
-      Files.write(permLibFilePath, permLib.getBytes(StandardCharsets.UTF_8))
+      if (inclduePermLib) Files.write(permLibFilePath, permLib.getBytes(StandardCharsets.UTF_8))
 
       val rulesFilePath = lpOutputPath.resolve(s"$nameRulesFile.lp")
       Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))

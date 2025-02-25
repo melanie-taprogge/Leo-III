@@ -470,6 +470,7 @@ object ModularProofEncoding {
       val permutationApp = permutationStepSkript(currentLits, permutedLits, lastStepName)
       val permutationStep = lpHave("Permutation", lpOlUntypedBinaryConnectiveTerm_multi(lpOr, permutedLits).prf, lpProofScript(Seq(lpRefine(permutationApp))))
       allSteps = allSteps :+ permutationStep
+      usedSymbols = usedSymbols + metaPermutation
       lastStepName = lpConstantTerm(permStepName)
       Out.lp_debug_info(s"permutation applied")
       currentLits = permutedLits
@@ -730,6 +731,7 @@ object ModularProofEncoding {
       val permutationApp = permutationStepSkript(parentLits,permutedParents, lastStepName)
       val permutationStep = lpHave("Permutation",lpOlUntypedBinaryConnectiveTerm_multi(lpOr,permutedParents).prf,lpProofScript(Seq(lpRefine(permutationApp))))
       allSteps = allSteps :+ permutationStep
+      usedSymbols = usedSymbols + metaPermutation
       lastStepName = lpConstantTerm(permStepName)
       Out.lp_debug_info(s"permutation applied")
       parentLits = permutedParents
@@ -1130,6 +1132,7 @@ object ModularProofEncoding {
       if (needsPermute) {
         Out.lp_debug_info(s"applying the following permutation: $permutation")
         allSteps = allSteps :+ lpRefine(metaPermutation.instanciate(permutation, liftedLits, lastStep))
+        usedRules = usedRules + metaPermutation
         // permutation will not need to be added to the rules assuming that we will add it to stdlib
       } else {
         allSteps = allSteps :+ lpRefine(lpFunctionApp(lastStep, Seq()))
@@ -1578,6 +1581,7 @@ object ModularProofEncoding {
             // sometimes all that happens is a permutation and nothing else
             if (containsLpLits(encParentLiterals, encChildLiterals)) {
               val permutationStep = permutationStepSkript(encParentLiterals, encChildLiterals, lpFunctionApp(parentNameLpEnc, unboundVarsChild))
+              usedSymbols = usedSymbols + metaPermutation
 
               Out.lp_debug_info(s"Permutation step: ${permutationStep.pretty}")
               allSteps = allSteps :+ lpRefine(permutationStep)
@@ -1587,7 +1591,7 @@ object ModularProofEncoding {
 
             val proofScript = lpProofScript(allSteps)
             if (canEncode) (proofScript, usedSymbols, None)
-            else (lpProofScript(Seq.empty),Set.empty,  Option(s"permutation necessary for the encodng (See problem lpProof_SYO885^1_033_003)"))
+            else (lpProofScript(Seq.empty),Set.empty,  Option(s"permutation necessary for the encodng")) // (See problem lpProof_SYO885^1_033_003)
           } else (lpProofScript(Seq.empty),Set.empty,  Option(s"instanciation with variables not encoded yet"))
         } else (lpProofScript(Seq.empty),Set.empty,  Option(s"no term unifications to encode"))
       }
