@@ -190,7 +190,7 @@ object lpInferenceRuleEncoding {
   case object polaritySwitchEqLit extends inferenceRules {
     // in non eq case, we use simp 17, for equational case this is encoded
     // todo: update to standard library
-    // a b : Prf(= [o] (= [o] a b) (= [o] (¬ a) (¬ b)))
+    // a b : π ((a = b) = ((¬ a) = (¬ b)))
 
     override def name: lpConstantTerm = lpConstantTerm(s"polaritySwitchEqLit")
 
@@ -199,7 +199,7 @@ object lpInferenceRuleEncoding {
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, a,b), lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlUnaryConnectiveTerm(lpNot,a),lpOlUnaryConnectiveTerm(lpNot,b))).prf
 
-    override def proof: lpProofScript = throw new Exception("proof for mkPosPropPosLit_script not encoded yet") //todo: generate depending on number of args
+    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume a b;\n    refine propExt (a = b) (¬ a = ¬ b) _ _ \n        {assume h1;\n        have H1: π (b = a)\n                {symmetry;\n                refine h1};\n        refine propExt (¬ a) (¬ b) _ _\n            {assume h2;\n            refine ind_eq H1 (λ x, ¬ x) h2}\n            {assume h2;\n            refine ind_eq h1 (λ x, ¬ x) h2}}\n        {assume h1;\n        have H1: π (¬ b = ¬ a)\n                {symmetry;\n                refine h1};\n        refine propExt a b _ _\n            {assume h2;\n            have H2: π (¬ (¬ a))\n                {assume h3;\n                refine h3 h2};\n            refine (dne b) (ind_eq H1 (λ x, (¬ x)) H2)}\n            {assume h2;\n            have H2: π (¬ (¬ b))\n                {assume h3;\n                refine h3 h2};\n            refine (dne a) (ind_eq h1 (λ x, (¬ x)) H2)}}")))
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(a,b), ty)
 

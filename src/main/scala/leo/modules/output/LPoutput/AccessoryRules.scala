@@ -81,7 +81,7 @@ object AccessoryRules {
     // todo -> stdlib
     // Provide a proof of the type Prf(= [o] a (= [o] a ⊤))
 
-    override def name: lpConstantTerm = lpConstantTerm("mkPosPropPosEq")
+    override def name: lpConstantTerm = lpConstantTerm("posPropPosEq_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop)).prf
 
@@ -250,7 +250,7 @@ object AccessoryRules {
     // todo: replace occourences with the transformLit script
     // x: (π ((⊥ = x) = (¬ x)))
 
-    override def name: lpConstantTerm = lpConstantTerm("botNegProp")
+    override def name: lpConstantTerm = lpConstantTerm("botNegProp_eq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
@@ -657,7 +657,7 @@ object AccessoryRules {
     val x = lpOlTypedTermVar(lpOlConstantTerm("x"),T)
     val y = lpOlTypedTermVar(lpOlConstantTerm("y"),T)
 
-    override def name: lpConstantTerm = lpConstantTerm("eqSym_eq")
+    override def name: lpConstantTerm = lpConstantTerm("eqSym")
 
     override def ty: lpMlType = {
       lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x, y), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, y, x)).prf
