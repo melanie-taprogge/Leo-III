@@ -1,6 +1,7 @@
 package leo.modules.output.logger
 
 import leo.modules.output.Output
+import java.util.logging.Level
 
 /**
  * Simple implementation of the [[Logging]] trait
@@ -37,7 +38,31 @@ object Out extends Logging {
     }
   )
 
-  def output(msg: Output): Unit = { println(msg.apply()) }
+  // Attach a handler specifically for lpLog
+  addLpLogHandler(
+    new ConsoleHandler {
+      setLevel(Level.ALL)
+      setFormatter(new Formatter {
+        def format(record: LogRecord) = {
+          val lines = record.getMessage.linesWithSeparators
+          if (lines.hasNext) {
+            val msg = lines.next() + lines.map(str => "% " + str).mkString("")
+            s"% [LP-DEBUG: ${record.getLevel.getLocalizedName}] \t $msg \n"
+          } else {
+            ""
+          }
+        }
+      })
+
+      override def publish(record: LogRecord): Unit = {
+        super.publish(record)
+        flush()
+      }
+    }
+  )
+
+
+def output(msg: Output): Unit = { println(msg.apply()) }
   def output(msg: String): Unit = { println(msg) }
   def comment(msg: String): Unit = {println(msg.linesWithSeparators.map(str => "% "+str).mkString(""))}
 

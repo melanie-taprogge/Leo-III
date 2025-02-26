@@ -27,7 +27,7 @@ object DefExpSimp extends CalculusRule {
     Simp.normalize(t.δ_expand_upTo(symb).betaNormalize.etaExpand)
   }
 
-  final def apply_andTrack(t: Term)(implicit sig: Signature): (Term, Seq[(Seq[Int], String, Term, Term)], Seq[Signature.Key]) = {
+  final def apply_andTrack(t: Term)(implicit sig: Signature): (Term, Seq[(Seq[Int], Int)], Seq[Signature.Key]) = {
     val symb: Set[Signature.Key] = Set(sig("?").key, sig("&").key, sig("=>").key)
     val (expandedTerm, expandedSymbols) = t.δ_expand_andTrack_upTo(symb)
     val (simplifiedTerm, simpInfo) = Simp.normalize_andTrack(expandedTerm.betaNormalize.etaExpand)
@@ -355,26 +355,40 @@ object LiftEq extends CalculusRule {
   type NegLiftLits = Seq[Literal]
   type OtherLits = Seq[Literal]
   final def canApply(cl: Clause): (Boolean, PosLiftLits, NegLiftLits, OtherLits) = {
-    var can = false
-    var posLiftLits: PosLiftLits = Vector()
-    var negLiftLits: NegLiftLits = Vector()
-    var otherLits: OtherLits = Vector()
-    val lits = cl.lits.iterator
-    while (lits.hasNext) {
-      val l = lits.next()
-      val canLift = canApply(l)
-      if (canLift == POS_LIFT) {
-        posLiftLits = posLiftLits :+ l
-        can = true
-      } else if (canLift == NEG_LIFT) {
-        negLiftLits = negLiftLits :+ l
-        can = true
-      } else {
-        otherLits = otherLits :+ l
-      }
-    }
+    val (can, posLiftLits, negLiftLits, otherLits, _) = canApplyAndTrack(cl)
     (can, posLiftLits, negLiftLits, otherLits)
   }
+
+  final def canApplyAndTrack(cl: Clause): (Boolean, PosLiftLits, NegLiftLits, OtherLits, Seq[Seq[Int]]) = {
+      var can = false
+      var posLiftLits: PosLiftLits = Vector()
+      var negLiftLits: NegLiftLits = Vector()
+      var otherLits: OtherLits = Vector()
+      var posLiftLits_inx: Seq[Int] = Vector()
+      var negLiftLits_inx: Seq[Int] = Vector()
+      var otherLits_inx: Seq[Int] = Vector()
+
+      val lits = cl.lits.iterator
+      var indx = -1
+      while (lits.hasNext) {
+        indx = indx +1
+        val l = lits.next()
+        val canLift = canApply(l)
+        if (canLift == POS_LIFT) {
+          posLiftLits = posLiftLits :+ l
+          posLiftLits_inx = posLiftLits_inx :+ indx
+          can = true
+        } else if (canLift == NEG_LIFT) {
+          negLiftLits = negLiftLits :+ l
+          negLiftLits_inx = negLiftLits_inx :+ indx
+          can = true
+        } else {
+          otherLits = otherLits :+ l
+          otherLits_inx = otherLits_inx :+ indx
+        }
+      }
+      (can, posLiftLits, negLiftLits, otherLits, Seq(posLiftLits_inx, negLiftLits_inx, otherLits_inx))
+    }
 
   final def apply(posLiftLits: PosLiftLits, negLiftLits: NegLiftLits, otherLits: OtherLits)(implicit sig: Signature): Seq[Literal] = {
     posLiftLits.map(l => apply(POS_LIFT, l.left, l.polarity)(sig)) ++ negLiftLits.map(l => apply(NEG_LIFT, l.left, l.polarity)(sig)) ++ otherLits
@@ -735,7 +749,7 @@ object Simp extends CalculusRule {
     }
   }
 
-  final private def eqSimp_andTrack(l: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], String, Term, Term)]) = {
+  final private def eqSimp_andTrack(l: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], Int)]) = {
     if (!l.equational) {
       val (norm, addInfo) = normalize_andTrack(l.left)
       (Literal(norm, l.polarity), addInfo)
@@ -743,7 +757,7 @@ object Simp extends CalculusRule {
       val (normLeft, addInfoLeft) = normalize_andTrack(l.left)
       val (normRight, addInfoRight) = normalize_andTrack(l.right)
       (normLeft, normRight) match {
-        case (a, b) if a == b => (Literal(LitTrue(), l.polarity),addInfoLeft ++ addInfoRight :+ (Seq.empty,"Simp9",asTerm(l),LitTrue)) //todo: make sure this is right
+        case (a, b) if a == b => (Literal(LitTrue(), l.polarity),addInfoLeft ++ addInfoRight :+ (Seq.empty,31)) //todo: make sure this is right
         case _ => (Literal.mkLit(normLeft, normRight, l.polarity, l.oriented),addInfoLeft ++ addInfoRight)
       }
     }
@@ -770,7 +784,7 @@ object Simp extends CalculusRule {
 
   final def apply(lit: Literal)(implicit sig: Signature): Literal = PolaritySwitch(eqSimp(lit))
 
-  final def apply_andTrack(lit: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], String, Term, Term)]) = {
+  final def apply_andTrack(lit: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], Int)]) = {
     val (simpTerm, addInfo) = eqSimp_andTrack(lit)
     (PolaritySwitch(simpTerm), addInfo)
   }
@@ -864,9 +878,9 @@ object Simp extends CalculusRule {
     newLits
   }
 
-  final def shallowSimp_andTrack(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Seq[(Seq[Int], String, Term, Term)]) = {
+  final def shallowSimp_andTrack(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Seq[(Seq[Int], Int)]) = {
     var newLits: Seq[Literal] = Vector.empty
-    var addInfo:  Seq[(Seq[Int], String, Term, Term)] = Seq.empty
+    var addInfo:  Seq[(Seq[Int], Int)] = Seq.empty
     val litIt = lits.iterator
     while (litIt.hasNext) {
       val lit0 = litIt.next()
@@ -885,7 +899,7 @@ object Simp extends CalculusRule {
     Clause(shallowSimp(cl.lits)(sig))
   }
 
-  final def shallowSimp_andTrack(cl: Clause)(implicit sig: Signature): (Clause, Seq[(Seq[Int], String, Term, Term)]) = {
+  final def shallowSimp_andTrack(cl: Clause)(implicit sig: Signature): (Clause, Seq[(Seq[Int], Int)]) = {
     val (simpLits, addInfo) = shallowSimp_andTrack(cl.lits)(sig)
     (Clause(simpLits), addInfo)
   }
@@ -1030,7 +1044,7 @@ object Simp extends CalculusRule {
     else result
   }
 
-  final def normalize_andTrack(t: Term): (Term, Seq[(Seq[Int], String, Term, Term)]) = {
+  final def normalize_andTrack(t: Term): (Term, Seq[(Seq[Int], Int)]) = {
     // termSimp(t)
     import leo.modules.procedures.{Simplification, GroundArithmeticEval}
     val arith = GroundArithmeticEval.apply(t)

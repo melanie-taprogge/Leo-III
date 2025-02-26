@@ -425,7 +425,7 @@ package inferenceControl {
         }
       }
     }
-    
+
     private final def singleParamod1(withWrapper: AnnotatedClause,
                                      withClause: Clause,
                                      withIndex: Int,
@@ -491,7 +491,10 @@ package inferenceControl {
             val intoLitSubst = intoClauseSubst(intoIndex)
             leo.Out.finest(s"intoClauseSubst: ${intoClauseSubst.pretty(sig)}")
             leo.Out.finest(s"intoLitSubst: ${intoLitSubst.pretty(sig)}")
-            leo.Out.finest(s"maxLits = \n\t${intoClauseSubst.maxLits(sig).map(_.pretty(sig)).mkString("\n\t")}")
+            leo.Out.finest(s"number of lits ${intoClauseSubst.lits.length}")
+            val maxLits = intoClauseSubst.maxLits(sig)
+            leo.Out.finest(s"number of max lits ${maxLits.length}")
+            leo.Out.finest(s"maxLits = \n\t${maxLits.map(_.pretty(sig)).mkString("\n\t")}")
             myAssert(Clause.wellTyped(intoClauseSubst))
             myAssert(Literal.wellTyped(intoLitSubst))
             if (Configuration.isSet("noOrdCheck2") || !intoLitSubst.polarity || intoClauseSubst.maxLits(sig).contains(intoLitSubst)) { // FIXME: Approx. of selection strategy
@@ -1125,12 +1128,12 @@ package inferenceControl {
         while (uniResultIt.hasNext) {
           val uniRes = uniResultIt.next()
           uniResult = uniResult union defaultUnify(freshVarGen, uniRes)(state)
-          // add the information about the kind of unification
-          uniResult foreach {aCl =>
-            val addInfo = aCl.furtherInfo
-            addInfo.addInfoUniRule = ("uniAfterFactoring",(uniLit1, uniLit2))
-            newResult = newResult + AnnotatedClause(aCl.cl,aCl.role,aCl.annotation,aCl.properties,addInfo)
-          }
+        }
+        // add the information about the kind of unification
+        uniResult foreach { aCl =>
+          val addInfo = aCl.furtherInfo
+          addInfo.addInfoUniRule = ("uniAfterFactoring", (uniLit1, uniLit2))
+          newResult = newResult + AnnotatedClause(aCl.id, aCl.cl, aCl.role, aCl.annotation, aCl.properties, addInfo)
         }
         newResult
       }
@@ -1281,10 +1284,17 @@ package inferenceControl {
           val (posFuncExtLits, negFuncExtLits) = funcExtLits.partition(_.polarity)
           val appliedNegFuncExtLits = negFuncExtLits.map(lit => FuncExt.applyExhaust(lit, vargen)(sig))
           // create Sequences of the before and after literals for negative literals
-          if (LP) addInfo = addInfo ++ negFuncExtLits.zip(appliedNegFuncExtLits).map { case (x, y) => (x, y)}
+          var addInfo: Seq[(Literal,Literal)] = Seq.empty
+          addInfo = addInfo ++ negFuncExtLits.zip(appliedNegFuncExtLits).map { case (x, y) => (x, y)}
           val (stepLiterals, stepInfo) = exhaustiveSteps(posFuncExtLits,vargen)(sig)
-          val steps = stepLiterals.zip(stepInfo).iterator
+          val pairs = stepLiterals.zip(stepInfo)
           val newProp = addProp(ClauseAnnotation.PropFuncExt, deleteProp(ClauseAnnotation.PropBoolExt | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
+          if (pairs.isEmpty){
+            val newClause = Clause(appliedNegFuncExtLits ++ otherLits)
+            val newInfo = new FurtherInfo() //todo : im sure there is a more elegant way of instantiation
+            result = result + AnnotatedClause(newClause, Role_Plain, InferredFrom(FuncExt, cl), newProp, newInfo)
+          }
+          val steps = pairs.iterator
           while (steps.hasNext) {
             val posFuncExtStep = steps.next()
             val newClause = Clause(posFuncExtStep._1 ++ appliedNegFuncExtLits ++ otherLits)
@@ -1306,10 +1316,8 @@ package inferenceControl {
     @tailrec private final def exhaustiveSteps0(posLits: Seq[Literal], vargen: FreshVarGen, done: Seq[Literal], acc: Seq[Seq[Literal]], addInfo0: Seq[(Literal,Literal)]=Seq.empty)(sig: Signature): (Seq[Seq[Literal]],Seq[(Literal,Literal)]) = {
       if (posLits.isEmpty) (acc,addInfo0)
       else {
-        val LP = true
-        var addInfo: Seq[(Literal,Literal)] = Seq.empty // todo only track if LP is true
         val appliedOneStepPosFuncExtLits = posLits.map(lit => FuncExt.applyNew(lit, vargen)(sig))
-        if (LP) addInfo = addInfo ++ posLits.zip(appliedOneStepPosFuncExtLits).map { case (x, y) => (x, y)}
+        val addInfo = posLits.zip(appliedOneStepPosFuncExtLits).map { case (x, y) => (x, y)}
         val (_,todoLits,doneLits) = FuncExt.canApply(appliedOneStepPosFuncExtLits)
         exhaustiveSteps0(todoLits, vargen, done ++ doneLits, acc :+ (appliedOneStepPosFuncExtLits ++ done), addInfo0 ++ addInfo)(sig)
       }
@@ -1833,9 +1841,13 @@ package inferenceControl {
     }
 
     final def liftEq(cl: AnnotatedClause)(implicit sig: Signature): AnnotatedClause = {
-      val (cA_lift, posLift, negLift, lift_other) = LiftEq.canApply(cl.cl)
+      val (cA_lift, posLift, negLift, lift_other, indxs) = LiftEq.canApplyAndTrack(cl.cl)
       if (cA_lift) {
-        val result = AnnotatedClause(Clause(LiftEq(posLift, negLift, lift_other)(sig)), InferredFrom(LiftEq, cl), deleteProp(ClauseAnnotation.PropBoolExt,cl.properties))
+
+        val encInfo = new FurtherInfo()
+        encInfo.addInfoLiftEq = indxs
+        val result = AnnotatedClause(Clause(LiftEq(posLift, negLift, lift_other)(sig)), Role_Plain, InferredFrom(LiftEq, cl), deleteProp(ClauseAnnotation.PropBoolExt,cl.properties), encInfo)
+        //print(s"here are incices: $indxs for clause ${cl.id} to retrive ${result.id}\n")
         Out.debug(s"[ToEq] [${cl.id}] > [${result.id}]")
         Out.trace(s"[ToEq] Result: ${result.pretty(sig)}")
         result
@@ -2287,21 +2299,21 @@ package inferenceControl {
         leo.Out.finest(s"vargen in rewriteSimp: ${vargen.existingVars.toString()}")
         val newLits = cl.cl.lits.map(lit => rewriteLit(vargen, lit, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig))
         val newCl = Clause(newLits)
+        val information: FurtherInfo = cl.furtherInfo
         val result0 = if (rewriteRulesUsed.isEmpty) cl else {
           leo.Out.finest(s"Rewriting happend!")
+          information.addInfoRewriting = Some(newCl)
           val newAnnotation = if (rewriteRulesUsed.exists(_.cl.lits.head.left.ty == HOLSignature.o))
             deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified | ClauseAnnotation.PropFuncExt,cl.properties)
           else deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties)
-          AnnotatedClause(newCl, InferredFrom(RewriteSimp, Seq(cl) ++ rewriteRulesUsed.toSeq), newAnnotation)
+          AnnotatedClause(newCl, Role_Plain, InferredFrom(RewriteSimp, Seq(cl) ++ rewriteRulesUsed.toSeq), newAnnotation, information)
         }
         val (simpResult, addInfo) = Simp.shallowSimp_andTrack(result0.cl)(sig)
         val result = if (simpResult == result0.cl) result0
         else {
           //print(s"${result0.cl.pretty}\n")
           //print(s"${simpResult.pretty}\n")
-          val information: FurtherInfo = cl.furtherInfo
           information.addInfoSimp = information.addInfoSimp ++ addInfo
-          information.addInfoRewriting = Some(result0.cl)
           AnnotatedClause(simpResult, Role_Plain, InferredFrom(Simp, Seq(result0)), result0.properties, information)
         }
         Out.debug(s"[Rewriting] Result: ${result.pretty(sig)}")
@@ -2315,6 +2327,8 @@ package inferenceControl {
       if (lit.equational) Literal.mkOrdered(rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), rewriteTerm(vargen, lit.right, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), lit.polarity)(sig)
       else Literal.apply(rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), lit.polarity)
     }
+
+
     private def rewriteTerm(vargen: FreshVarGen, term: Term, groundRewriteTable: RewriteTable, nonGroundRewriteTable: RewriteTable, rewriteRulesUsed: mutable.Set[AnnotatedClause], depth: Int = 0)(sig: Signature): Term = {
       import leo.datastructures.Term._
       import leo.datastructures.partitionArgs
@@ -2364,7 +2378,7 @@ package inferenceControl {
 
             val res0 = Term.mkTypeApp(rewrittenHd, tyArgs)
             Term.mkTermApp(res0, termArgs.map(t => rewriteTerm(vargen, t, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth)(sig)))
-          case ty :::> body => /* term */ Term.mkTermAbs(ty, rewriteTerm(vargen, body, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth+1)(sig))
+          case ty :::> body => /* term */ Term.mkTermAbs(ty, rewriteTerm(vargen, body, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth + 1)(sig))
             // FIXME: Rewriting under lambda? What can go wrong? See SYO532^1.p
             // Found the error: inside lambdas, there are more (higher) variables that are already used
             // so the template needs to be lifted again. but then the vargen needs to be updated as well
