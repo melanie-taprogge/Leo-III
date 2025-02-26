@@ -23,7 +23,7 @@ object AccessoryRules {
   case class mkNegPropPosLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((¬ x) = ((¬ x) = ⊤)))
 
-    override def name: lpConstantTerm = lpConstantTerm("negPropPosEq_eq")
+    override def name: lpConstantTerm = lpConstantTerm("negPropPosEq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlTop)).prf
 
@@ -42,7 +42,7 @@ object AccessoryRules {
   case class mkNegPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((¬ x) = (¬ (x = ⊤))))
 
-    override def name: lpConstantTerm = lpConstantTerm("negPropNegEq_eq")
+    override def name: lpConstantTerm = lpConstantTerm("negPropNegEq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop))).prf
 
@@ -61,7 +61,7 @@ object AccessoryRules {
   case class mkPosPropNegLit_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π (x = (¬ ((¬ x) = ⊤))))
 
-    override def name: lpConstantTerm = lpConstantTerm("posPropNegEq_eq")
+    override def name: lpConstantTerm = lpConstantTerm("posPropNegEq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTop))).prf
 
@@ -81,7 +81,7 @@ object AccessoryRules {
     // todo -> stdlib
     // Provide a proof of the type Prf(= [o] a (= [o] a ⊤))
 
-    override def name: lpConstantTerm = lpConstantTerm("posPropPosEq_eq")
+    override def name: lpConstantTerm = lpConstantTerm("posPropPosEq")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTop)).prf
 
@@ -101,7 +101,7 @@ object AccessoryRules {
   case class mkNegLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((¬ ((¬ x) = ⊤)) = x))
 
-    override def name: lpConstantTerm = lpConstantTerm("negEqPosProp_eq")
+    override def name: lpConstantTerm = lpConstantTerm("negEqPosProp")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)),lpOlTop)),lpOlConstantTerm(patternVarName)).prf
 
@@ -123,7 +123,7 @@ object AccessoryRules {
   case class mkNegLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((¬ (x = ⊤)) = (¬ x)))
 
-    override def name: lpConstantTerm = lpConstantTerm("negEqNegProp_eq")
+    override def name: lpConstantTerm = lpConstantTerm("negEqNegProp")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlConstantTerm(patternVarName), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
@@ -146,7 +146,7 @@ object AccessoryRules {
   case class mkPosLitNegProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π (((¬ x) = ⊤) = (¬ x)))
 
-    override def name: lpConstantTerm = lpConstantTerm("posEqNegProp_eq")
+    override def name: lpConstantTerm = lpConstantTerm("posEqNegProp")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTop), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
@@ -169,7 +169,7 @@ object AccessoryRules {
   case class mkPosLitPosProp_script(patternVarName: String = "x") extends lpDefinedRules {
     // x: (π ((x = ⊤) = x))
 
-    override def name: lpConstantTerm = lpConstantTerm("posEqPosProp_eq")
+    override def name: lpConstantTerm = lpConstantTerm("posEqPosProp")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly,lpOlConstantTerm(patternVarName), lpOlTop), lpOlConstantTerm(patternVarName)).prf
 
@@ -192,7 +192,7 @@ object AccessoryRules {
   case class mkNegPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
     // Π x: τ o, π (¬ x = (x = ⊥))
 
-    override def name: lpConstantTerm = lpConstantTerm("negPropEqBot_eq")
+    override def name: lpConstantTerm = lpConstantTerm("negPropEqBot")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlBot)).prf
 
@@ -206,7 +206,7 @@ object AccessoryRules {
   case class mkNegPropNegEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
     // Π x: Prop, π (¬ x = ¬ (¬ x = ⊥))
 
-    override def name: lpConstantTerm = lpConstantTerm("negPropNegEqBot_eq")
+    override def name: lpConstantTerm = lpConstantTerm("negPropNegEqBot")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm(patternVarName)), lpOlBot))).prf
 
@@ -221,7 +221,7 @@ object AccessoryRules {
   case class mkPosPropNegEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
     // Π x: τ o, π (x = ¬ (x = ⊥))
 
-    override def name: lpConstantTerm = lpConstantTerm("propNegEqBot_eq")
+    override def name: lpConstantTerm = lpConstantTerm("propNegEqBot")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlBot))).prf
 
@@ -235,7 +235,7 @@ object AccessoryRules {
   case class mkPropEqBot_script(patternVarName: String = "x") extends lpDefinedRules {
     // Π x: Prop, π (x = (¬ x = ⊥))
 
-    override def name: lpConstantTerm = lpConstantTerm("PropEqBot_eq")
+    override def name: lpConstantTerm = lpConstantTerm("PropEqBot")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlConstantTerm(patternVarName), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName)), lpOlBot)).prf
 
@@ -250,7 +250,7 @@ object AccessoryRules {
     // todo: replace occourences with the transformLit script
     // x: (π ((⊥ = x) = (¬ x)))
 
-    override def name: lpConstantTerm = lpConstantTerm("botNegProp_eq")
+    override def name: lpConstantTerm = lpConstantTerm("botNegProp")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlConstantTerm(patternVarName)), lpOlUnaryConnectiveTerm(lpNot, lpOlConstantTerm(patternVarName))).prf
 
@@ -265,7 +265,7 @@ object AccessoryRules {
     // todo: replace occourences with the transformLit script
     // x: (π ((⊤ = x) = x))
 
-    override def name: lpConstantTerm = lpConstantTerm("topPosProp_eq")
+    override def name: lpConstantTerm = lpConstantTerm("topPosProp")
 
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTop, lpOlConstantTerm(patternVarName)), lpOlConstantTerm(patternVarName)).prf
 
@@ -282,7 +282,7 @@ object AccessoryRules {
     val a = lpOlUserDefinedType(typeVarName)
     val x = lpOlTypedTermVar(lpOlConstantTerm(patternVarName1),a)
     val y = lpOlTypedTermVar(lpOlConstantTerm(patternVarName2),a)
-    override def name: lpConstantTerm = lpConstantTerm("liftEqExlicit_eq")
+    override def name: lpConstantTerm = lpConstantTerm("liftEqExlicit")
     // [a: Set] (x y : τ a) :(π ((x = y) = ((x = y) = ⊤)))
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y) , lpOlTop)).prf
 

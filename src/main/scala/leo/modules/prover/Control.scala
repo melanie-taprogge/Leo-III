@@ -491,7 +491,10 @@ package inferenceControl {
             val intoLitSubst = intoClauseSubst(intoIndex)
             leo.Out.finest(s"intoClauseSubst: ${intoClauseSubst.pretty(sig)}")
             leo.Out.finest(s"intoLitSubst: ${intoLitSubst.pretty(sig)}")
-            leo.Out.finest(s"maxLits = \n\t${intoClauseSubst.maxLits(sig).map(_.pretty(sig)).mkString("\n\t")}")
+            leo.Out.finest(s"number of lits ${intoClauseSubst.lits.length}")
+            val maxLits = intoClauseSubst.maxLits(sig)
+            leo.Out.finest(s"number of max lits ${maxLits.length}")
+            leo.Out.finest(s"maxLits = \n\t${maxLits.map(_.pretty(sig)).mkString("\n\t")}")
             myAssert(Clause.wellTyped(intoClauseSubst))
             myAssert(Literal.wellTyped(intoLitSubst))
             if (Configuration.isSet("noOrdCheck2") || !intoLitSubst.polarity || intoClauseSubst.maxLits(sig).contains(intoLitSubst)) { // FIXME: Approx. of selection strategy
