@@ -1,5 +1,28 @@
 Leo-III
 ========
+
+This is an extension of LEO-III outputing Lambdapi proofs.
+
+In this version, LEO-III has been enhanced to generate verifiable proof output files verifiable in the Dedukti Framework using [Lambdapi](https://github.com/Deducteam/lambdapi). To enable this feature, simply run the prover as usual and add the flag `--lp-output` followed by the directory where you want the Lambdapi files to be saved. 
+
+**Note:**  
+- The extension is still ongoing.
+- Generally, the proofs follow the same pattern as the proofs given by LEO-III in the TSTP format, but the steps of the proof are presented as substeps in the Lambdapi scripts.
+- So far, only a part of the inference rules have been implemented and some of their instances my requre additional steps that have not yet been encoded. Any steps that cannot be encoded yet are given as assumptions.
+
+**Requirements:**  
+- You must have the latest releases of both [Lambdapi](https://github.com/Deducteam/lambdapi) and the [Lambdapi Standard Library](https://github.com/Deducteam/lambdapi-stdlib) installed.
+
+**References:**  
+- This project is described in a paper currently submitted for publication: *"Towards the Verification of Higher-Order Logic Automated Reasoning"* by Taprogge, Blanqui, and Steen.
+- It originates from the work presented in the Master's thesis available [here](https://inria.hal.science/hal-04733263v1).
+
+<details>
+<summary>Original LEO-III README.md</summary>
+
+<original LEO-III README.md>
+
+</
 *An automated theorem prover for classical higher-order logic with choice*
 
 Leo-III [SB19,S18,SB18] is an automated theorem prover for (polymorphic) higher-order logic which supports all common TPTP dialects, including THF, TFF and FOF as well as their rank-1 polymorphic derivatives [Sut08,SWB17]. 
@@ -57,4 +80,4 @@ Further information including related projects can be found on the [Leo-III proj
     Workshop on the Implementation of Logics (Doha, Qattar), CEUR Workshop 
     Proceedings 418, 38-49.
     
-
+>
