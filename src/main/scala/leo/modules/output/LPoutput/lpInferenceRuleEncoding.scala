@@ -210,6 +210,7 @@ object lpInferenceRuleEncoding {
     }
   }
 
+  /*
   case class liftEq(eq0: Boolean, pol0: Boolean) extends inferenceRules {
     // produce equalitites for rewrite tactic in cases where equality lift changes the representation in the lp encoding
     // this occours when....
@@ -241,7 +242,8 @@ object lpInferenceRuleEncoding {
       if (eq0) {
         // in this case we only need a rule if the literal has negative polarity
         // [a] (x y : τ a) : π ((x ≠ y) = (¬ (x = y)))
-        lpProofScript(Seq(lpProofScriptStringProof("assume a x y;\n\treflexivity")))
+        //lpProofScript(Seq(lpProofScriptStringProof("assume a x y;\n\treflexivity")))
+        throw new Exception("trying to output proof for equality lift in LP encoding, but sides are equivalent")
       } else {
         throw new Exception("proof for liftEq not encoded yet")
       }
@@ -253,6 +255,7 @@ object lpInferenceRuleEncoding {
       lpFunctionApp(name, Seq(x, y), Seq(a))
     }
   }
+   */
 
   ////////////////////////////////////////////////////////////////
   ////////// Meta-Theorem

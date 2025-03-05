@@ -188,7 +188,7 @@ object ModularProofEncoding {
       //val encMap = editedLiterals.map{case (lorig,led) => (term2LP(asTerm(lorig),bVarMap,sig)._1,term2LP(asTerm(led),bVarMap,sig)._1)}.toMap
       var litsAfterFunext: Seq[lpOlTerm] = Seq.empty
       var literalsToEqRW: Seq[lpProofScriptStep] = Seq.empty
-      if (parent.cl.lits.length > 1) cantEncode = cantEncode :+ "parent of length longer than two"
+      if (parent.cl.lits.length > 1) cantEncode = cantEncode :+ "parent of length longer than one"
       parent.cl.lits foreach { origLit =>
         val edLit = editedLiteralsMap.getOrElse(origLit, origLit)
 
@@ -213,9 +213,9 @@ object ModularProofEncoding {
             val (literalsToEqRW0, usedSymbols0, canEncode0) = transformLiteral(encEditLit0, encEditedLit00, parent.cl.lits.indexOf(origLit), parent.cl.lits.length)
             if (!canEncode0) {
               cantEncode = cantEncode :+ "unencoded transformation necessary"
-              Out.lp_debug_info(s"Transformation to equational form is applied: ${literalsToEqRW0.map(_.pretty)}")
-            }else{
               Out.lp_debug_info(s"Transformation to equational form necessary but can not be applied")
+            }else{
+              Out.lp_debug_info(s"Transformation to equational form is applied: ${literalsToEqRW0.map(_.pretty)}")
             }
             usedSymbols = usedSymbols ++ usedSymbols0
             literalsToEqRW = literalsToEqRW ++ literalsToEqRW0
@@ -238,7 +238,7 @@ object ModularProofEncoding {
           }
           // todo: nested application of funext in cases with more than two applied symbols
 
-          if (!origLit.polarity) cantEncode = cantEncode :+ "negative literals unencoded"
+          if (!origLit.polarity) cantEncode = cantEncode :+ "NFE literals unencoded"
           else {
             usedSymbols = usedSymbols + funExtPosEq_rev()
             if (appliedVars.isEmpty) {
