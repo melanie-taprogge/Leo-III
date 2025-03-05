@@ -198,7 +198,7 @@ object ModularProofEncoding {
           val encOrigLitRhs = term2LP(origLit.right, bVarMap, sig)._1
           val encOrigLit = term2LP(asTerm(origLit), bVarMap, sig)._1
           val encEditLit0 = term2LP(asTerm(edLit), bVarMap, sig)._1
-          val encEditLitTy = type2LP(edLit.left.ty, sig)._1
+          val encEditLitTy = type2LP(edLit.left.ty, sig)
           Out.lp_debug_info(s"applying FunExt to literal ${encOrigLit.pretty}, resulting in ${encEditLit0.pretty}")
 
           val encEditedLit: lpOlTerm = if (!edLit.equational) {
@@ -403,7 +403,7 @@ object ModularProofEncoding {
     var maxLit_l0: lpOlTerm = term2LP(maxLit.left, bVarMap, sig)._1
     var maxLit_r0: lpOlTerm = term2LP(maxLit.right, bVarMap, sig)._1
     val ty = if (maxLit.equational) maxLit.left.ty else asTerm(maxLit).ty
-    val encType = type2LP(ty, sig)._1
+    val encType = type2LP(ty, sig)
     val (posOtherLit0, posMaxLit0) = (findLitInClause(otherLit, parent),findLitInClause(maxLit, parent))
     assert(posMaxLit0.length == 1 && posOtherLit0.length == 1, "multiple occurences of max or alternative literal found in lpEncoidng") //todo: what does Leo do here?
     var (posMaxLit, posOtherLit) = (posMaxLit0.head, posOtherLit0.head)
@@ -630,7 +630,7 @@ object ModularProofEncoding {
     var parentLits = parentEnc.lits
 
     assert(otherLit.right.ty == maxLit.right.ty)
-    val eqTypeEnc = type2LP(otherLit.right.ty,sig)._1
+    val eqTypeEnc = type2LP(otherLit.right.ty,sig)
     Out.lp_debug_info(s"Applying to parent ${parentEnc.pretty}")
     Out.lp_debug_info(s"MaxLit is ${maxLitEnc.pretty}, OtherLit is ${otherLitEnc.pretty}")
 
@@ -640,7 +640,7 @@ object ModularProofEncoding {
     var maxLit_l: lpOlTerm = lpOlNothing
     var maxLit_r: lpOlTerm = lpOlNothing
     val ty = if (maxLit.equational) maxLit.left.ty else asTerm(maxLit).ty
-    val encType = type2LP(ty, sig)._1
+    val encType = type2LP(ty, sig)
 
     // Identify the two literals to be unified and compose a function proving the rule application including all necessary transformations:
     //    a) If the order of the left- and right-hand sides in either of the literals has to changed in order for the encoded equal factoring rule to associate the sides correctly, apply eqSym_eq
@@ -941,7 +941,7 @@ object ModularProofEncoding {
         // in this case we need to find out the type of the terms in this equality to instanciate the simplification rule with them
         val ty = termAtRewriteVar match {
           case tl === tr =>
-            type2LP(tl.ty, sig, Set.empty)._1
+            type2LP(tl.ty, sig)
           //todo: can equivalence also occour here
           case _ => throw new Exception(s"detected connective other than equality where equality was exprected")
         }
@@ -1066,7 +1066,7 @@ object ModularProofEncoding {
           val (lhs, rhs) = lhsRhs.get
           val encRhs = term2LP(rhs, bVars, sig)._1
           val encLhs = term2LP(lhs, bVars, sig)._1
-          val encType = type2LP(lhs.ty, sig)._1
+          val encType = type2LP(lhs.ty, sig)
           val litPol = lit.polarity
           val rwPattern = generateClausePatternTerm(Seq(permutation.indexOf(indx)), indices.length, None, lpOlUntypedVar(lpOlConstantTerm("x")), litPol)
           if (rwPattern.isDefined) Out.lp_debug_info(s"generated pattern for rewrite operation: ${rwPattern.get.pretty}")
@@ -1202,7 +1202,7 @@ object ModularProofEncoding {
       val rewriteEq = rewriteEqClause.lits.head
       val rwLhs = term2LP(rewriteEq.left, bVarsRewriteEq, sig)._1
       var rwRhs = term2LP(rewriteEq.right, bVarsRewriteEq, sig)._1
-      val rwType = type2LP(rewriteEq.right.ty, sig)._1
+      val rwType = type2LP(rewriteEq.right.ty, sig)
       val rwPol = rewriteEq.polarity
 
       // check that none of the things not yet encoded occur
@@ -1413,7 +1413,7 @@ object ModularProofEncoding {
       if (!uniC.polarity){
         // in this case, we need to first show that both sides are equal modulo simplification and then apply a Simp Rule that postulates that x≠x = ⊥
         // the rewrite rule used here needs to explicitly instanciate the used type, therefore we first need to find that type out:
-        var ty = type2LP(uniC.left.ty, sig, Set.empty)._1
+        var ty = type2LP(uniC.left.ty, sig)
         val lastLit = lastLit0 match {
           case lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, ty0, lhs, _)) =>
             ty = ty0

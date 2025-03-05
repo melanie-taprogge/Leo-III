@@ -568,7 +568,7 @@ object ToTPTP {
 
   // Type quantification collection
   @tailrec
-  private final def collectForallTys(count: Int, ty: Type): (Int, Type) = {
+  final def collectForallTys(count: Int, ty: Type): (Int, Type) = {
     ty match {
       case ∀(t) => collectForallTys(count+1, t)
       case _ => (count, ty)

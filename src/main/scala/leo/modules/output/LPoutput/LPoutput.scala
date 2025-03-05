@@ -237,7 +237,8 @@ object LPoutput {
       val sig = state.signature
       val proof = state.proof
 
-      var usedSymbols:Set[lpStatement] = Set.empty // always add them because they are necessary for equality tactics. Todo: handle differently
+      var usedSymbols: Set[lpStatement] = Set.empty // always add them because they are necessary for equality tactics. Todo: handle differently
+      var tptpDefinedSymbols:Set[lpStatement] = Set.empty // always add them because they are necessary for equality tactics. Todo: handle differently
       var parameters: (Int,Int,Int,Int) = (0,0,0,0)
 
       // add symbols of the user defined TPTP problem signature if necessary
@@ -255,12 +256,10 @@ object LPoutput {
           //user defined types: add declarations to the problem
           //todo: what is saved as a kind? look at lines 96-99 in toTPTPscala again
           typeDecSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,lpSet).pretty)
-          usedSymbols = usedSymbols + lpSet
 
         }else{
           if (symbol.hasType) {
-            val (typeDec, updatedUsedSymbols) = type2LP(symbol._ty, sig, usedSymbols)
-            usedSymbols = updatedUsedSymbols
+            val typeDec = type2LP(symbol._ty, sig)
             typeDecSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,typeDec.lift2Meta).pretty)
           }
 
@@ -268,31 +267,12 @@ object LPoutput {
 
             //val encAsRewriteRule = false
 
-            val (bVarTys, body) = collectLambdasLP(symbol._defn)
+            val (bVarTys, _) = collectLambdasLP(symbol._defn)
             val newBVars = makeBVarList(bVarTys,0)
-            val (definition, _) = term2LP(symbol._defn, fusebVarListwithMap(newBVars, Map()), sig)
+            val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, fusebVarListwithMap(newBVars, Map()), sig)
+            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
 
-            /*
-            val (definition, updatedUsedSymbols,boundVars) = def2LP(symbol._defn, sig, usedSymbols, encAsRewriteRule)
-            usedSymbols = updatedUsedSymbols
-            var variables: Seq[lpOlUntypedVar] = Seq.empty
-            boundVars foreach { v_t =>
-              variables = variables :+ lpOlUntypedVar(lpOlConstantTerm(v_t._1))
-              // todo: for poylmorphic types this might have to be extended
-              //if (encAsRewriteRule) variables = variables :+ lpRuleVariable(lpOlConstantTerm(v_t._1))
-              //else variables = variables :+ lpOlUntypedVar(lpOlConstantTerm(v_t._1))
-            }
-            val encodedDef = {
-              if (encAsRewriteRule) {
-                lpRule(lpOlConstantTerm(sName),variables,definition)
-              } else {
-                val defTermType = type2LP(symbol._defn.ty,sig)._1
-                val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq,defTermType,lpOlFunctionApp(lpOlConstantTerm(sName),variables.map(Left(_))),definition)
-                lpDeclaration(lpConstantTerm(s"${sName}_def"),variables,defAsEq.prf)
-              }
-             */
-
-            val defTermType = type2LP(symbol._defn.ty, sig)._1
+            val defTermType = type2LP(symbol._defn.ty, sig)
             val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(sName), Seq.empty), definition)
             val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
             Out.lp_debug_info(s"${symbol._defn.pretty}")
@@ -302,10 +282,6 @@ object LPoutput {
         }
       }
       val objectDecSB = typeDecSB.append(defSB)
-      if (objectDecSB.length != 0){
-        proofFileSB.append("// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
-        proofFileSB.append(objectDecSB)
-      }
 
       // encode the clauses representing the steps
       // todo: Also make it possible to just output one long lambda-term
@@ -328,23 +304,24 @@ object LPoutput {
             //print(s" symbols in negated conjecture: ${symbols(step.cl).map(sig.apply(_).name)}\n")
             if (conjEnc) throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
             conjEnc = true
-            val (encConj, _) = clause2LP(step.cl, usedSymbols, sig)
+            val (encConj, tptpDefinedSymbols0) = clause2LP(step.cl, Set(), sig)
+            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
             identicalSteps += (stepId -> conjName)
             conjecture = encConj.lits match {
               case Seq(lpOlUnaryConnectiveTerm(lpNot, conj)) => conj
               case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
             }
           } else if (step.role == Role_Axiom){ //todo: what about other roles like lamme etc. ?
-            val (encClause, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
-            usedSymbols = usedSymbolsNew
+            val (encClause, tptpDefinedSymbols0) = clause2LP(step.cl, Set(), sig)
+            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
             val axName = lpConstantTerm(s"axiom$axCounter")
             problemEncSB.append(lpDeclaration(axName, Seq.empty, encClause).pretty)
             identicalSteps += (stepId -> axName)
             axCounter = axCounter + 1
           }else {
 
-            val (encStep, usedSymbolsNew) = clause2LP(step.cl, usedSymbols, sig)
-            usedSymbols = usedSymbolsNew
+            val (encStep, tptpDefinedSymbols0) = clause2LP(step.cl, Set(), sig)
+            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
 
             var encodeStep = false
 
@@ -404,6 +381,34 @@ object LPoutput {
               }
             }
           }
+      }
+
+      // Generate declarations of symbols that are implicit in TPTP but not mapped to a Lambdapi encoding
+      if (tptpDefinedSymbols.nonEmpty){
+        var declareInts = false
+        var tptpSymbolsSB: mutable.StringBuilder = new StringBuilder()
+        tptpDefinedSymbols foreach {tptpSymbol =>
+          tptpSymbol match {
+          case lpInt(n) =>
+              declareInts = true
+              val intDec = lpDeclaration(tptpSymbol,Seq(),lpIntType.lift2Meta)
+              tptpSymbolsSB.append(intDec.pretty)
+          case lpTptpOperator(name,ty,vars) =>
+              tptpSymbolsSB.append(lpTptpOperator(name,ty,vars).dec.pretty)
+          case _ => Out.lp_debug_info(s"LP-Encoding: Found TPTP defined symbol ${tptpSymbol.pretty}")
+        }
+        }
+        if (declareInts) {
+          val intDec = lpDeclaration(lpIntType,Seq(),lpSet)
+          Out.lp_debug_info(s"need to define ints: ${intDec.pretty}")
+          tptpSymbolsSB.insert(0,intDec.pretty)
+        }
+        proofFileSB.append("// TPTP SYMBOL ENCODINGS /////////////////////////////////\n\n")
+        proofFileSB.append(tptpSymbolsSB)
+      }
+      if (objectDecSB.length != 0) {
+        proofFileSB.append("\n\n// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
+        proofFileSB.append(objectDecSB)
       }
 
       if (problemEncSB.length != 0) {

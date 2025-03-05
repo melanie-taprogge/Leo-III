@@ -119,7 +119,7 @@ package object LPoutput {
     var applySymbolsToParent: Seq[lpUntypedVar] = Seq.empty
     parent.implicitlyBound foreach { name_type =>
       //clauseQuantification.append(s"(${bVarMap(name_type._1)}: $Els($uparrow ${type2LP(name_type._2, sig)._1}))")
-      clauseQuantification = clauseQuantification :+ lpTypedVar(lpConstantTerm(bVarMap(name_type._1)), type2LP(name_type._2, sig)._1.lift2Meta)
+      clauseQuantification = clauseQuantification :+ lpTypedVar(lpConstantTerm(bVarMap(name_type._1)), type2LP(name_type._2, sig).lift2Meta)
       //applySymbolsToParent = applySymbolsToParent ++ Seq(bVarMap(name_type._1))
       applySymbolsToParent = applySymbolsToParent :+ lpUntypedVar(lpConstantTerm(bVarMap(name_type._1)))
     }
@@ -201,7 +201,7 @@ package object LPoutput {
           }
           else throw new Exception(s"invalid position $currentPosition vor connective ${lpOr.pretty}")
         case tl === tr =>
-          val ty = type2LP(tl.ty, sig, Set())._1
+          val ty = type2LP(tl.ty, sig)
           if (currentPosition == 1) {
             val (intermediatePattern, intermediateTerm) = acessSubterm(tr, position.tail, sig, patternVar)
             (lpOlTypedBinaryConnectiveTerm(lpEq, ty, intermediatePattern, lpOlWildcard), intermediateTerm)
