@@ -1271,7 +1271,6 @@ package inferenceControl {
       */
     final def applyNew(cl: AnnotatedClause)(implicit state: LocalState): Set[AnnotatedClause] = {
       val LP = true //todo: make a parameter
-      var addInfo: Seq[(Literal,Literal)] = Seq.empty // todo only track if LP is true
       if (isPropSet(ClauseAnnotation.PropFuncExt, cl.properties)) Set.empty
       else {
         implicit val sig: Signature = state.signature
@@ -1299,7 +1298,7 @@ package inferenceControl {
             val posFuncExtStep = steps.next()
             val newClause = Clause(posFuncExtStep._1 ++ appliedNegFuncExtLits ++ otherLits)
             val newInfo = new FurtherInfo() //todo : im sure there is a more elegant way of instantiation
-            newInfo.edLitBeforeAfter = addInfo ++ Seq(posFuncExtStep._2)
+            newInfo.edLitBeforeAfter = addInfo ++ posFuncExtStep._2
             result = result + AnnotatedClause(newClause, Role_Plain, InferredFrom(FuncExt, cl), newProp, newInfo)
           }
           Out.trace(s"[FuncExtControl] Result(s):\n\t${result.map(_.pretty(sig)).mkString("\n\t")}")
@@ -1309,17 +1308,17 @@ package inferenceControl {
           Set.empty
       }
     }
-    private final def exhaustiveSteps(posLits: Seq[Literal], vargen: FreshVarGen)(sig: Signature): (Seq[Seq[Literal]],Seq[(Literal,Literal)]) = {
+    private final def exhaustiveSteps(posLits: Seq[Literal], vargen: FreshVarGen)(sig: Signature): (Seq[Seq[Literal]],Seq[Seq[(Literal,Literal)]]) = {
       if (posLits.isEmpty) (Seq(Seq.empty),Seq.empty)
       else exhaustiveSteps0(posLits, vargen, Seq.empty, Seq.empty)(sig)
     }
-    @tailrec private final def exhaustiveSteps0(posLits: Seq[Literal], vargen: FreshVarGen, done: Seq[Literal], acc: Seq[Seq[Literal]], addInfo0: Seq[(Literal,Literal)]=Seq.empty)(sig: Signature): (Seq[Seq[Literal]],Seq[(Literal,Literal)]) = {
+    @tailrec private final def exhaustiveSteps0(posLits: Seq[Literal], vargen: FreshVarGen, done: Seq[Literal], acc: Seq[Seq[Literal]], addInfo0: Seq[Seq[(Literal,Literal)]]=Seq.empty)(sig: Signature): (Seq[Seq[Literal]],Seq[Seq[(Literal,Literal)]]) = {
       if (posLits.isEmpty) (acc,addInfo0)
       else {
         val appliedOneStepPosFuncExtLits = posLits.map(lit => FuncExt.applyNew(lit, vargen)(sig))
         val addInfo = posLits.zip(appliedOneStepPosFuncExtLits).map { case (x, y) => (x, y)}
         val (_,todoLits,doneLits) = FuncExt.canApply(appliedOneStepPosFuncExtLits)
-        exhaustiveSteps0(todoLits, vargen, done ++ doneLits, acc :+ (appliedOneStepPosFuncExtLits ++ done), addInfo0 ++ addInfo)(sig)
+        exhaustiveSteps0(todoLits, vargen, done ++ doneLits, acc :+ (appliedOneStepPosFuncExtLits ++ done), addInfo0 :+ addInfo)(sig)
       }
     }
   }

@@ -252,8 +252,8 @@ object lpDatastructures {
   case class lpliftedObjectType(ty: lpOlType) extends lpMlType {
     def pretty: String = {
       ty match {
-        case _ :lpOlMonoType => s"(${lpEl.pretty} ${ty.pretty})"
-        case _ :lpOlPolyType => s"(${lpEls.pretty} ${ty.pretty})"
+        case _ :lpOlMonoType => s"${lpEl.pretty} ${ty.pretty}"
+        case _ :lpOlPolyType => s"${lpEls.pretty} ${ty.pretty}"
         case _ => throw new Exception(s"failed to print lpliftedObjectType, $ty has wrong format")
       }
     }
@@ -264,7 +264,7 @@ object lpDatastructures {
   case class lpliftedMonoType(ty: lpOlMonoType) extends lpOlPolyType {
     def pretty: String = {
       if (monomorphic) s"${ty.pretty}"
-      else s"(${lpSet2Schme.pretty} ${ty.pretty})"
+      else s"${lpSet2Schme.pretty} ${ty.pretty}"
     }
     override def lift2Meta: lpMlType = {
       lpliftedObjectType(lpliftedMonoType(ty))

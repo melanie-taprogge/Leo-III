@@ -229,7 +229,6 @@ package object LPoutput {
   def findRWTerm0(rwMap:Map[lpOlTerm, lpOlTerm], searchIn:lpOlTerm, rwUnderBinder:Boolean = false, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x")), currentX:Int = 0): (lpOlTerm, lpOlTerm, Int, Boolean) = {
     // find a specific subterm for the application of a rewrite operation
     // this function returns: The rewrite-pattern, the term modulo rewriting and an integer signaling how often the pattern was found.
-    Out.lp_debug_info(s"is ${rwMap.keySet} in $searchIn ? ${rwMap.keySet.contains(searchIn)}")
     if (rwMap.keySet.contains(searchIn)) (patternVar,rwMap(searchIn), currentX + 1, rwUnderBinder)
     else {
       searchIn match {
@@ -330,7 +329,9 @@ package object LPoutput {
         Out.lp_debug_info(s"rewriting with dictionary $substDict")
         Out.lp_debug_info(s"searching in $body")
 
-        val reduced = findRWTerm0(substDict,body)._2
+        val reducedBody = findRWTerm0(substDict,body)._2
+        val remainingVars = vars.drop(args.length)
+        val reduced = if (remainingVars.nonEmpty) lpOlLambdaTerm(remainingVars,reducedBody) else reducedBody
         Out.lp_debug_info(s"reduced to ${reduced.pretty}")
         reduced
       // in all other cases we need to search substructures for reducable terms

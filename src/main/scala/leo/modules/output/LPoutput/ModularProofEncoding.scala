@@ -161,88 +161,77 @@ object ModularProofEncoding {
 
   def encFuncExtPos(child: ClauseProxy, parent: ClauseProxy, editedLiterals: Seq[(Literal, Literal)], parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Set[lpStatement], Option[String]) = {
 
+    // Set up counters and Lists
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     var usedSymbols: Set[lpStatement] = Set.empty
-    var editLitCount = 0
     var cantEncode: Seq[String] = Seq.empty
+    var editLitCount = 0
 
+    // Preliminary encodings and conversions
+    val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
+    //val impBoundParent = parent.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
+    val encParent = clause2LP(parent.cl, Set(), sig)._1
+    var (currParentLits, impBoundParent) = (encParent.lits, encParent.impBoundVars)
+    var lastStepName: lpTerm = lpFunctionApp(parentNameLpEnc, impBoundParent)
+    val editedLiteralsMap = editedLiterals.toMap
+    // check if we will need to do a permutation
+    val editedLiteralsMap_rev = editedLiterals.map(tuple => (tuple._2,tuple._1)).toMap
+    val permutation = child.cl.lits.map(childLit => parent.cl.lits.indexOf(editedLiteralsMap_rev.getOrElse(childLit,childLit)))
+
+    // The modular proof script can consist of the following steps:
+    // 1. Abstract over free variables
+    // For each affected literal:
+    //    2.   Instantiate PFE and use it to define a new hypothesis
+    //    3.   Use the proven hypothesis to apply the changes to the (instantiated) parent formula, using the appropriate transform rule
+    //    4 a) If necessary, transform the literal in the parent to equational form
+    //    4 b) If the order within the literal was changed, apply eqSym_eq
+    // 5. If the order of literals was changed, generate a permute rule and apply it to permute the literals
+    // 6. Refine with the last step
+
+    Out.lp_debug_info(s"Amount of edited Literals detected: ${editedLiterals.length}")
     if (editedLiterals.length > 0) {
 
-      val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
+      /////////////////////////////////////////////////////
+      //// preliminary
+      var litsAfterFunext: Seq[lpOlTerm] = Seq.empty
+      // Seq to keep track of the literals that need to be transformed to equational form
+      var literalsToEqRW: Seq[lpProofScriptStep] = Seq.empty
 
-      // The modular proof script can consist of the following steps:
-      // 1. Abstract over free variables
-      // For each affected literal:
-      //    2. If the order within the literal was changed, apply eqSym_eq
-      //    2.5 If necessary, transform the literal in the parent to equational form
-      //    3. Instantiate PFE and use it to define a new hypothesis (in the case of a nested application, use impTrans)
-      // 4. Use the proven hypothesis to apply the changes to the (instantiated) parent formula, using the appropriate transform rule
-      // 5. If the order of literals was changed, generate a permute rule and apply it to permute the literals
-      // 6. Refine with the last step
-
-      // 1. Abstract over free variables
+      /////////////////////////////////////////////////////
+      //// 1. Abstract over free variables
       val freeVarsChild = child.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
       if (freeVarsChild.nonEmpty) allSteps = allSteps :+ lpAssume(freeVarsChild)
 
-      val editedLiteralsMap = editedLiterals.toMap
-      //val encMap = editedLiterals.map{case (lorig,led) => (term2LP(asTerm(lorig),bVarMap,sig)._1,term2LP(asTerm(led),bVarMap,sig)._1)}.toMap
-      var litsAfterFunext: Seq[lpOlTerm] = Seq.empty
-      var literalsToEqRW: Seq[lpProofScriptStep] = Seq.empty
-      if (parent.cl.lits.length > 1) cantEncode = cantEncode :+ "parent of length longer than one"
+      /////////////////////////////////////////////////////
+      //// Steps 2 to 4
       parent.cl.lits foreach { origLit =>
         val edLit = editedLiteralsMap.getOrElse(origLit, origLit)
-
         if (edLit != origLit) {
-
+          // Do all the necessary encodings
           val encOrigLitLhs = term2LP(origLit.left, bVarMap, sig)._1
           val encOrigLitRhs = term2LP(origLit.right, bVarMap, sig)._1
+          val encOrigLitTy = type2LP(origLit.left.ty, sig)
           val encOrigLit = term2LP(asTerm(origLit), bVarMap, sig)._1
           val encEditLit0 = term2LP(asTerm(edLit), bVarMap, sig)._1
           val encEditLitTy = type2LP(edLit.left.ty, sig)
           Out.lp_debug_info(s"applying FunExt to literal ${encOrigLit.pretty}, resulting in ${encEditLit0.pretty}")
 
-          val encEditedLit: lpOlTerm = if (!edLit.equational) {
-            // if the edited literal is no longer equational, the application of FunExt has lead to the RHS becoming top and we work with the equaitonal
-            // for in the following steps.
-            val encEditedLit00 = encEditLit0 match {
-              case lpOlUnaryConnectiveTerm(`lpNot`, body) =>
-                lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, body, lpOlBot)
-              case _ =>
-                lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encEditLit0, lpOlTop)
-            }
-            val (literalsToEqRW0, usedSymbols0, canEncode0) = transformLiteral(encEditLit0, encEditedLit00, parent.cl.lits.indexOf(origLit), parent.cl.lits.length)
-            if (!canEncode0) {
-              cantEncode = cantEncode :+ "unencoded transformation necessary"
-              Out.lp_debug_info(s"Transformation to equational form necessary but can not be applied")
-            }else{
-              Out.lp_debug_info(s"Transformation to equational form is applied: ${literalsToEqRW0.map(_.pretty)}")
-            }
-            usedSymbols = usedSymbols ++ usedSymbols0
-            literalsToEqRW = literalsToEqRW ++ literalsToEqRW0
-            encEditedLit00
-
-          } else encEditLit0
-          // 2. If the order within the literal was changed, apply eqSym_eq
-          // todo
-
-          // 3. Instantiate PFE and use it to define a new hypothesis
-          val namefunExtStep = s"${funExtPosEq_rev().name.pretty}_$editLitCount"
-          editLitCount = editLitCount + 1
-          // Construction the equality to be proved
-          val impToProve = lpMlFunctionType(Seq(encOrigLit.prf,encEditedLit.prf))
-          // Track the newly applied variables and proof the application of funExt
-          val freshVars = edLit.fv.diff(origLit.fv)
-          var appliedVars: Seq[lpOlTerm] = Seq.empty
-          freshVars foreach { freshVar =>
-            appliedVars = appliedVars :+ lpOlUntypedVar(lpOlConstantTerm(bVarMap(freshVar._1)))
-          }
-          // todo: nested application of funext in cases with more than two applied symbols
-
           if (!origLit.polarity) cantEncode = cantEncode :+ "NFE literals unencoded"
           else {
-            usedSymbols = usedSymbols + funExtPosEq_rev()
+            val indexOfLit = parent.cl.lits.indexOf(origLit)
+            // Find the terms we need to apply. Usually, this will be variables, but in some cases we need to use witness terms.
+            // Track the newly applied variables
+            val freshVars = edLit.fv.diff(origLit.fv)
+            var appliedVars: Seq[lpOlTerm] = freshVars.map(freshVar => lpOlTypedTermVar(lpOlConstantTerm(bVarMap(freshVar._1)),type2LP(freshVar._2,sig))).toSeq //Seq.empty
+            /*freshVars foreach { freshVar =>
+              appliedVars = appliedVars :+ lpOlUntypedVar(lpOlConstantTerm(bVarMap(freshVar._1)))
+            }
+             */
+            // In some cases, we need witness terms for the application instead of variables
+            // todo: once you have implmeneted nested applications:
+            //  instead find by comparing len of applied args and num of rule application
+            //  ( to also catch examples that require both variables and witness terms)
             if (appliedVars.isEmpty) {
-              // find out the type of the variables we abstract over
               val encTypes = encOrigLit match {
                 case lpOlTypedBinaryConnectiveTerm(_,_,lpOlLambdaTerm(vars,_),_) =>
                   vars.map(_.ty)
@@ -255,64 +244,161 @@ object ModularProofEncoding {
                 case _ => throw new Exception(s"trying to generate witness term for a type that is not an encoded HOL type")
               })
             }
-
+            Out.lp_debug_info(s"applied variables: ${appliedVars}")
+            // Instancaite some values we will update for nested applications
             var (resLhs, resRhs) = (encOrigLitLhs, encOrigLitRhs)
-            appliedVars foreach { appliedVar =>
-              val refineWithFunExt = lpRefine(funExtPosEq_rev().instanciate(None, encOrigLitLhs, encOrigLitRhs, appliedVar))
-              allSteps = allSteps :+ lpHave(namefunExtStep, impToProve, lpProofScript(Seq(refineWithFunExt)))
-              Out.lp_debug_info(s"Proving instancion of PFE to prove ${impToProve.pretty}")
-
-              // test if the application of funExt to the literal changes the sides of the literal todo: replace by builtin beta reduction and comparison modulo
-              //val vargen = freshVarGen(parent.cl)
-              //val newVar = vargen(edLit.left.ty._funDomainType)
-              //val appliedLeft = Term.mkTermApp()
-              // we need to compare what we are deriving with funExt to the type we have to actually derive and changes sides if applicable
-              // the term we derive needs to be constructed based on
-              resLhs = lpOlFunctionApp(resLhs,Seq(Left(appliedVar)))
-              resRhs = lpOlFunctionApp(resRhs,Seq(Left(appliedVar)))
+            var currentTypeSeq : Seq[lpOlType] = encOrigLitTy match {
+              case lpOlFunctionType(types) => types
+              case _ => throw new Exception(s"LP-ENCODING: Expected function type but found ${encOrigLitTy.pretty}")
             }
-            // we compute the term that results from our rule application
-            val reducedLhs = betaReduceLpApplication(resLhs)
-            val reducedRhs = betaReduceLpApplication(resRhs)
+            // we carry out the instanciation for each application
+            appliedVars foreach { appliedVar =>
+              /////////////////////////////////////////////////////
+              //// 2.   Instantiate PFE and use it to define a new hypothesis
+              val namefunExtStep = s"${funExtPosEq_rev().name.pretty}_$editLitCount"
+              // Construction the literal to be proved
+              val unappliedLit = lpOlTypedBinaryConnectiveTerm(lpEq, lpOlFunctionType(currentTypeSeq), resLhs, resRhs)
+              val (appliedLhs, appliedRhs) = (betaReduceLpApplication(lpOlFunctionApp(resLhs, Seq(Left(appliedVar)))), betaReduceLpApplication(lpOlFunctionApp(resRhs, Seq(Left(appliedVar)))))
+              val (appliedType, currentType) = (currentTypeSeq.tail, currentTypeSeq.head)
+              val appliedLit = lpOlTypedBinaryConnectiveTerm(lpEq, lpOlFunctionType(appliedType), appliedLhs, appliedRhs)
+              // Instanciation of the step
+              val impToProve = lpMlFunctionType(Seq(unappliedLit.prf, appliedLit.prf))
+              val funExtImp = lpRefine(funExtPosEq_rev().instanciate(None, resLhs, resRhs, appliedVar))
+              allSteps = allSteps :+ lpHave(namefunExtStep, impToProve, lpProofScript(Seq(funExtImp)))
+              usedSymbols = usedSymbols + funExtPosEq_rev()
+              Out.lp_debug_info(s"Instance of $namefunExtStep to prove ${impToProve.pretty}")
 
-            Out.lp_debug_info(s"comparing ${encEditedLit} to ${lpOlTypedBinaryConnectiveTerm(lpEq,encEditLitTy,reducedRhs,reducedLhs)}")
+              // test if we need any rewriting on the parent
+              // todo: move here
+
+              /////////////////////////////////////////////////////
+              //// 3.   Use the proven hypothesis to apply the changes to the (instantiated) parent formula, using the appropriate transform rule
+              val applicationStepName = lpConstantTerm(s"${namefunExtStep}_app")
+              // if the length of the parent is greater than one, we need to use transform
+              val proofTerm : lpTerm = if (parent.cl.lits.length > 1) {
+                usedSymbols = usedSymbols + metaPermutation
+                val transformApp = metaTransform.instanciate(currParentLits,indexOfLit,lpConstantTerm(namefunExtStep),lastStepName)
+                transformApp
+              } else lpFunctionApp(lpConstantTerm(namefunExtStep), Seq(lastStepName))
+              val refineWithFunExt = lpRefine(lpFunctionApp(proofTerm, Seq()))
+              val newParentLits = currParentLits.updated(indexOfLit, appliedLit)
+              allSteps = allSteps :+ lpHave(applicationStepName.name, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, newParentLits).prf, lpProofScript(Seq(refineWithFunExt)))
+              lastStepName = applicationStepName
+              Out.lp_debug_info(s"Successfully applied $namefunExtStep (in setp $applicationStepName)")
+
+              // update all of the vars
+              resLhs = appliedLhs
+              resRhs = appliedRhs
+              currentTypeSeq = appliedType
+              currParentLits = newParentLits
+              editLitCount = editLitCount + 1
+            }
+            /////////////////////////////////////////////////////
+            //// 4. Apply necessary implicit transformations
+            // Compare the derived literal with the literal that it is mapped to and apply any necessary transformations
+
+            // ß-reduce the the derived literal to before comparing it
+            //appliedLit
+            // we compute the term that results from our rule application
+            //val reducedLhs = betaReduceLpApplication(resLhs)
+            //val reducedRhs = betaReduceLpApplication(resRhs)
+            val finalType : lpOlType = if (currentTypeSeq.length == 1) currentTypeSeq.head else lpOlFunctionType(currentTypeSeq)
+            val reducedAppliedLit =lpOlTypedBinaryConnectiveTerm(lpEq, finalType,resLhs,resRhs)
+            if (encEditLit0 != reducedAppliedLit){
+              Out.lp_debug_info(s"Looking for transformations to get from ${encEditLit0.pretty} to ${reducedAppliedLit.pretty}\n${encEditLit0} to \n${reducedAppliedLit}")
+              // if we had a permutation, we need to infer the index in the clause modulo application
+              val indexModuloPerm = permutation.indexOf(indexOfLit)
+              val (literalsToEqRW0, usedSymbols0, canEncode0) = transformLiteral(encEditLit0, reducedAppliedLit,indexModuloPerm, parent.cl.lits.length)
+              if (!canEncode0) {
+                cantEncode = cantEncode :+ "unencoded transformation necessary"
+                Out.lp_debug_info(s"Transformation to equational form necessary but can not be applied")
+              } else {
+                Out.lp_debug_info(s"Transformation to equational form is applied: ${literalsToEqRW0.map(_.pretty)}")
+              }
+              usedSymbols = usedSymbols ++ usedSymbols0
+              literalsToEqRW = literalsToEqRW ++ literalsToEqRW0
+            }
+            // afterwards we work with reducedAppliedLit
+
+
+
+            /*
+            val encEditedLit: lpOlTerm = if (!edLit.equational) {
+              val encEditedLit00 = encEditLit0 match {
+                case lpOlUnaryConnectiveTerm(`lpNot`, body) =>
+                  lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, body, lpOlBot)
+                case _ =>
+                  lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encEditLit0, lpOlTop)
+              }
+              val (literalsToEqRW0, usedSymbols0, canEncode0) = transformLiteral(encEditLit0, encEditedLit00, parent.cl.lits.indexOf(origLit), parent.cl.lits.length)
+              if (!canEncode0) {
+                cantEncode = cantEncode :+ "unencoded transformation necessary"
+                Out.lp_debug_info(s"Transformation to equational form necessary but can not be applied")
+              } else {
+                Out.lp_debug_info(s"Transformation to equational form is applied: ${literalsToEqRW0.map(_.pretty)}")
+              }
+              usedSymbols = usedSymbols ++ usedSymbols0
+              literalsToEqRW = literalsToEqRW ++ literalsToEqRW0
+              encEditedLit00
+            } else encEditLit0
+
+
+            // 2. If the order within the literal was changed, apply eqSym_eq
+            // todo
+
+            // we compute the term that results from our rule application
+            //val reducedLhs = betaReduceLpApplication(resLhs)
+            //val reducedRhs = betaReduceLpApplication(resRhs)
+
+            // todo: I think i have to move this further up now to because this all needs to happen before I apply stuff to the parent
+            Out.lp_debug_info(s"comparing ${encEditedLit.pretty} to ${lpOlTypedBinaryConnectiveTerm(lpEq,encEditLitTy,reducedRhs,reducedLhs).pretty}")
             val funExRes =
               if (encEditedLit.pretty == lpOlTypedBinaryConnectiveTerm(lpEq,encEditLitTy,reducedRhs,reducedLhs).pretty){ //todo: sometimes one side is encoded as an untyped var and the other as a typed one, hence comparison of pretty terms, fix it
                 Out.lp_debug_info(s"it is necessary to flip roigi, this is however not yet encoded")
                 cantEncode = cantEncode :+ "requires flip of orignial lit"
+                throw new Exception(s"FLIP ORIG LIT EXAMPLE")
                 lpOlTypedBinaryConnectiveTerm(lpEq,encEditLitTy,reducedLhs,reducedRhs)}
               else encEditedLit
 
-            //throw new Exception(s"reduced ${resLhs.pretty} to ${reducedLhs.pretty} and ${resRhs.pretty} to ${reducedRhs.pretty}")
-
             litsAfterFunext = litsAfterFunext :+ funExRes
+
+             */
           }
         }
       }
 
+      /////////////////////////////////////////////////////
+      //// 5. Apply permutation if necessary
+
+      val permTerm: lpTerm = if (permutation != parent.cl.lits.indices) {
+        Out.lp_debug_info(s"Permutation required: $permutation")
+        val permutationInstance = metaPermutation.instanciate(permutation,currParentLits,lastStepName)
+        Out.lp_debug_info(s"proposed permutation: ${permutationInstance.pretty}")
+        permutationInstance
+      } else lastStepName
+
+
+
+      /*
       // 4. Use the proven hypothesis to apply the changes to the (instanciated) parent formula, using the appropriate transform rule
       val applicationStepName = "FunExtApplication"
-      val impBoundParent = parent.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
       if (editedLiterals.length > 1) {
         cantEncode = cantEncode :+ "application to multiple literals not encoded yet"
-        //allSteps = allSteps :+ lpHave(applicationStepName,)
-        // combine the individual hypothesis with transform
       }
       else {
         val refineWithFunExt0 = lpRefine(lpFunctionApp(lpConstantTerm(s"${funExtPosEq_rev().name.pretty}_0"),Seq(lpFunctionApp(parentNameLpEnc, impBoundParent))))
         allSteps = allSteps :+ lpHave(applicationStepName,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,litsAfterFunext).prf,lpProofScript(Seq(refineWithFunExt0)))
       }
-
+       */
       allSteps = allSteps ++ literalsToEqRW
 
       // 5. If the order of literals was changed, generate a permute rule and apply it to permute the literals
       // todo
-      val lastStep = applicationStepName
 
       // 6. Refine with the (instantiated) parent
       // We can not necessarily refine the parent with the assumed variables since we may have introduced new variables in the child
       // Instead we detect the unbound variables of the parent to refine with them
-      allSteps = allSteps :+ lpRefine(lpFunctionApp(lpConstantTerm(lastStep),Seq()))
+      allSteps = allSteps :+ lpRefine(lpFunctionApp(permTerm,Seq()))
     }
     if (editLitCount == 0) cantEncode = cantEncode :+ "nested application of FunExt not encoded yet"
     if (! cantEncode.isEmpty) (lpProofScript(allSteps),usedSymbols, Some(s"FunExt can not be encoded: ${cantEncode.mkString(", ")}"))
