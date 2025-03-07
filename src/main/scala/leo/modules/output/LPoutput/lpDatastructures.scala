@@ -1,5 +1,7 @@
 package leo.modules.output.LPoutput
 
+import leo.datastructures.Int0
+
 /**
   *
   * @author Melanie Taprogge
@@ -49,7 +51,7 @@ object lpDatastructures {
   ////////////////////////// KINDS OF STATEMENTS ///////////////////////////////////////////////////////////////////////////////////
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
-  case class lpDeclaration(name: lpConstantTerm, variables: Seq[lpTerm], typing: lpType, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpStatement{
+  case class lpDeclaration(name: lpStatement, variables: Seq[lpTerm], typing: lpType, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpStatement{
     override def pretty: String = {
 
       val typedImpArgs = implicitArgs.map {
@@ -250,8 +252,8 @@ object lpDatastructures {
   case class lpliftedObjectType(ty: lpOlType) extends lpMlType {
     def pretty: String = {
       ty match {
-        case _ :lpOlMonoType => s"(${lpEl.pretty} ${ty.pretty})"
-        case _ :lpOlPolyType => s"(${lpEls.pretty} ${ty.pretty})"
+        case _ :lpOlMonoType => s"${lpEl.pretty} ${ty.pretty}"
+        case _ :lpOlPolyType => s"${lpEls.pretty} ${ty.pretty}"
         case _ => throw new Exception(s"failed to print lpliftedObjectType, $ty has wrong format")
       }
     }
@@ -262,7 +264,7 @@ object lpDatastructures {
   case class lpliftedMonoType(ty: lpOlMonoType) extends lpOlPolyType {
     def pretty: String = {
       if (monomorphic) s"${ty.pretty}"
-      else s"(${lpSet2Schme.pretty} ${ty.pretty})"
+      else s"${lpSet2Schme.pretty} ${ty.pretty}"
     }
     override def lift2Meta: lpMlType = {
       lpliftedObjectType(lpliftedMonoType(ty))
@@ -311,7 +313,8 @@ object lpDatastructures {
 
   val tptpDefinedTypeMap: Map[String, lpOlMonoType] = Map(
     "$o" -> lpOtype,
-    "$i" -> lpItype)
+    "$i" -> lpItype,
+    "$int" -> lpIntType)
 
   case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlMonoType {
     def pretty: String = s"(${args.map(t => t.pretty).mkString(s" ${lpOlTypeConstructor.pretty} ")})"
@@ -342,6 +345,31 @@ object lpDatastructures {
     // change nothing when encoding as meta type
     override def lift2Meta: lpMlType = liftedProp(t)
   }
+
+  ///////////// TPTP dedined symbols
+  case class lpInt(n: Int0) extends lpOlTerm {
+    override def pretty: String = s"int_$n"
+
+    override def prf: lpMlType = throw new Exception(s"trying to provide proof of an integer in LP encoding")
+  }
+
+  case object lpIntType extends lpOlMonoType {
+    override def pretty: String = s"tptp_int"
+
+    override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpIntType)
+    override def lift2Meta: lpMlType = lpliftedObjectType(lpIntType)
+  }
+
+
+  case class lpTptpOperator(name: String, ty: lpOlType, tyVars: Seq[lpOlType]) extends lpOlTerm{
+
+    override def pretty: String = name
+    def dec : lpDeclaration = lpDeclaration(lpConstantTerm(name),tyVars,ty.lift2Meta)
+
+    override def prf: lpMlType = throw new Exception(s"trying to provide proof of an integer operator in LP encoding")
+  }
+
+
 
   ///////////// CONNECTIVES
   abstract class lpOlConnective extends lpTerm {
@@ -542,6 +570,15 @@ object lpDatastructures {
       if (args.isEmpty) f.pretty else s"(${f.pretty} ${prettyArgs.mkString(" ")})"
     }
     override def prf: liftedProp = liftedProp(lpOlFunctionApp(f, args))
+  }
+
+  object lpOlFunctionApp {
+    def apply(f: lpOlTerm, args: Seq[Either[lpOlTerm, lpOlType]]): lpOlFunctionApp = f match {
+      case lpOlFunctionApp(f0, innerArgs) =>
+        new lpOlFunctionApp(f0, innerArgs ++ args)
+      case _ =>
+        new lpOlFunctionApp(f, args)
+    }
   }
 
   abstract class lpOlConnectiveTerm extends lpOlTerm

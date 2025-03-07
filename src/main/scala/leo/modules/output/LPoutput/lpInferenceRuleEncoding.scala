@@ -210,6 +210,7 @@ object lpInferenceRuleEncoding {
     }
   }
 
+  /*
   case class liftEq(eq0: Boolean, pol0: Boolean) extends inferenceRules {
     // produce equalitites for rewrite tactic in cases where equality lift changes the representation in the lp encoding
     // this occours when....
@@ -241,7 +242,8 @@ object lpInferenceRuleEncoding {
       if (eq0) {
         // in this case we only need a rule if the literal has negative polarity
         // [a] (x y : τ a) : π ((x ≠ y) = (¬ (x = y)))
-        lpProofScript(Seq(lpProofScriptStringProof("assume a x y;\n\treflexivity")))
+        //lpProofScript(Seq(lpProofScriptStringProof("assume a x y;\n\treflexivity")))
+        throw new Exception("trying to output proof for equality lift in LP encoding, but sides are equivalent")
       } else {
         throw new Exception("proof for liftEq not encoded yet")
       }
@@ -253,6 +255,7 @@ object lpInferenceRuleEncoding {
       lpFunctionApp(name, Seq(x, y), Seq(a))
     }
   }
+   */
 
   ////////////////////////////////////////////////////////////////
   ////////// Meta-Theorem
@@ -275,6 +278,24 @@ object lpInferenceRuleEncoding {
     override def pretty: String = lpDefinition(name, Seq(σ, c), Some(ty), proof).pretty
     def instanciate(σ: Seq[Int], c: Seq[lpOlTerm], before: lpTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(lpList(σ.map(indx => lpNum(indx))), lpList(c), lpOlTop_i, before))
+    }
+  }
+
+  case object metaTransform extends inferenceRules {
+
+    // opaque symbol transformation_theorem [l : τ o] (c: 𝕃 o) (n : τ nat) :
+    //    π ((nth ⊥ c n) ⇒ l) → π (disj c) → π (disj (set_nth ⊥ c n l))
+    override def name: lpConstantTerm = lpConstantTerm(s"transformation_theorem")
+    override def ty: lpMlType = throw new Exception(s"trying to access type of Lambdapi-Meta theorem transform")
+
+    override def proof: lpProofScript = throw new Exception(s"trying to access proof of Lambdapi-Meta theorem transform")
+
+    override def dec: lpDeclaration = throw new Exception(s"trying to access declaration of Lambdapi-Meta theorem transform")
+
+    override def pretty: String = throw new Exception(s"trying to access pretty of Lambdapi-Meta theorem transform")
+
+    def instanciate(c: Seq[lpOlTerm], n: Int, rule: lpTerm, before: lpTerm): lpFunctionApp = {
+      lpFunctionApp(name, Seq(lpList(c), lpNum(n), rule, before))
     }
   }
 
