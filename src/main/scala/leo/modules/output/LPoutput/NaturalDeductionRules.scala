@@ -54,6 +54,7 @@ object NaturalDeductionRules {
     }
   }
 
+  /*
   case class eqRef() extends lpBasicRules {
 
     val T = lpOlUserDefinedMonoType("T")
@@ -71,6 +72,8 @@ object NaturalDeductionRules {
 
     override def pretty: String = lpDefinition(name, Seq(x), Some(ty), proof, Seq(T)).pretty
   }
+
+   */
 
   case class orIl() extends lpBasicRules {
     // x y : Prf x → Prf(x ∨ y)

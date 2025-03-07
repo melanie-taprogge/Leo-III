@@ -172,7 +172,7 @@ object ModularProofEncoding {
     //val impBoundParent = parent.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
     val encParent = clause2LP(parent.cl, Set(), sig)._1
     var (currParentLits, impBoundParent) = (encParent.lits, encParent.impBoundVars)
-    var lastStepName: lpTerm = lpFunctionApp(parentNameLpEnc, impBoundParent)
+    var lastStepName: lpTerm = lpFunctionApp(parentNameLpEnc, liftVarsToMeta(impBoundParent))
     val editedLiteralsMap = editedLiterals.toMap
     // check if we will need to do a permutation
     val editedLiteralsMap_rev = editedLiterals.map(tuple => (tuple._2,tuple._1)).toMap
@@ -222,7 +222,7 @@ object ModularProofEncoding {
             // Find the terms we need to apply. Usually, this will be variables, but in some cases we need to use witness terms.
             // Track the newly applied variables
             val freshVars = edLit.fv.diff(origLit.fv)
-            var appliedVars: Seq[lpOlTerm] = freshVars.map(freshVar => lpOlTypedTermVar(lpOlConstantTerm(bVarMap(freshVar._1)),type2LP(freshVar._2,sig))).toSeq //Seq.empty
+            var appliedVars: Seq[lpOlTerm] = freshVars.map(freshVar => lpOlTypedVar(lpOlConstantTerm(bVarMap(freshVar._1)),type2LP(freshVar._2,sig))).toSeq //Seq.empty
 
             // In some cases, we need witness terms for the application instead of variables
             // todo: once you have implmeneted nested applications:
@@ -231,7 +231,10 @@ object ModularProofEncoding {
             if (appliedVars.isEmpty) {
               val encTypes = encOrigLit match {
                 case lpOlTypedBinaryConnectiveTerm(_,_,lpOlLambdaTerm(vars,_),_) =>
-                  vars.map(_.ty)
+                  vars.map {
+                    case Left(termVar) => termVar.ty
+                    case Right(_) => throw new Exception(s"LP-Encoding: found unexpected type variables")
+                  }
                 case _ =>
                   Seq.empty
               }
@@ -1191,7 +1194,7 @@ object ModularProofEncoding {
 
     // 1. Abstract over free variables
     val (parentImpVars, _, _) = clause2LP_unquantified(parent, Set.empty, sig)
-    val impBoundParent = parentImpVars.map(var0 => var0.untyped)
+    val impBoundParent = liftVarsToMeta(parentImpVars).map(var0 => var0.untyped)
     if (impBoundParent.nonEmpty) allSteps = allSteps :+ lpAssume(impBoundParent)
 
     // encode the relevant clauses
@@ -1329,74 +1332,86 @@ object ModularProofEncoding {
   ////////////////////////////////////////////////////////////////
 
   def substituteVarTerm(t: lpOlTerm, subsMap: Map[String,lpOlTerm]): lpOlTerm = {
+    // todo: instead of matchin on names, actually give the subst map using variables
     // given a substitution map and a term, substitute all occurrences of given variables in a term
 
-    def substituteTypedVarsTerm(var0: lpOlTypedVar, subsMap: Map[String, lpOlTerm]): lpOlTypedVar = {
+    def substituteTypedVarsTerm(var0: Either[lpOlTypedVar, lpOlTyVar], subsMap: Map[String, lpOlTerm]): Either[lpOlTypedVar, lpOlTyVar] = {
       // apply substitution to a typed variable
-      if (subsMap.contains(var0.name.pretty)) {
-        subsMap(var0.name.pretty) match {
-          case lpOlTypedTermVar(name1, ty1) => lpOlTypedTermVar(name1, ty1)
-          case lpOlTypedTyVar(name1) => lpOlTypedTyVar(name1)
-          case lpOlUntypedVar(lpOlConstantTerm(name1)) =>
-            var0.ty match {
-              case ty0 : lpOlType => lpOlTypedTermVar(lpOlConstantTerm(name1), ty0)
-              case `lpSet` => lpOlTypedTyVar(lpOlConstantTerm(name1))
-              case _  => throw new Exception(s"LP encoding: trying to substitute expected OL variable ${var0.pretty}, but type is ${var0.ty.pretty}")
+      var0 match {
+        case Left(termVar) =>
+          if (subsMap.contains(termVar.name.pretty)) {
+            subsMap(termVar.name.pretty) match {
+              case lpOlTypedVar(name1, ty1) => Left(lpOlTypedVar(name1, ty1))
+              //case lpOlTyVar(name1) => lpOlTyVar(name1)
+              case lpOlUntypedVar(lpOlConstantTerm(name1)) =>
+                termVar.ty match {
+                  case ty0: lpOlType => Left(lpOlTypedVar(lpOlConstantTerm(name1), ty0))
+                  case _ => throw new Exception(s"LP encoding: trying to substitute expected OL variable ${termVar.pretty}, but type is ${termVar.ty.pretty}")
+                }
+              case lpOlConstantTerm(name1) => //todo: this actually should not happen
+                termVar.ty match {
+                  case ty0: lpOlType => Left(lpOlTypedVar(lpOlConstantTerm(name1), ty0))
+                  case _ => throw new Exception(s"LP encoding: trying to substitute expected OL variable ${termVar.pretty}, but type is ${termVar.ty.pretty}")
+                }
+              case _ => throw new Exception(s"Error in lp Encoding: trying to substitute variable ${termVar.pretty} with ${subsMap(termVar.name.pretty)}")
             }
-          case lpOlConstantTerm(name1) =>
-            var0.ty match {
-              case ty0: lpOlType => lpOlTypedTermVar(lpOlConstantTerm(name1), ty0)
-              case `lpSet` => lpOlTypedTyVar(lpOlConstantTerm(name1))
-              case _ => throw new Exception(s"LP encoding: trying to substitute expected OL variable ${var0.pretty}, but type is ${var0.ty.pretty}")
+          } else var0
+        case Right(tyVar) =>
+          throw new Exception(s"Error in lp Encoding: trying to substitute variable ${tyVar.pretty} with ${subsMap(tyVar.name)}")
+          /*
+          todo: once the variables can be either term or type vars, we can use this:
+          if (subsMap.contains(tyVar.name)) {
+            subsMap(tyVar.name) match {
+              case lpOlTyVar(name1) => Right(lpOlTyVar(name1))
+              case _ => throw new Exception(s"Error in lp Encoding: trying to substitute variable ${tyVar.pretty} with ${subsMap(tyVar.name)}")
             }
-          case _ => throw new Exception(s"Error in lp Encoding: trying to substitute variable ${var0.pretty} with ${subsMap(var0.name.pretty)}")
-        }
-      } else var0
+          } else var0
+           */
+      }
     }
 
-    t match{
-      case `lpOlTop` =>
-        lpOlTop
-      case `lpOlBot` => lpOlBot
-      case lpOlConstantTerm(name) =>
-        subsMap.getOrElse(name,lpOlConstantTerm(name))
-      case lpOlTypedTermVar(name, ty) =>
-        // when we encounter the typed var that was quantified in the body, we want to replace it!
-        subsMap.getOrElse(name.a, t)
-      case lpOlTypedTyVar(name) =>
-        // when we encounter the typed var that was quantified in the body, we want to replace it!
-        subsMap.getOrElse(name.a, t)
-      case lpOlUntypedVar(lpConstantTerm(name)) =>
-        if (subsMap.contains(name)) {
-          subsMap(name) match {
-            case lpOlTypedTermVar(name1,_) => lpOlUntypedVar(name1)
-            case lpOlTypedTyVar(name1) => lpOlUntypedVar(name1)
-            case lpOlUntypedVar(name1) => lpOlUntypedVar(lpOlConstantTerm(name1.pretty))
-            case lpOlConstantTerm(name1) => lpOlUntypedVar(lpOlConstantTerm(name1))
-            case _ => throw new Exception(s"Error in lp Encoding: trying to substitute variable ${t.pretty} with ${subsMap(name).pretty}")
+      t match {
+        case `lpOlTop` => lpOlTop
+        case `lpOlBot` => lpOlBot
+        case lpOlConstantTerm(name) =>
+          subsMap.getOrElse(name, lpOlConstantTerm(name))
+        case lpOlTypedVar(name, ty) =>
+          // when we encounter the typed var that was quantified in the body, we want to replace it!
+          subsMap.getOrElse(name.a, t)
+        //case lpOlTyVar(name) =>
+          // when we encounter the typed var that was quantified in the body, we want to replace it!
+          //subsMap.getOrElse(name, t)
+        case lpOlUntypedVar(lpConstantTerm(name)) =>
+          if (subsMap.contains(name)) {
+            subsMap(name) match {
+              case lpOlTypedVar(name1, _) => lpOlUntypedVar(name1)
+              //case lpOlTyVar(name1) => lpOlUntypedVar(lpConstantTerm(name1))
+              case lpOlUntypedVar(name1) => lpOlUntypedVar(lpOlConstantTerm(name1.pretty))
+              case lpOlConstantTerm(name1) => lpOlUntypedVar(lpOlConstantTerm(name1))
+              case _ => throw new Exception(s"Error in lp Encoding: trying to substitute variable ${t.pretty} with ${subsMap(name).pretty}")
+            }
+          } else t
+        case lpOlLambdaTerm(vars, body) => lpOlLambdaTerm(vars.map(var0 => substituteTypedVarsTerm(var0, subsMap)), substituteVarTerm(body, subsMap))
+        case lpOlFunctionApp(f, args) =>
+          var encArgs: Seq[Either[lpOlTerm, lpOlType]] = Seq.empty
+          args foreach { arg =>
+            arg match {
+              case Left(term) => encArgs = encArgs :+ Left(substituteVarTerm(term, subsMap))
+              // if the argument is e.g. a type we do not need to substitute anything
+              case Right(ty) => encArgs :+ arg
+              //case a : Left[lpOlTerm, lpOlType] => encArgs = encArgs :+ Left(substituteVarTerm(a, subsMap))
+              //case _ => encArgs :+ arg
+            }
           }
-        } else t
-      case lpOlLambdaTerm(vars,body) => lpOlLambdaTerm(vars.map(var0 => substituteTypedVarsTerm(var0, subsMap)),substituteVarTerm(body, subsMap))
-      case lpOlFunctionApp(f, args) =>
-        var encArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
-        args foreach {arg =>
-          arg match{
-            case Left(term) => encArgs = encArgs :+ Left(substituteVarTerm(term, subsMap))
-            // if the argument is e.g. a type we do not need to substitute anything
-            case Right(ty) => encArgs :+ arg
-            //case a : Left[lpOlTerm, lpOlType] => encArgs = encArgs :+ Left(substituteVarTerm(a, subsMap))
-            //case _ => encArgs :+ arg
-          }
-        }
-        lpOlFunctionApp(substituteVarTerm(f, subsMap), encArgs)
-      case lpOlQuantifiedTerm(quantifier, variables, body) => lpOlQuantifiedTerm(quantifier, variables.map(var0 => substituteTypedVarsTerm(var0, subsMap)), substituteVarTerm(body, subsMap))
-      case lpOlUnaryConnectiveTerm(connective, body) => lpOlUnaryConnectiveTerm(connective,  substituteVarTerm(body, subsMap))
-      case lpOlUntypedBinaryConnectiveTerm(connective,lhs,rhs) => lpOlUntypedBinaryConnectiveTerm(connective, substituteVarTerm(lhs, subsMap), substituteVarTerm(rhs, subsMap))
-      case lpOlTypedBinaryConnectiveTerm(connective, ty, lhs, rhs) => lpOlTypedBinaryConnectiveTerm(connective, ty,  substituteVarTerm(lhs, subsMap),  substituteVarTerm(rhs, subsMap))
-      case lpOlUntypedBinaryConnectiveTerm_multi(connective, args) =>
-        lpOlUntypedBinaryConnectiveTerm_multi(connective, args.map(arg => substituteVarTerm(arg, subsMap)))
-      case _ => throw new Exception(s"encountered unexptcted term $t when trying to do substitution")
-    }
+          lpOlFunctionApp(substituteVarTerm(f, subsMap), encArgs)
+        case lpOlQuantifiedTerm(quantifier, variables, body) => lpOlQuantifiedTerm(quantifier, variables.map(var0 => isTermVar(substituteTypedVarsTerm(Left(var0), subsMap))), substituteVarTerm(body, subsMap))
+        case lpOlUnaryConnectiveTerm(connective, body) => lpOlUnaryConnectiveTerm(connective, substituteVarTerm(body, subsMap))
+        case lpOlUntypedBinaryConnectiveTerm(connective, lhs, rhs) => lpOlUntypedBinaryConnectiveTerm(connective, substituteVarTerm(lhs, subsMap), substituteVarTerm(rhs, subsMap))
+        case lpOlTypedBinaryConnectiveTerm(connective, ty, lhs, rhs) => lpOlTypedBinaryConnectiveTerm(connective, ty, substituteVarTerm(lhs, subsMap), substituteVarTerm(rhs, subsMap))
+        case lpOlUntypedBinaryConnectiveTerm_multi(connective, args) =>
+          lpOlUntypedBinaryConnectiveTerm_multi(connective, args.map(arg => substituteVarTerm(arg, subsMap)))
+        case _ => throw new Exception(s"encountered unexptcted term $t when trying to do substitution")
+      }
   }
 
   def removeUnificationConstraint(uniC: Literal, parent: Clause, lastLit0: lpOlTerm, sig: Signature): (Seq[lpProofScriptStep], Set[lpStatement])={
@@ -1472,7 +1487,7 @@ object ModularProofEncoding {
       val (unboundVarsChild0, encChild, _) = clause2LP_unquantified(cl.cl, Set.empty, sig)
       val (unboundVarsParent, _, _) = clause2LP_unquantified(parent.cl, Set.empty, sig)
       var encChildLiterals = encChild.args
-      val unboundVarsChild = unboundVarsChild0.map(var0 => lpUntypedVar(var0.name))
+      val unboundVarsChild = liftVarsToMeta(unboundVarsChild0)
       allSteps = if (unboundVarsChild.nonEmpty) allSteps :+ lpAssume(unboundVarsChild) else allSteps
 
       val (_, encParent, _) = clause2LP_unquantified(parent.cl, Set.empty, sig)
@@ -1520,7 +1535,7 @@ object ModularProofEncoding {
             val encSubstLits = encLits.map(encLit => substituteVarTerm(encLit, subsMap.toMap))
             Out.lp_debug_info(s"substitution result: ${encSubstLits.map(_.pretty)}")
             // The application that instanciates the quantified variables with the substituted Terms in lp
-            val applyToParent = unboundVarsParent.map(var0 => subsMap.getOrElse(var0.name.pretty, var0))
+            val applyToParent: Seq[lpTerm] = unboundVarsParent.map(var0 => subsMap.getOrElse(liftVarsToMeta(var0).name.pretty, liftVarsToMeta(var0)))
             val substitution = lpProofScript(Seq(lpRefine(lpFunctionApp(parentNameLpEnc, applyToParent))))
             val substitutionStepName = "Substitution"
             val substitutionHaveStep = lpHave(substitutionStepName, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, encSubstLits).prf, substitution)

@@ -1,6 +1,6 @@
 package leo.modules.output.LPoutput
 
-import leo.datastructures.Int0
+import leo.datastructures.{Int0, termArgs}
 
 /**
   *
@@ -60,8 +60,8 @@ object lpDatastructures {
       }
 
       val typedVars = variables.map {
-        case lpOlTypedTermVar(term, ty) => s"(${term.pretty} : ${ty.lift2Meta.pretty})"
-        case lpOlTypedTyVar(term) => s"(${term.pretty} : ${lpSet.pretty})"
+        case lpOlTypedVar(term, ty) => s"(${term.pretty} : ${ty.lift2Meta.pretty})"
+        case lpOlTyVar(name) => s"($name : ${lpSet.pretty})"
         case others => s"${others.pretty}"
       }
 
@@ -90,8 +90,8 @@ object lpDatastructures {
       }
 
       val typedVars = variables.map {
-        case lpOlTypedTermVar(term, ty) => s"(${term.pretty} : ${ty.lift2Meta.pretty})"
-        case lpOlTypedTyVar(term) => s"(${term.pretty} : ${lpSet.pretty})"
+        case lpOlTypedVar(term, ty) => s"(${term.pretty} : ${ty.lift2Meta.pretty})"
+        case lpOlTyVar(name) => s"($name : ${lpSet.pretty})"
         case others => s"${others.pretty}"
       }
 
@@ -152,8 +152,15 @@ object lpDatastructures {
     override def lift2Meta: lpMlType = lpMlFunctionType(objects)
   }
 
-  case class lpClause(impBoundVars: Seq[lpOlTypedVar], lits: Seq[lpOlTerm]) extends lpMlType {
-    override def pretty: String = lpMlDependType(impBoundVars.map(_.lift2Meta),lpOlUntypedBinaryConnectiveTerm_multi(lpOr,lits).prf).pretty
+  case class lpClause(impBoundVars: Seq[Either[lpOlTypedVar, lpOlTyVar]], lits: Seq[lpOlTerm]) extends lpMlType {
+    override def pretty: String = {
+      val metaVars = impBoundVars.map{
+        case Left(tyVar) => tyVar.asMlVar
+        case Right(termVar) => termVar.asMlVar
+
+      }
+      lpMlDependType(metaVars,lpOlUntypedBinaryConnectiveTerm_multi(lpOr,lits).prf).pretty
+    }
 
     def withoutQuant: lpOlUntypedBinaryConnectiveTerm_multi = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,lits)
 
@@ -494,16 +501,11 @@ object lpDatastructures {
     override def pretty: String = s"(${v.pretty})"
   }
 
-  abstract class lpOlTypedVar(val name: lpOlConstantTerm, val ty: lpType) extends lpOlTerm{
+  case class lpOlTypedVar(name: lpOlConstantTerm, ty: lpOlType) extends lpOlTerm {
 
-    def lift2Meta: lpTypedVar
-
-    def untyped: lpOlUntypedVar
-  }
-
-  case class lpOlTypedTermVar(override val name: lpOlConstantTerm,override val ty: lpOlType) extends lpOlTypedVar(name, ty) {
+    def typeDec: String = s"($name: ${ty.lift2Meta.pretty})"
     override def pretty: String = name.pretty
-    override def lift2Meta: lpTypedVar = lpTypedVar(lpConstantTerm(name.pretty),ty.lift2Meta)
+    def asMlVar: lpTypedVar = lpTypedVar(lpConstantTerm(name.pretty),ty.lift2Meta)
 
     /*
     def lift2Meta: lpTypedVar = {
@@ -517,31 +519,20 @@ object lpDatastructures {
     }
      */
 
-    override def prf: liftedProp = liftedProp(lpOlTypedTermVar(name,ty))
+    override def prf: liftedProp = liftedProp(lpOlTypedVar(name,ty))
 
-    override def untyped: lpOlUntypedVar = lpOlUntypedVar(name)
   }
 
-  case class lpOlTypedTyVar(override val name: lpOlConstantTerm) extends lpOlTypedVar(name, lpSet) {
-    override def pretty: String = name.pretty
+  case class lpOlTyVar(name:String) extends lpOlMonoType {
 
-    override def lift2Meta: lpTypedVar = lpTypedVar(lpConstantTerm(name.pretty), lpSet)
+    def typeDec: String = s"($name: ${lpSet.pretty})"
+    override def pretty: String = name
+    
+    override def lift2Meta: lpMlType = lpliftedObjectType(lpOlTyVar(name:String))
 
-    /*
-    def lift2Meta: lpTypedVar = {
-      val metaType = ty match {
-        case ty0:lpOlType => ty0.lift2Meta
-        case ty0:lpMlType =>
-          if (ty0 == lpSet) lpSet
-          else throw new Exception(s"attempting to type OL variable ${name.pretty} with meta-level type ${ty.pretty} in LP encoding")
-      }
-      lpTypedVar(lpConstantTerm(name.pretty),metaType)
-    }
-     */
+    def asMlVar: lpTypedVar = lpTypedVar(lpConstantTerm(name),lpSet.lift2Meta)
 
-    override def prf: liftedProp = throw new Exception(s"trying to ouput proof for a type-variable")
-
-    override def untyped: lpOlUntypedVar = lpOlUntypedVar(name)
+    override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOlTyVar(name:String))
   }
 
   case class lpOlUntypedVar(name: lpTerm) extends lpOlTerm {
@@ -554,9 +545,13 @@ object lpDatastructures {
 
   ///////////// TERMS
 
-  case class lpOlLambdaTerm(vars: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
+  case class lpOlLambdaTerm(vars: Seq[Either[lpOlTypedVar,lpOlTyVar]], body: lpOlTerm) extends lpOlTerm {
     override def pretty: String = {
-      s"(${lpLambda.pretty} ${vars.map(name_ty => s"(${name_ty.pretty} : ${name_ty.ty.lift2Meta.pretty})").mkString(" ")}, ${body.pretty})"
+      val decVars = vars.map{
+        case Left(tyVar) => tyVar.typeDec
+        case Right(termVar) => termVar.typeDec
+      }
+      s"(${lpLambda.pretty} ${decVars.mkString(" ")}, ${body.pretty})"
     }
     override def prf: liftedProp = liftedProp(lpOlLambdaTerm(vars, body))
   }
@@ -629,7 +624,7 @@ object lpDatastructures {
         }
         s"(${quantifier.pretty} [${ty0.pretty}] ${variable.name.pretty})"
       }
-      else s"(${quantifier.pretty}${lpLambdaTerm(Seq(variable.lift2Meta),body).pretty})"
+      else s"(${quantifier.pretty}${lpLambdaTerm(Seq(variable.asMlVar),body).pretty})"
     }
     override def prf: liftedProp = liftedProp(lpOlMonoQuantifiedTerm(quantifier, variable, body))
   }

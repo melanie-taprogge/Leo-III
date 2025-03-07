@@ -435,7 +435,7 @@ object LPoutput {
           val flexFlexStepName = "flexflex_to_bot"
           val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
             case lpClause(vars,lits) =>
-              val appliedVars = vars.map(var0 => lpWitness(var0.ty))
+              val appliedVars = vars.map(var0 => lpWitness(isTermVar(var0).ty))
               (lpFunctionApp(lpConstantTerm(flexFlexStepName),appliedVars),(lpFunctionApp(lpConstantTerm(name),appliedVars)))
             case _ => (lpConstantTerm(flexFlexStepName), lpConstantTerm(name))
           }

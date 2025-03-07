@@ -160,7 +160,7 @@ object Encodings {
       val (scope, ty) = curImplicitlyQuantified.head
       val name = intToName(fvCount - i - 1)
       val encType = type2LP(ty,sig)
-      boundVars = boundVars :+ lpOlTypedTermVar(lpOlConstantTerm(name),encType)
+      boundVars = boundVars :+ lpOlTypedVar(lpOlConstantTerm(name),encType)
       resultBindingMap = resultBindingMap + (scope -> name)
 
       curImplicitlyQuantified = curImplicitlyQuantified.tail
@@ -211,19 +211,19 @@ object Encodings {
     (encodedClause,usedSymbols)
     }
 
-  final def clause2LP_unquantified(cl: Clause, usedSymbols0: Set[lpStatement], sig: Signature): (Seq[lpOlTypedVar],lpOlUntypedBinaryConnectiveTerm_multi, Set[lpStatement]) = {
+  final def clause2LP_unquantified(cl: Clause, usedSymbols0: Set[lpStatement], sig: Signature): (Seq[Either[lpOlTypedVar,lpOlTyVar]],lpOlUntypedBinaryConnectiveTerm_multi, Set[lpStatement]) = {
     val freeVarsExist = cl.implicitlyBound.nonEmpty || cl.typeVars.nonEmpty
     var usedSymbols = usedSymbols0
     if (freeVarsExist) {
       // If there are free variables, they are implicitly quantified over, in the encoding this quantification should be explicit
       // Add implicitly quantified type variables
-      var quantifiedVars: Seq[lpOlTypedVar] = Seq.empty
+      var quantifiedVars: Seq[Either[lpOlTypedVar,lpOlTyVar]] = Seq.empty
       // todo: add the T vars to counted here
       //  and: is it right to just make these things Set types? It should be since we can only quantify over mono types right?
-      quantifiedVars = quantifiedVars ++ (cl.typeVars.reverse.map(i => lpOlTypedTyVar(lpOlConstantTerm(s"T${intToName(i - 1)}"))))
+      quantifiedVars = quantifiedVars ++ (cl.typeVars.reverse.map(i => Right(lpOlTyVar(s"T${intToName(i - 1)}"))))
       // Add implicitly quantified typed variables
       val (namedFVEnumerationLP, bVarMap, usedSymbolsUpdated) = clauseVars2LP(cl.implicitlyBound, sig, usedSymbols)
-      quantifiedVars = quantifiedVars ++ namedFVEnumerationLP
+      quantifiedVars = quantifiedVars ++ namedFVEnumerationLP.map(Left(_))
       // With this we now encode the actual clause
       val (encClause, usedSymbolsClause) = clause2LP0(cl, bVarMap, sig, usedSymbolsUpdated)
       usedSymbols = usedSymbolsClause
@@ -261,7 +261,7 @@ object Encodings {
       // Give Bound variables names
       case Bound(_, scope) =>
         val encType = type2LP(t.ty, sig)
-        (lpOlTypedTermVar(lpOlConstantTerm(bVars(scope)),encType),usedSymbols) //throw new Error(s"bound vars are not encoded yet ${t.pretty}") //bVars(scope)
+        (lpOlTypedVar(lpOlConstantTerm(bVars(scope)),encType),usedSymbols) //throw new Error(s"bound vars are not encoded yet ${t.pretty}") //bVars(scope)
 
       // Unary connectives
       case Not(t2) =>
@@ -275,7 +275,7 @@ object Encodings {
         var quantifiedVars: Seq[lpOlTypedVar]= Seq.empty
         newBVars foreach { s_ty =>
           val encType = type2LP(s_ty._2, sig)
-          quantifiedVars = quantifiedVars :+ lpOlTypedTermVar(lpOlConstantTerm(s_ty._1),encType)
+          quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType)
         }
         (lpOlQuantifiedTerm(lpOlForAll,quantifiedVars,encBody), usedSymbolsQuant)
       case Exists(_) =>
@@ -287,7 +287,7 @@ object Encodings {
         var quantifiedVars: Seq[lpOlTypedVar] = Seq.empty
         newBVars foreach { s_ty =>
           val encType = type2LP(s_ty._2, sig)
-          quantifiedVars = quantifiedVars :+ lpOlTypedTermVar(lpOlConstantTerm(s_ty._1), encType)
+          quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1), encType)
         }
         (lpOlQuantifiedTerm(lpOlExists, quantifiedVars, encBody), usedSymbolsQuant)
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet ${t.pretty}")
@@ -337,10 +337,10 @@ object Encodings {
           val newBVars = makeBVarList(bVarTys, bVars.size)
           val (encBody, updatedUsedSymbols0) = term2LP(body,fusebVarListwithMap(newBVars, bVars),sig,usedSymbols)
           var updatedUsedSymbols = updatedUsedSymbols0
-          var abstractions: Seq[lpOlTypedVar] = Seq.empty
+          var abstractions: Seq[Either[lpOlTypedVar,lpOlTyVar]] = Seq.empty
           newBVars foreach { s_ty =>
             val encType = type2LP(s_ty._2, sig)
-            abstractions = abstractions :+ (lpOlTypedTermVar(lpOlConstantTerm(s_ty._1),encType)) //todo: for polymorphy we might also need to use Scheme types here
+            abstractions = abstractions :+ Left(lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType))//todo: for polymorphy we might also need to use Scheme types here
             // todo: summarize same types into one bracket
           }
           (lpOlLambdaTerm(abstractions,encBody), updatedUsedSymbols)

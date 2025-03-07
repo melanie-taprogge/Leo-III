@@ -35,10 +35,10 @@ object lpInferenceRuleEncoding {
     }
 
     val T = lpOlUserDefinedPolyType("T")
-    val x = lpOlTypedTermVar(lpOlConstantTerm("x"),T)
-    val y = lpOlTypedTermVar(lpOlConstantTerm("y"),T)
-    val z = lpOlTypedTermVar(lpOlConstantTerm("z"),T)
-    val v = lpOlTypedTermVar(lpOlConstantTerm("v"),T)
+    val x = lpOlTypedVar(lpOlConstantTerm("x"),T)
+    val y = lpOlTypedVar(lpOlConstantTerm("y"),T)
+    val z = lpOlTypedVar(lpOlConstantTerm("z"),T)
+    val v = lpOlTypedVar(lpOlConstantTerm("v"),T)
 
     override def ty: lpMlType = {
       if (polarity) {
@@ -98,9 +98,9 @@ object lpInferenceRuleEncoding {
 
     val T = lpOlUserDefinedMonoType("T")
     val S = lpOlUserDefinedMonoType("S")
-    val f = lpOlTypedTermVar(lpOlConstantTerm("f"),lpOlFunctionType(Seq(S,T)))
-    val g = lpOlTypedTermVar(lpOlConstantTerm("g"),lpOlFunctionType(Seq(S,T)))
-    val x = lpOlTypedTermVar(lpOlConstantTerm("x"),S)
+    val f = lpOlTypedVar(lpOlConstantTerm("f"),lpOlFunctionType(Seq(S,T)))
+    val g = lpOlTypedVar(lpOlConstantTerm("g"),lpOlFunctionType(Seq(S,T)))
+    val x = lpOlTypedVar(lpOlConstantTerm("x"),S)
 
     override def ty: lpMlType = lpMlFunctionType(Seq(lpOlTypedBinaryConnectiveTerm(lpEq,lpOlFunctionType(Seq(T,S)),f,g).prf,lpOlTypedBinaryConnectiveTerm(lpEq,S,lpOlFunctionApp(f,Seq(Left(x))),lpOlFunctionApp(g,Seq(Left(x)))).prf))
 
@@ -226,8 +226,8 @@ object lpInferenceRuleEncoding {
     }
 
     val a = lpOlUserDefinedMonoType("a")
-    val x = lpOlTypedTermVar(lpOlConstantTerm("x"),a)
-    val y = lpOlTypedTermVar(lpOlConstantTerm("y"),a)
+    val x = lpOlTypedVar(lpOlConstantTerm("x"),a)
+    val y = lpOlTypedVar(lpOlConstantTerm("y"),a)
     // do i need to do this differently such that I can type x and y?
 
     override def ty: lpMlType =

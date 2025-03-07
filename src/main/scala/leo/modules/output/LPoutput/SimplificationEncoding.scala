@@ -110,7 +110,7 @@ object SimplificationEncoding {
   case object Simp10_eq extends simplificationRules {
 
     val T = lpOlUserDefinedType("T")
-    val x1 = lpOlTypedTermVar(lpOlConstantTerm("x"),T)
+    val x1 = lpOlTypedVar(lpOlConstantTerm("x"),T)
 
     override def name: lpConstantTerm = lpConstantTerm("simp10")
 
