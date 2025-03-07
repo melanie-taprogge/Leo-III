@@ -226,10 +226,14 @@ package object LPoutput {
     (rewritePattern,rewrittenTerm)
   }
 
-  def findRWTerm0(rwMap:Map[lpOlTerm, lpOlTerm], searchIn:lpOlTerm, rwUnderBinder:Boolean = false, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x")), currentX:Int = 0): (lpOlTerm, lpOlTerm, Int, Boolean) = {
+  // todo: implement type substitution
+  //def lpTySubst(tyRwMap:Map[lpOlTerm,lpOlType],)
+
+  def findRWTerm0(termRwMap:Map[lpOlTerm, lpOlTerm], searchIn:lpOlTerm, rwUnderBinder:Boolean = false, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x")), currentX:Int = 0): (lpOlTerm, lpOlTerm, Int, Boolean) = {
     // find a specific subterm for the application of a rewrite operation
     // this function returns: The rewrite-pattern, the term modulo rewriting and an integer signaling how often the pattern was found.
-    if (rwMap.keySet.contains(searchIn)) (patternVar,rwMap(searchIn), currentX + 1, rwUnderBinder)
+    if (termRwMap.keySet.contains(searchIn)) (patternVar,termRwMap(searchIn), currentX + 1, rwUnderBinder)
+    //else if (tyRwMap.keySet.contains(searchIn)) (patternVar,tyRwMap(searchIn), currentX + 1, rwUnderBinder)
     else {
       searchIn match {
         case `lpOlTop` =>
@@ -245,72 +249,72 @@ package object LPoutput {
       case lpOlUntypedVar(lpConstantTerm(_)) =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlLambdaTerm(vars,body) =>
-        val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(rwMap, body, rwUnderBinder, patternVar, 0)
+        val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(termRwMap, body, rwUnderBinder, patternVar, 0)
         val pattern = if (counter == 0) lpOlWildcard else lpOlLambdaTerm(vars, patternbody)
         val rewrittenTerm = lpOlLambdaTerm(vars, rewrittenbody0)
         (pattern, rewrittenTerm, counter, true)
       case lpOlQuantifiedTerm(quantifier, vars, body) =>
-        val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(rwMap, body, rwUnderBinder, patternVar, 0)
+        val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(termRwMap, body, rwUnderBinder, patternVar, 0)
         val pattern = if (counter == 0) lpOlWildcard else lpOlQuantifiedTerm(quantifier, vars, patternbody)
         val rewrittenTerm = lpOlQuantifiedTerm(quantifier, vars, rewrittenbody0)
         (pattern, rewrittenTerm, counter, true)
       case lpOlUnaryConnectiveTerm(con, term) =>
-          val (patternTerm, rewrittenTerm0, counter, rwUnderBinder0) = findRWTerm0(rwMap, term, rwUnderBinder, patternVar, 0)
+          val (patternTerm, rewrittenTerm0, counter, rwUnderBinder0) = findRWTerm0(termRwMap, term, rwUnderBinder, patternVar, 0)
           // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
           val pattern = if (counter == 0) lpOlWildcard else lpOlUnaryConnectiveTerm(con, patternTerm)
           val rewrittenTerm = lpOlUnaryConnectiveTerm(con, rewrittenTerm0)
           (pattern, rewrittenTerm, counter, rwUnderBinder0)
-        case lpOlUntypedBinaryConnectiveTerm(con,lhs,rhs) =>
-          val (patternLhs, rewrittenLhs, counterLhs, rwUnderBinderLhs) = findRWTerm0(rwMap, lhs, rwUnderBinder, patternVar, 0)
-          val (patternRhs, rewrittenRhs, counterRhs, rwUnderBinderRhs) = findRWTerm0(rwMap, rhs, rwUnderBinder, patternVar, 0)
-          // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
-          val newCounter = counterLhs + counterRhs
-          val pattern = if (newCounter == 0) lpOlWildcard else lpOlUntypedBinaryConnectiveTerm(con,patternLhs,patternRhs)
-          val rewrittenTerm = lpOlUntypedBinaryConnectiveTerm(con,rewrittenLhs,rewrittenRhs)
-          (pattern, rewrittenTerm, newCounter, rwUnderBinderLhs || rwUnderBinderRhs)
-        case lpOlUntypedBinaryConnectiveTerm_multi(con, args) =>
-          val intermediateResult = args.map(arg => findRWTerm0(rwMap, arg, rwUnderBinder, patternVar, 0))
-          // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
-          val newCounter = intermediateResult.map(_._3).sum
-          val pattern = if (newCounter == 0) lpOlWildcard else lpOlUntypedBinaryConnectiveTerm_multi(con, intermediateResult.map(_._1))
-          val rewrittenTerm = lpOlUntypedBinaryConnectiveTerm_multi(con, intermediateResult.map(_._2))
-          val rwUnderBinder0 = intermediateResult.map(_._4).contains(true)
-          (pattern, rewrittenTerm, newCounter, rwUnderBinder0)
-        case lpOlTypedBinaryConnectiveTerm(con, ty, lhs, rhs) =>
-          val (patternLhs, rewrittenLhs, counterLhs, rwUnderBinderLhs) = findRWTerm0(rwMap, lhs, rwUnderBinder, patternVar, 0)
-          val (patternRhs, rewrittenRhs, counterRhs, rwUnderBinderRhs) = findRWTerm0(rwMap, rhs, rwUnderBinder, patternVar, 0)
-          // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
-          val newCounter = counterLhs + counterRhs
-          val pattern = if (newCounter == 0) lpOlWildcard else lpOlTypedBinaryConnectiveTerm(con, ty, patternLhs, patternRhs)
-          val rewrittenTerm = lpOlTypedBinaryConnectiveTerm(con, ty, rewrittenLhs, rewrittenRhs)
-          (pattern, rewrittenTerm, newCounter, rwUnderBinderLhs || rwUnderBinderRhs)
-        case lpOlFunctionApp(head,args) =>
-          val (patternHead, termHead, counterHead, rwUnderBinderHead) = findRWTerm0(rwMap, head, rwUnderBinder, patternVar, 0)
-          var patternsArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
-          var termsArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
-          var rwUnderBinderArg = false
-          var countersArgs = 0
-          args foreach{ arg =>
-            arg match {
-              case Left(term) =>
-                val (patternArg0, termArg, counterArg, rwUnderBinderArg0) = findRWTerm0(rwMap, term, rwUnderBinder, patternVar, 0)
-                val patternArg = if (counterArg == 0) lpOlWildcard else patternArg0
-                patternsArgs = patternsArgs :+ Left(patternArg)
-                termsArgs = termsArgs :+ Left(termArg)
-                countersArgs = countersArgs + counterArg
-                if (rwUnderBinderArg0) rwUnderBinderArg = true
-              case Right(ty) =>
-                patternsArgs = patternsArgs :+ Left(lpOlWildcard)
-                termsArgs = termsArgs :+ Right(ty)
-            }
+      case lpOlUntypedBinaryConnectiveTerm(con,lhs,rhs) =>
+        val (patternLhs, rewrittenLhs, counterLhs, rwUnderBinderLhs) = findRWTerm0(termRwMap, lhs, rwUnderBinder, patternVar, 0)
+        val (patternRhs, rewrittenRhs, counterRhs, rwUnderBinderRhs) = findRWTerm0(termRwMap, rhs, rwUnderBinder, patternVar, 0)
+        // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
+        val newCounter = counterLhs + counterRhs
+        val pattern = if (newCounter == 0) lpOlWildcard else lpOlUntypedBinaryConnectiveTerm(con,patternLhs,patternRhs)
+        val rewrittenTerm = lpOlUntypedBinaryConnectiveTerm(con,rewrittenLhs,rewrittenRhs)
+        (pattern, rewrittenTerm, newCounter, rwUnderBinderLhs || rwUnderBinderRhs)
+      case lpOlUntypedBinaryConnectiveTerm_multi(con, args) =>
+        val intermediateResult = args.map(arg => findRWTerm0(termRwMap, arg, rwUnderBinder, patternVar, 0))
+        // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
+        val newCounter = intermediateResult.map(_._3).sum
+        val pattern = if (newCounter == 0) lpOlWildcard else lpOlUntypedBinaryConnectiveTerm_multi(con, intermediateResult.map(_._1))
+        val rewrittenTerm = lpOlUntypedBinaryConnectiveTerm_multi(con, intermediateResult.map(_._2))
+        val rwUnderBinder0 = intermediateResult.map(_._4).contains(true)
+        (pattern, rewrittenTerm, newCounter, rwUnderBinder0)
+      case lpOlTypedBinaryConnectiveTerm(con, ty, lhs, rhs) =>
+        val (patternLhs, rewrittenLhs, counterLhs, rwUnderBinderLhs) = findRWTerm0(termRwMap, lhs, rwUnderBinder, patternVar, 0)
+        val (patternRhs, rewrittenRhs, counterRhs, rwUnderBinderRhs) = findRWTerm0(termRwMap, rhs, rwUnderBinder, patternVar, 0)
+        // to make sure patterns are not longer than necessary, we check weather rewriting at a specific position happend and - if this is not the case - just give "-"
+        val newCounter = counterLhs + counterRhs
+        val pattern = if (newCounter == 0) lpOlWildcard else lpOlTypedBinaryConnectiveTerm(con, ty, patternLhs, patternRhs)
+        val rewrittenTerm = lpOlTypedBinaryConnectiveTerm(con, ty, rewrittenLhs, rewrittenRhs)
+        (pattern, rewrittenTerm, newCounter, rwUnderBinderLhs || rwUnderBinderRhs)
+      case lpOlFunctionApp(head,args) =>
+        val (patternHead, termHead, counterHead, rwUnderBinderHead) = findRWTerm0(termRwMap, head, rwUnderBinder, patternVar, 0)
+        var patternsArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
+        var termsArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
+        var rwUnderBinderArg = false
+        var countersArgs = 0
+        args foreach{ arg =>
+          arg match {
+            case Left(term) =>
+              val (patternArg0, termArg, counterArg, rwUnderBinderArg0) = findRWTerm0(termRwMap, term, rwUnderBinder, patternVar, 0)
+              val patternArg = if (counterArg == 0) lpOlWildcard else patternArg0
+              patternsArgs = patternsArgs :+ Left(patternArg)
+              termsArgs = termsArgs :+ Left(termArg)
+              countersArgs = countersArgs + counterArg
+              if (rwUnderBinderArg0) rwUnderBinderArg = true
+            case Right(ty) =>
+              patternsArgs = patternsArgs :+ Left(lpOlWildcard)
+              termsArgs = termsArgs :+ Right(ty)
           }
-          val pattern = if (counterHead + countersArgs == 0) lpOlWildcard else lpOlFunctionApp(patternHead, patternsArgs)
-          val rewtrittenTerm = lpOlFunctionApp(termHead, termsArgs)
-          (pattern,rewtrittenTerm,countersArgs, rwUnderBinderArg || rwUnderBinderHead)
+        }
+        val pattern = if (counterHead + countersArgs == 0) lpOlWildcard else lpOlFunctionApp(patternHead, patternsArgs)
+        val rewtrittenTerm = lpOlFunctionApp(termHead, termsArgs)
+        (pattern,rewtrittenTerm,countersArgs, rwUnderBinderArg || rwUnderBinderHead)
 
-          // just for testing
-        case _ => throw new Exception(s"encountered unexptcted term $searchIn when trying to find terms ${rwMap.keySet.map(_.pretty)} in ${searchIn.pretty}")
-      }
+        // just for testing
+      case _ => throw new Exception(s"encountered unexptcted term $searchIn when trying to find terms ${termRwMap.keySet.map(_.pretty)} in ${searchIn.pretty}")
+    }
     }
   }
 
@@ -320,7 +324,25 @@ package object LPoutput {
       // only in this case can we reduce
       case lpOlFunctionApp(lpOlLambdaTerm(vars,body), args) =>
         assert(vars.length >= args.length)
-        Out.lp_debug_info(s"it is happending for ${term0.pretty}")
+        Out.lp_debug_info(s"Beta-reduction occurring for ${term0.pretty}")
+
+        val pairs = vars.zip(args)
+        val (termPairs, typePairs) = pairs.partition {
+          case (_, e) => e.isLeft
+        }
+        val termSubstDict: Map[lpOlTerm, lpOlTerm] = termPairs.map {
+          case (v, Left(term)) => (v, term)
+          case _ => throw new Exception("unexpected case")
+        }.toMap
+        val tySubstDict: Map[lpOlTypedVar, lpOlType] = typePairs.map {
+          case (v, Right(ty)) => (v, ty)
+          case _ => throw new Exception("unexpected case")
+        }.toMap
+
+        Out.lp_debug_info(s"terms to rewrite: $termSubstDict")
+        if (tySubstDict.nonEmpty) Out.lp_debug_info(s"Can not currently substitute types but found type subst: $tySubstDict")
+
+        /*
         val args0: Seq[lpOlTerm] = args.map(arg => arg match {
           case Left(term) => term
           case Right(ty) => throw new Exception(s"can not currently encode subst of type variables")
@@ -328,12 +350,17 @@ package object LPoutput {
         val substDict : Map[lpOlTerm,lpOlTerm] = vars.zip(args0).toMap
         Out.lp_debug_info(s"rewriting with dictionary $substDict")
         Out.lp_debug_info(s"searching in $body")
+         */
 
-        val reducedBody = findRWTerm0(substDict,body)._2
+        val reducedBody = findRWTerm0(termSubstDict,body)._2
+        // todo: actually, I should probably search the body for reducable terms again?
         val remainingVars = vars.drop(args.length)
         val reduced = if (remainingVars.nonEmpty) lpOlLambdaTerm(remainingVars,reducedBody) else reducedBody
         Out.lp_debug_info(s"reduced to ${reduced.pretty}")
         reduced
+
+
+
       // in all other cases we need to search substructures for reducable terms
       case lpOlLambdaTerm(vars,body) =>
         lpOlLambdaTerm(vars,betaReduceLpApplication(body))
@@ -359,6 +386,90 @@ package object LPoutput {
     }
   }
 
+  def alphaEquivalent(t1: Option[lpOlTerm], t2: Option[lpOlTerm]): Boolean = {
+    if (t1 == t2) true
+    else if (t1.isDefined && t2.isDefined) alphaEquivalent(t1.get, t2.get, Map.empty)
+    else false
+  }
+  def alphaEquivalent(t1: lpOlTerm, t2: lpOlTerm): Boolean = {
+    Out.lp_debug_info(s"testing alpha equivalence of ${t1.pretty} and ${t2.pretty}")
+    if (t1 == t2) true
+    else alphaEquivalent(t1, t2, Map.empty)
+  }
+
+  private def alphaEquivalent(t1: lpTerm, t2: lpTerm, env: Map[lpTerm, lpTerm]): Boolean = {
+    // Checks whether two lpTerms are equal modulo renaming of bound variables.
+    Out.lp_debug_info(s"comparing ${t1.pretty} and ${t2.pretty} with mapping $env")
+    (t1, t2) match {
+    // First, we handle terms with binders:
+    case (lam1: lpOlLambdaTerm, lam2: lpOlLambdaTerm) =>
+      if (lam1.vars.length != lam2.vars.length) false
+      else {
+        val newEnv = lam1.vars.zip(lam2.vars).foldLeft(env) { case (acc, (v1, v2)) =>
+          v1 match {
+            case otv1: lpOlTypedVar =>
+              v2 match {
+                case otv2: lpOlTypedVar =>
+                  if (v1.ty != v2.ty) return false// todo: Once polymorhic types are implemented, also include them
+                  acc + (otv1 -> otv2)
+                case _ => acc
+              }
+            // only typed vars are allowed
+            case _ => throw new Exception(s"LP-Encoding: found unallowed untyped vars in Ol-lambda term")
+          }
+        }
+        alphaEquivalent(lam1.body, lam2.body, newEnv)
+      }
+    case (q1: lpOlQuantifiedTerm, q2: lpOlQuantifiedTerm) =>
+      if (q1.quantifier != q2.quantifier) false
+      else {
+        (q1.variables, q2.variables) match {
+          case (v1: lpOlTypedVar, v2: lpOlTypedVar) =>
+            if (v1.ty != v2.ty) false // todo: Once polymorhic types are implemented, also include them
+            else {
+              val newEnv = env + (v1 -> v2)
+              alphaEquivalent(q1.body, q2.body, newEnv)
+            }
+          // only typed vars are allowed in mono-quantified terms
+          case _ => false
+        }
+      }
+
+    // Variables themselves
+    case (v1: lpOlTypedVar, v2: lpOlTypedVar) =>
+      env.getOrElse(v1, v1) == v2
+    case (v1: lpOlUntypedVar, v2: lpOlUntypedVar) =>
+      env.getOrElse(v1, v1) == v2
+    case (u1: lpOlUnaryConnectiveTerm, u2: lpOlUnaryConnectiveTerm) =>
+      u1.connective == u2.connective && alphaEquivalent(u1.body, u2.body, env)
+
+    // All other terms that may contain variables
+    case (app1: lpOlFunctionApp, app2: lpOlFunctionApp) =>
+      app1.args.length == app2.args.length &&
+        alphaEquivalent(app1.f, app2.f, env) &&
+        app1.args.zip(app2.args).forall {
+          case (Left(t1), Left(t2)) => alphaEquivalent(t1, t2, env)
+          case (Right(ty1), Right(ty2)) => alphaEquivalent(ty1, ty2, env)
+          case _ => false
+        }
+    case (b1: lpOlUntypedBinaryConnectiveTerm, b2: lpOlUntypedBinaryConnectiveTerm) =>
+      b1.connective == b2.connective &&
+        alphaEquivalent(b1.lhs, b2.lhs, env) &&
+        alphaEquivalent(b1.rhs, b2.rhs, env)
+    case (b1: lpOlTypedBinaryConnectiveTerm, b2: lpOlTypedBinaryConnectiveTerm) =>
+      b1.connective == b2.connective &&
+        b1.ty == b2.ty &&
+        alphaEquivalent(b1.lhs, b2.lhs, env) &&
+        alphaEquivalent(b1.rhs, b2.rhs, env)
+    case (m1: lpOlUntypedBinaryConnectiveTerm_multi, m2: lpOlUntypedBinaryConnectiveTerm_multi) =>
+      m1.connective == m2.connective &&
+        m1.args.length == m2.args.length &&
+        m1.args.zip(m2.args).forall { case (a, b) => alphaEquivalent(a, b, env) }
+
+    // other cases can not contain variables and can thus be handled by usual ==
+    case _ => t1 == t2
+  }
+  }
 
   def wholeHaveRewriteStep(rewriteSteps: Seq[lpProofScriptStep], nameStep: String, nameSubStep: String, before: lpOlTerm, sourceBefore: lpTerm, after: lpOlTerm): lpHave = {
     //todo: use this in my simplification steps?

@@ -258,6 +258,7 @@ object ModularProofEncoding {
               val namefunExtStep = s"${funExtPosEq_rev().name.pretty}_$editLitCount"
               // Construction the literal to be proved
               val unappliedLit = lpOlTypedBinaryConnectiveTerm(lpEq, lpOlFunctionType(currentTypeSeq), resLhs, resRhs)
+              //def lpA
               val (appliedLhs, appliedRhs) = (betaReduceLpApplication(lpOlFunctionApp(resLhs, Seq(Left(appliedVar)))), betaReduceLpApplication(lpOlFunctionApp(resRhs, Seq(Left(appliedVar)))))
               val (appliedType, currentType) = (currentTypeSeq.tail, currentTypeSeq.head)
               val appliedLit = lpOlTypedBinaryConnectiveTerm(lpEq, lpOlFunctionType(appliedType), appliedLhs, appliedRhs)
@@ -267,6 +268,7 @@ object ModularProofEncoding {
               allSteps = allSteps :+ lpHave(namefunExtStep, impToProve, lpProofScript(Seq(funExtImp)))
               usedSymbols = usedSymbols + funExtPosEq_rev()
               Out.lp_debug_info(s"Instance of $namefunExtStep to prove ${impToProve.pretty}")
+              Out.lp_debug_info(s"Types of the literal before application: ${currentTypeSeq.map(_.pretty)} after: ${appliedType.map(_.pretty)}")
 
               // test if we need any rewriting on the parent
               // todo: move here
@@ -304,7 +306,8 @@ object ModularProofEncoding {
             //val reducedRhs = betaReduceLpApplication(resRhs)
             val finalType : lpOlType = if (currentTypeSeq.length == 1) currentTypeSeq.head else lpOlFunctionType(currentTypeSeq)
             val reducedAppliedLit =lpOlTypedBinaryConnectiveTerm(lpEq, finalType,resLhs,resRhs)
-            if (encEditLit0 != reducedAppliedLit){
+            Out.lp_debug_info(s"reduced applied lit $reducedAppliedLit")
+            if (!alphaEquivalent(encEditLit0, reducedAppliedLit)){
               Out.lp_debug_info(s"Looking for transformations to get from ${encEditLit0.pretty} to ${reducedAppliedLit.pretty}\n${encEditLit0} to \n${reducedAppliedLit}")
               // if we had a permutation, we need to infer the index in the clause modulo application
               val indexModuloPerm = permutation.indexOf(indexOfLit)

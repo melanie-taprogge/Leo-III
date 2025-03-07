@@ -572,6 +572,15 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlFunctionApp(f, args))
   }
 
+  object lpOlFunctionApp {
+    def apply(f: lpOlTerm, args: Seq[Either[lpOlTerm, lpOlType]]): lpOlFunctionApp = f match {
+      case lpOlFunctionApp(f0, innerArgs) =>
+        new lpOlFunctionApp(f0, innerArgs ++ args)
+      case _ =>
+        new lpOlFunctionApp(f, args)
+    }
+  }
+
   abstract class lpOlConnectiveTerm extends lpOlTerm
 
   case class lpOlUnaryConnectiveTerm(connective: lpOlUnaryConnective, body: lpOlTerm) extends lpOlConnectiveTerm{

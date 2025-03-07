@@ -453,6 +453,7 @@ object AccessoryRules {
 
   def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
     Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
+    // todo: compare modulo alpha conversion?
 
     // Transform two literals into each other, including cases of eq-sym application, transformation to and from equality literal inclduing ones where we insert bottom rather than top
 
@@ -547,12 +548,13 @@ object AccessoryRules {
       if ((Seq(lhs1, rhs1).contains(lhs0) || Seq(lhs1.get, rhs1.get).contains(lpOlUnaryConnectiveTerm(lpNot, lhs0.get))) && (Seq(lhs1, rhs1).contains(Some(lpOlBot)) || Seq(lhs1, rhs1).contains(Some(lpOlTop)))) {
 
         // detect if we need to swap sides
-        flip = (lhs0 == rhs1)
+        flip = (lhs0 == rhs1) // alphaEquivalent(lhs0.get, rhs1.get)
 
         val (necessaryRule, necessaryFlip): (Option[lpDefinedRules], Boolean) = if (!pol0) {
           if (!pol1) {
             // go from neg non-eq to neg eq
             // x: (π ((¬ x) = (¬ (x = ⊤))))
+            // if ((alphaEquivalent(lhs1, lhs0) && alphaEquivalent(rhs1, Some(lpOlTop))) || (alphaEquivalent(rhs1, lhs0) && alphaEquivalent(lhs1, Some(lpOlTop)))) {
             if ((lhs1 == lhs0 && rhs1 == Some(lpOlTop)) || (rhs1 == lhs0 && lhs1 == Some(lpOlTop))) {
               // go to top
               (Some(mkNegPropNegLit_script()), false)
@@ -642,7 +644,7 @@ object AccessoryRules {
       // maybe transform bot to not top and vice versa?
       true
     }
-    Out.lp_debug_info(s"success")
+    if (canEncode) Out.lp_debug_info(s"success")
     (allSteps,usedSymbols,canEncode)
   }
 
