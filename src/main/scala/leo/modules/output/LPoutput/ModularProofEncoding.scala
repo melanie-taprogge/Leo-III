@@ -168,15 +168,44 @@ object ModularProofEncoding {
     var editLitCount = 0
 
     // Preliminary encodings and conversions
-    val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
-    //val impBoundParent = parent.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
+    val allFreeVars = editedLiterals.flatMap(pair => pair._2.fv) ++ child.cl.implicitlyBound
+    val bVarMap = clauseVars2LP(allFreeVars, sig, Set.empty)._2
     val encParent = clause2LP(parent.cl, Set(), sig)._1
+    var currentUnencParent = parent.cl.lits
     var (currParentLits, impBoundParent) = (encParent.lits, encParent.impBoundVars)
     var lastStepName: lpTerm = lpFunctionApp(parentNameLpEnc, liftVarsToMeta(impBoundParent))
-    val editedLiteralsMap = editedLiterals.toMap
+
     // check if we will need to do a permutation
-    val editedLiteralsMap_rev = editedLiterals.map(tuple => (tuple._2,tuple._1)).toMap
-    val permutation = child.cl.lits.map(childLit => parent.cl.lits.indexOf(editedLiteralsMap_rev.getOrElse(childLit,childLit)))
+    // Since FunExt can be applied in a nested fashion, we first need to construct a mapping of each literal of the
+    // parent to its final transformed stage and then through the comparison of positions we can infer the permutation
+    val litsParent = parent.cl.lits.diff(child.cl.lits)
+    // Recursive helper that follows the chain of edited literal pairs.
+    def followChain(edits: Seq[(Literal, Literal)], start: Literal): (Literal, Seq[(Literal, Literal)]) = {
+      edits.find {
+        case (from, _) => from == start } match {
+        case Some((_, next)) =>
+          // Remove the found tuple and continue following the chain.
+          val index = edits.indexWhere(_ == (start, next))
+          val updatedEdits =  if (index < 0) edits else edits.take(index) ++ edits.drop(index + 1)
+          followChain(updatedEdits, next)
+        case None =>
+          // No further mapping found; return the current literal.
+          (start, edits)
+      }
+    }
+    // Process each parent literal and map each literal to its final literal after FunExt application
+    val (funExtMap, _) = litsParent.foldLeft((Map.empty[Literal, Literal], editedLiterals)) {
+      case ((acc, edits), parentLit) =>
+        val (finalLit, updatedEdits) = followChain(edits, parentLit)
+        // Build a mapping from the final literal (key) to the original parent literal (value)
+        (acc + (finalLit -> parentLit), updatedEdits)
+    }
+    // Compute the permutation by mapping each literal in child.cl to its corresponding index in parent
+    val permutation: Seq[Int] = child.cl.lits.map { childLit =>
+      val correspondingParentLit = funExtMap.getOrElse(childLit, childLit)
+      parent.cl.lits.indexOf(correspondingParentLit)
+    }
+
 
     // The modular proof script can consist of the following steps:
     // 1. Abstract over free variables
@@ -188,12 +217,11 @@ object ModularProofEncoding {
     // 5. If the order of literals was changed, generate a permute rule and apply it to permute the literals
     // 6. Refine with the last step
 
-    Out.lp_debug_info(s"Amount of edited Literals detected: ${editedLiterals.length}")
+    Out.lp_debug_info(s"Amount of edited Literals detected: ${editedLiterals.length}: ${editedLiterals.map((pair => s"\n${pair._1.pretty}\n${pair._2.pretty}"))}")
     if (editedLiterals.length > 0) {
 
       /////////////////////////////////////////////////////
       //// preliminary
-      var litsAfterFunext: Seq[lpOlTerm] = Seq.empty
       // Seq to keep track of the literals that need to be transformed to equational form
       var literalsToEqRW: Seq[lpProofScriptStep] = Seq.empty
 
@@ -204,9 +232,18 @@ object ModularProofEncoding {
 
       /////////////////////////////////////////////////////
       //// Steps 2 to 4
-      parent.cl.lits foreach { origLit =>
-        val edLit = editedLiteralsMap.getOrElse(origLit, origLit)
-        if (edLit != origLit) {
+      editedLiterals foreach { pair =>
+        val (origLit, edLit) = pair
+        //val edLit = editedLiteralsMap.getOrElse(origLit, origLit)
+        // Do all the necessary encodings
+        val encOrigLit000 = term2LP(asTerm(origLit), bVarMap, sig)._1
+        Out.lp_debug_info(s"current parent?: ${currentUnencParent.map(llit => term2LP(asTerm(llit), bVarMap, sig)._1.pretty)}")
+        Out.lp_debug_info(s"is in parent?: ${currentUnencParent.contains(origLit)}")
+        Out.lp_debug_info(s"orig lit: ${encOrigLit000.pretty}")
+        val encEditLit000 = term2LP(asTerm(edLit), bVarMap, sig)._1
+
+        Out.lp_debug_info(s"trying to apply FunExt to literal ${encOrigLit000.pretty}, resulting in ${encEditLit000.pretty}")
+        if (currentUnencParent.contains(origLit)) {
           // Do all the necessary encodings
           val encOrigLitLhs = term2LP(origLit.left, bVarMap, sig)._1
           val encOrigLitRhs = term2LP(origLit.right, bVarMap, sig)._1
@@ -214,11 +251,11 @@ object ModularProofEncoding {
           val encOrigLit = term2LP(asTerm(origLit), bVarMap, sig)._1
           val encEditLit0 = term2LP(asTerm(edLit), bVarMap, sig)._1
           val encEditLitTy = type2LP(edLit.left.ty, sig)
-          Out.lp_debug_info(s"applying FunExt to literal ${encOrigLit.pretty}, resulting in ${encEditLit0.pretty}")
+          //Out.lp_debug_info(s"trying to apply FunExt to literal ${encOrigLit.pretty}, resulting in ${encEditLit0.pretty}")
 
           if (!origLit.polarity) cantEncode = cantEncode :+ "NFE literals unencoded"
           else {
-            val indexOfLit = parent.cl.lits.indexOf(origLit)
+            val indexOfLit = currentUnencParent.indexOf(origLit)
             // Find the terms we need to apply. Usually, this will be variables, but in some cases we need to use witness terms.
             // Track the newly applied variables
             val freshVars = edLit.fv.diff(origLit.fv)
@@ -297,7 +334,7 @@ object ModularProofEncoding {
             // Compare the derived literal with the literal that it is mapped to and apply any necessary transformations
             val finalType : lpOlType = if (currentTypeSeq.length == 1) currentTypeSeq.head else lpOlFunctionType(currentTypeSeq)
             val reducedAppliedLit =lpOlTypedBinaryConnectiveTerm(lpEq, finalType,resLhs,resRhs)
-            Out.lp_debug_info(s"reduced applied lit $reducedAppliedLit")
+            Out.lp_debug_info(s"reduced applied lit ${reducedAppliedLit.pretty}")
             if (!alphaEquivalent(encEditLit0, reducedAppliedLit)){
               Out.lp_debug_info(s"Looking for transformations to get from ${encEditLit0.pretty} to ${reducedAppliedLit.pretty}\n${encEditLit0} to \n${reducedAppliedLit}")
               // if we had a permutation, we need to infer the index in the clause modulo application
@@ -313,7 +350,9 @@ object ModularProofEncoding {
               literalsToEqRW = literalsToEqRW ++ literalsToEqRW0
             }
           }
-        }
+          // update the current parent
+          currentUnencParent = currentUnencParent.updated(currentUnencParent.indexOf(origLit), edLit)
+        } else Out.lp_debug_info(s"literal ${origLit.pretty} could not be found in parent")
       }
 
       /////////////////////////////////////////////////////
@@ -323,6 +362,7 @@ object ModularProofEncoding {
         Out.lp_debug_info(s"Permutation required: $permutation")
         val permutationInstance = metaPermutation.instanciate(permutation,currParentLits,lastStepName)
         Out.lp_debug_info(s"proposed permutation: ${permutationInstance.pretty}")
+        usedSymbols = usedSymbols + metaPermutation
         permutationInstance
       } else lastStepName
 
@@ -330,7 +370,7 @@ object ModularProofEncoding {
 
       allSteps = allSteps :+ lpRefine(lpFunctionApp(permTerm,Seq()))
     }
-    if (editLitCount == 0) cantEncode = cantEncode :+ "nested application of FunExt not encoded yet"
+    //if (editLitCount == 0) cantEncode = cantEncode :+ "nested application of FunExt not encoded yet"
     if (! cantEncode.isEmpty) (lpProofScript(allSteps),usedSymbols, Some(s"FunExt can not be encoded: ${cantEncode.mkString(", ")}"))
     else (lpProofScript(allSteps),usedSymbols, None)
   }
@@ -1271,7 +1311,7 @@ object ModularProofEncoding {
           val (patternTerm, rewrittenLit, counter, rwUnderBinder) = findRWTerm0(Seq((rwLhs, rwRhs)).toMap, encLit)
           if (rwUnderBinder) {
             allTransformationsEncoded = false
-            Out.lp_debug_info(s"Rewriting-Tactic can not be used on literal of the parent clause: ${encLit} since term is under binder")
+            Out.lp_debug_info(s"Rewriting-Tactic can not be used on literal of the parent clause: ${encLit.pretty} since term is under binder")
           } else if (counter != 0) {
             rewriteenLits = rewriteenLits.updated(litCount,rewrittenLit)
             Out.lp_debug_info(s"Trying to apply to literal of the parent clause: ${encLit.pretty}")

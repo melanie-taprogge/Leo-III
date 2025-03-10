@@ -1270,7 +1270,6 @@ package inferenceControl {
       * @param cl The clause `cl` to be processed
       */
     final def applyNew(cl: AnnotatedClause)(implicit state: LocalState): Set[AnnotatedClause] = {
-      val LP = true //todo: make a parameter
       if (isPropSet(ClauseAnnotation.PropFuncExt, cl.properties)) Set.empty
       else {
         implicit val sig: Signature = state.signature
@@ -1288,9 +1287,10 @@ package inferenceControl {
           val (stepLiterals, stepInfo) = exhaustiveSteps(posFuncExtLits,vargen)(sig)
           val pairs = stepLiterals.zip(stepInfo)
           val newProp = addProp(ClauseAnnotation.PropFuncExt, deleteProp(ClauseAnnotation.PropBoolExt | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
+          val newClause = Clause(appliedNegFuncExtLits ++ otherLits)
           if (pairs.isEmpty){
-            val newClause = Clause(appliedNegFuncExtLits ++ otherLits)
-            val newInfo = new FurtherInfo() //todo : im sure there is a more elegant way of instantiation
+            val newInfo = new FurtherInfo()
+            newInfo.edLitBeforeAfter = addInfo
             result = result + AnnotatedClause(newClause, Role_Plain, InferredFrom(FuncExt, cl), newProp, newInfo)
           }
           val steps = pairs.iterator
@@ -1317,8 +1317,9 @@ package inferenceControl {
       else {
         val appliedOneStepPosFuncExtLits = posLits.map(lit => FuncExt.applyNew(lit, vargen)(sig))
         val addInfo = posLits.zip(appliedOneStepPosFuncExtLits).map { case (x, y) => (x, y)}
+        val updatedInfo:  Seq[(Literal, Literal)] = if (addInfo0.nonEmpty) addInfo0.last ++ addInfo else addInfo
         val (_,todoLits,doneLits) = FuncExt.canApply(appliedOneStepPosFuncExtLits)
-        exhaustiveSteps0(todoLits, vargen, done ++ doneLits, acc :+ (appliedOneStepPosFuncExtLits ++ done), addInfo0 :+ addInfo)(sig)
+        exhaustiveSteps0(todoLits, vargen, done ++ doneLits, acc :+ (appliedOneStepPosFuncExtLits ++ done), addInfo0 :+ updatedInfo)(sig)
       }
     }
   }

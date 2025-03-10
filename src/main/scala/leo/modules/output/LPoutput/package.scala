@@ -417,7 +417,7 @@ package object LPoutput {
 
   private def alphaEquivalent(t1: lpTerm, t2: lpTerm, env: Map[lpTerm, lpTerm]): Boolean = {
     // Checks whether two lpTerms are equal modulo renaming of bound variables.
-    Out.lp_debug_info(s"comparing ${t1.pretty} and ${t2.pretty} with mapping $env")
+    //Out.lp_debug_info(s"comparing ${t1.pretty} and ${t2.pretty} with mapping $env")
     (t1, t2) match {
     // First, we handle terms with binders:
     case (lam1: lpOlLambdaTerm, lam2: lpOlLambdaTerm) =>
