@@ -280,8 +280,8 @@ object AccessoryRules {
     // Π [a: Set], Π x: τ a, Π y: τ a, π ((x = y) = ((x = y) = ⊤))
 
     val a = lpOlUserDefinedType(typeVarName)
-    val x = lpOlTypedTermVar(lpOlConstantTerm(patternVarName1),a)
-    val y = lpOlTypedTermVar(lpOlConstantTerm(patternVarName2),a)
+    val x = lpOlTypedVar(lpOlConstantTerm(patternVarName1),a)
+    val y = lpOlTypedVar(lpOlConstantTerm(patternVarName2),a)
     override def name: lpConstantTerm = lpConstantTerm("liftEqExlicit")
     // [a: Set] (x y : τ a) :(π ((x = y) = ((x = y) = ⊤)))
     override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y) , lpOlTop)).prf
@@ -656,8 +656,8 @@ object AccessoryRules {
     // [T] (x y : τ T) : π((x = y) = (y = x))
 
     val T = lpOlUserDefinedMonoType("T")
-    val x = lpOlTypedTermVar(lpOlConstantTerm("x"),T)
-    val y = lpOlTypedTermVar(lpOlConstantTerm("y"),T)
+    val x = lpOlTypedVar(lpOlConstantTerm("x"),T)
+    val y = lpOlTypedVar(lpOlConstantTerm("y"),T)
 
     override def name: lpConstantTerm = lpConstantTerm("eqSym")
 

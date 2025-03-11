@@ -5,7 +5,7 @@ import leo.datastructures.Term.∙
 import leo.datastructures.{Clause, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature.{===, HOLBinaryConnective, Not, |||}
 import leo.modules.output.LPoutput.Encodings.type2LP
-import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedTermVar, lpOlTypedTyVar, lpOlTypedVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
+import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlTyVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
 
@@ -61,13 +61,13 @@ package object LPoutput {
 
   private final val partiallyAlliedTPTPmap : Map[String, (String,lpOlConstantTerm, lpOlConstantTerm) => lpOlLambdaTerm] = //Vector("=", "!=", "&", "|", "~", "!", "?")
   // symbol =_part (a : Set) ≔ λ (x y : τ a), x = y;
-    Map.apply("~" -> ((_, x, _) => lpOlLambdaTerm(Seq(lpOlTypedTermVar(x,lpOtype)),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedTermVar(x,lpOtype)))),
-      "=" -> ((a, x, y) => lpOlLambdaTerm(Seq(lpOlTypedTyVar(lpOlConstantTerm(a)),lpOlTypedTermVar(x,lpOlUserDefinedType(a)),lpOlTypedTermVar(y,lpOlUserDefinedType(a))),lpOlTypedBinaryConnectiveTerm(lpEq,lpOlUserDefinedType(a),lpOlTypedTermVar(x,lpOlUserDefinedType(a)),lpOlTypedTermVar(y,lpOlUserDefinedType(a))))),
-      "!=" -> ((a, x, y) => lpOlLambdaTerm(Seq(lpOlTypedTyVar(lpOlConstantTerm(a)),lpOlTypedTermVar(x,lpOlUserDefinedType(a)),lpOlTypedTermVar(y,lpOlUserDefinedType(a))),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOlUserDefinedType(a),lpOlTypedTermVar(x,lpOlUserDefinedType(a)),lpOlTypedTermVar(y,lpOlUserDefinedType(a)))))),
-      "&" -> ((_, x, y) => lpOlLambdaTerm(Seq(lpOlTypedTermVar(x,lpOtype),lpOlTypedTermVar(y,lpOtype)),lpOlUntypedBinaryConnectiveTerm(lpAnd,lpOlTypedTermVar(x,lpOtype),lpOlTypedTermVar(y,lpOtype)))),
-      "|" -> ((_, x, y) => lpOlLambdaTerm(Seq(lpOlTypedTermVar(x,lpOtype),lpOlTypedTermVar(y,lpOtype)),lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlTypedTermVar(x,lpOtype),lpOlTypedTermVar(y,lpOtype)))),
-      "!" -> ((a, x, _) => lpOlLambdaTerm(Seq(lpOlTypedTyVar(lpOlConstantTerm(a)),lpOlTypedTermVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype)))),lpOlMonoQuantifiedTerm(lpOlForAll,lpOlTypedTermVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))),x,true))),
-      "?" -> ((a, x, _) => lpOlLambdaTerm(Seq(lpOlTypedTyVar(lpOlConstantTerm(a)),lpOlTypedTermVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype)))),lpOlMonoQuantifiedTerm(lpOlExists,lpOlTypedTermVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))),x,true))))
+    Map.apply("~" -> ((_, x, _) => lpOlLambdaTerm(Seq(Left(lpOlTypedVar(x,lpOtype))),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedVar(x,lpOtype)))),
+      "=" -> ((a, x, y) => lpOlLambdaTerm(Seq(Right(lpOlTyVar(a)),Left(lpOlTypedVar(x,lpOlUserDefinedType(a))),Left(lpOlTypedVar(y,lpOlUserDefinedType(a)))),lpOlTypedBinaryConnectiveTerm(lpEq,lpOlUserDefinedType(a),lpOlTypedVar(x,lpOlUserDefinedType(a)),lpOlTypedVar(y,lpOlUserDefinedType(a))))),
+      "!=" -> ((a, x, y) => lpOlLambdaTerm(Seq(Right(lpOlTyVar(a)),Left(lpOlTypedVar(x,lpOlUserDefinedType(a))),Left(lpOlTypedVar(y,lpOlUserDefinedType(a)))),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOlUserDefinedType(a),lpOlTypedVar(x,lpOlUserDefinedType(a)),lpOlTypedVar(y,lpOlUserDefinedType(a)))))),
+      "&" -> ((_, x, y) => lpOlLambdaTerm(Seq(Left(lpOlTypedVar(x,lpOtype)),Left(lpOlTypedVar(y,lpOtype))),lpOlUntypedBinaryConnectiveTerm(lpAnd,lpOlTypedVar(x,lpOtype),lpOlTypedVar(y,lpOtype)))),
+      "|" -> ((_, x, y) => lpOlLambdaTerm(Seq(Left(lpOlTypedVar(x,lpOtype)),Left(lpOlTypedVar(y,lpOtype))),lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlTypedVar(x,lpOtype),lpOlTypedVar(y,lpOtype)))),
+      "!" -> ((a, x, _) => lpOlLambdaTerm(Seq(Right(lpOlTyVar(a)),Left(lpOlTypedVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))))),lpOlMonoQuantifiedTerm(lpOlForAll,lpOlTypedVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))),x,true))),
+      "?" -> ((a, x, _) => lpOlLambdaTerm(Seq(Right(lpOlTyVar(a)),Left(lpOlTypedVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))))),lpOlMonoQuantifiedTerm(lpOlExists,lpOlTypedVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))),x,true))))
       // todo: the other connectives
 
   final def lpEscapeName(str: String, sig: Signature): String = {
@@ -95,6 +95,23 @@ package object LPoutput {
     else {
       val safeName = lpEscapeName(str, sig)
       lpOlConstantTerm(safeName)
+    }
+  }
+
+  def liftVarsToMeta(vars:  Seq[Either[lpOlTypedVar, lpOlTyVar]]): Seq[lpTypedVar]={
+    vars.map(liftVarsToMeta((_)))
+  }
+  def liftVarsToMeta(var0: Either[lpOlTypedVar, lpOlTyVar]): lpTypedVar = {
+    var0 match {
+      case Left(tyVar) => tyVar.asMlVar
+      case Right(termVar) => termVar.asMlVar
+    }
+  }
+
+  def isTermVar(var0: Either[lpOlTypedVar, lpOlTyVar]): lpOlTypedVar = {
+    var0 match {
+      case Left(termVar) => termVar
+      case Right(tyVar) => throw new Exception(s"need a term variable but found a type variable")
     }
   }
 
@@ -230,6 +247,7 @@ package object LPoutput {
   //def lpTySubst(tyRwMap:Map[lpOlTerm,lpOlType],)
 
   def findRWTerm0(termRwMap:Map[lpOlTerm, lpOlTerm], searchIn:lpOlTerm, rwUnderBinder:Boolean = false, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x")), currentX:Int = 0): (lpOlTerm, lpOlTerm, Int, Boolean) = {
+    // todo: introduce type rw as well
     // find a specific subterm for the application of a rewrite operation
     // this function returns: The rewrite-pattern, the term modulo rewriting and an integer signaling how often the pattern was found.
     if (termRwMap.keySet.contains(searchIn)) (patternVar,termRwMap(searchIn), currentX + 1, rwUnderBinder)
@@ -242,10 +260,10 @@ package object LPoutput {
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlConstantTerm(_) =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
-      case lpOlTypedTermVar(_,_) =>
+      case lpOlTypedVar(_,_) =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
-      case lpOlTypedTyVar(_) =>
-          (lpOlWildcard, searchIn, 0, rwUnderBinder)
+      //case lpOlTyVar(_) =>
+          //(lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlUntypedVar(lpConstantTerm(_)) =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlLambdaTerm(vars,body) =>
@@ -331,11 +349,11 @@ package object LPoutput {
           case (_, e) => e.isLeft
         }
         val termSubstDict: Map[lpOlTerm, lpOlTerm] = termPairs.map {
-          case (v, Left(term)) => (v, term)
+          case (Left(v), Left(term)) => (v, term)
           case _ => throw new Exception("unexpected case")
         }.toMap
-        val tySubstDict: Map[lpOlTypedVar, lpOlType] = typePairs.map {
-          case (v, Right(ty)) => (v, ty)
+        val tySubstDict: Map[lpOlTyVar, lpOlType] = typePairs.map {
+          case (Right(v), Right(ty)) => (v, ty)
           case _ => throw new Exception("unexpected case")
         }.toMap
 
@@ -399,7 +417,7 @@ package object LPoutput {
 
   private def alphaEquivalent(t1: lpTerm, t2: lpTerm, env: Map[lpTerm, lpTerm]): Boolean = {
     // Checks whether two lpTerms are equal modulo renaming of bound variables.
-    Out.lp_debug_info(s"comparing ${t1.pretty} and ${t2.pretty} with mapping $env")
+    //Out.lp_debug_info(s"comparing \n${t1} and \n${t2} with mapping $env")
     (t1, t2) match {
     // First, we handle terms with binders:
     case (lam1: lpOlLambdaTerm, lam2: lpOlLambdaTerm) =>
@@ -407,10 +425,10 @@ package object LPoutput {
       else {
         val newEnv = lam1.vars.zip(lam2.vars).foldLeft(env) { case (acc, (v1, v2)) =>
           v1 match {
-            case otv1: lpOlTypedVar =>
+            case Left(otv1) =>
               v2 match {
-                case otv2: lpOlTypedVar =>
-                  if (v1.ty != v2.ty) return false// todo: Once polymorhic types are implemented, also include them
+                case Left(otv2) =>
+                  if (otv1.ty != otv2.ty) return false// todo: Once polymorhic types are implemented, also include them
                   acc + (otv1 -> otv2)
                 case _ => acc
               }
@@ -424,11 +442,18 @@ package object LPoutput {
       if (q1.quantifier != q2.quantifier) false
       else {
         (q1.variables, q2.variables) match {
-          case (v1: lpOlTypedVar, v2: lpOlTypedVar) =>
-            if (v1.ty != v2.ty) false // todo: Once polymorhic types are implemented, also include them
-            else {
-              val newEnv = env + (v1 -> v2)
-              alphaEquivalent(q1.body, q2.body, newEnv)
+          case (vars1: Seq[`lpOlTypedVar`], vars2: Seq[`lpOlTypedVar`]) =>
+            val newEnvOpt = vars1.zip(vars2).foldLeft(Option(env)) { (maybeEnv, v1v2) =>
+              maybeEnv.flatMap { currentEnv =>
+                if (v1v2._1.ty != v1v2._2.ty) None
+                else {
+                  Some(currentEnv + (v1v2._1 -> v1v2._2))
+                }
+              }
+            }
+            newEnvOpt match {
+              case Some(newEnv) => alphaEquivalent(q1.body, q2.body, newEnv)
+              case None => false
             }
           // only typed vars are allowed in mono-quantified terms
           case _ => false
@@ -471,6 +496,7 @@ package object LPoutput {
   }
   }
 
+  /*
   def wholeHaveRewriteStep(rewriteSteps: Seq[lpProofScriptStep], nameStep: String, nameSubStep: String, before: lpOlTerm, sourceBefore: lpTerm, after: lpOlTerm): lpHave = {
     //todo: use this in my simplification steps?
 
@@ -490,6 +516,8 @@ package object LPoutput {
     // the whole Have step:
     lpHave(nameStep, after.prf, stepProof)
   }
+
+   */
 
   final def clauseImplicitsToTPTPQuantifierList_map(implicitlyQuantified: Seq[(Int, Type)])(sig: Signature): Map[Int, String] = {
     // shoretened version to only consruct the map
