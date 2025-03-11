@@ -1,7 +1,7 @@
 package leo.modules.output.LPoutput
 
 import leo.datastructures.Term.{Integer, Rational, Real}
-import leo.datastructures.{Clause, ClauseProxy, Signature, Term, Type}
+import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term, Type}
 import leo.datastructures.Type._
 import leo.datastructures.Term._
 import leo.modules.HOLSignature
@@ -391,6 +391,49 @@ object Encodings {
 
       // Others should be invalid
       case _ => throw new IllegalArgumentException("Unexpected term format during conversion to LP")
+    }
+  }
+
+  case class lpLiteral(
+                        left: lpOlTerm,
+                        right: lpOlTerm,
+                        tyLhs: lpOlType,
+                        term: lpOlTerm,
+                        pol: Boolean,
+                        eq: Boolean
+                      )
+  object lpLiteral {
+    def constructFullLit (encLeft: lpOlTerm, encRight: lpOlTerm, encTy: lpOlType, pol: Boolean, eq: Boolean): lpOlTerm ={
+      val encTerm0 = if (eq) lpOlTypedBinaryConnectiveTerm(lpEq, encTy, encLeft, encRight) else encLeft
+      if (pol) encTerm0 else lpOlUnaryConnectiveTerm(lpNot, encTerm0)
+    }
+    def apply(lit: Literal, bVarMap: Map[Int, String], sig: Signature): lpLiteral = {
+      val encLeft = term2LP(lit.left, bVarMap, sig)._1
+      val encRight = if (lit.equational) term2LP(lit.right, bVarMap, sig)._1 else lpOlTop
+      val encTy = type2LP(lit.left.ty, sig)
+      val encTerm = constructFullLit(encLeft,encRight,encTy,lit.polarity, lit.equational)
+      lpLiteral(encLeft, encRight, encTy, encTerm, lit.polarity, lit.equational)
+    }
+
+    def apply(encLeft: lpOlTerm, encRight: lpOlTerm, encTy: lpOlType, pol: Boolean, eq: Boolean): lpLiteral = {
+      val encTerm = constructFullLit(encLeft,encRight, encTy, pol, eq)
+      lpLiteral(encLeft, encRight, encTy, encTerm, pol, eq)
+    }
+
+    def apply(fullLit: lpOlTerm): lpLiteral = {
+      fullLit match {
+        case lpOlUnaryConnectiveTerm(`lpNot`,body) =>
+          body match {
+            case lpOlTypedBinaryConnectiveTerm(`lpEq`,ty,lhs,rhs) =>
+              lpLiteral(lhs,rhs,ty,false,true)
+            case lhs =>
+              lpLiteral(lhs,lpOlTop,lpOtype,false,false)
+          }
+        case lpOlTypedBinaryConnectiveTerm(`lpEq`, ty, lhs, rhs) =>
+          lpLiteral(lhs, rhs, ty, true, true)
+        case lhs =>
+          lpLiteral(lhs, lpOlTop, lpOtype, true, false)
+      }
     }
   }
 }
