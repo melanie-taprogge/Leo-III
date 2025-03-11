@@ -1,11 +1,10 @@
 package leo.modules.output.LPoutput
 import leo.Out
-import leo.datastructures.Literal.{asTerm, mkLit}
+import leo.datastructures.Literal.{asTerm}
 import leo.modules.output.LPoutput.Encodings._
 import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term}
 import leo.modules.HOLSignature._
-import leo.modules.calculus.freshVarGen
-import leo.modules.output.LPoutput.lpDatastructures.{lpSet, _}
+import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
@@ -159,15 +158,13 @@ object ModularProofEncoding {
   ////////// Extensionality
   ////////////////////////////////////////////////////////////////
 
-  case class FunExtState(
-                          currParentLits: Seq[lpOlTerm],
+  case class funcExtState(currParentLits: Seq[lpOlTerm],
                           currentUnencParent: Seq[Literal],
                           lastStepName: lpTerm,
                           allSteps: Seq[lpProofScriptStep],
                           usedSymbols: Set[lpStatement],
                           literalsToEqRW: Seq[lpProofScriptStep],
-                          cantEncode: Option[String]
-                        )
+                          cantEncode: Option[String])
 
   // Recursive helper that follows the chain of edited literal pairs.
   def followChain(edits: Seq[(Literal, Literal)], start: Literal): (Literal, Seq[(Literal, Literal)]) = {
@@ -186,7 +183,7 @@ object ModularProofEncoding {
   }
 
   def encFuncExtPos(child: ClauseProxy, parent: ClauseProxy, editedLiterals: Seq[(Literal, Literal)], parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Set[lpStatement], Option[String]) = {
-
+    
     // Encoding of the application of the EP rule FuncExt (Functional Extensionality)
       // The modular proof script can consist of the following steps:
       // 1. Abstract over free variables
@@ -208,18 +205,18 @@ object ModularProofEncoding {
     Out.lp_debug_info(s"Amount of edited Literals detected: ${editedLiterals.length}")
 
     // Check if we will need to do a permutation
-      // -> Since FunExt can be applied in a nested fashion, we first need to construct a mapping of each literal of the
+      // -> Since FuncExt can be applied in a nested fashion, we first need to construct a mapping of each literal of the
       //    parent to its final transformed stage and then through the comparison of positions we can infer the permutation
     val litsParent = parent.cl.lits.diff(child.cl.lits)
-    // Map each final literal to its initial form prior to exhaustive FunExt application
-    val (funExtMap, _) = litsParent.foldLeft((Map.empty[Literal, Literal], editedLiterals)) {
+    // Map each final literal to its initial form prior to exhaustive FuncExt application
+    val (funcExtMap, _) = litsParent.foldLeft((Map.empty[Literal, Literal], editedLiterals)) {
       case ((acc, edits), parentLit) =>
         val (finalLit, updatedEdits) = followChain(edits, parentLit)
         (acc + (finalLit -> parentLit), updatedEdits)
     }
     // Compute the permutation by mapping each literal in child.cl to its corresponding index in the parent
     val permutation: Seq[Int] = child.cl.lits.map { childLit =>
-      val correspondingParentLit = funExtMap.getOrElse(childLit, childLit)
+      val correspondingParentLit = funcExtMap.getOrElse(childLit, childLit)
       parent.cl.lits.indexOf(correspondingParentLit)
     }
 
@@ -230,7 +227,7 @@ object ModularProofEncoding {
     val initialStep = if (freeVarsChild.nonEmpty) Seq(lpAssume(freeVarsChild)) else Seq()
 
     // Instantiate the initial state
-    val initialState = FunExtState(
+    val initialState = funcExtState(
       currParentLits = encParent.lits,
       currentUnencParent = parent.cl.lits,
       lastStepName = lpFunctionApp(parentNameLpEnc, liftVarsToMeta(impBoundParent)),
@@ -250,7 +247,7 @@ object ModularProofEncoding {
       if (state.currentUnencParent.contains(origLit)) {
         if (!state.cantEncode.isDefined){
           if (origLit.polarity) {
-            val (error, pfeSteps, pfeUsedSymbols, pfeStepName, pfeRwImplicitTrans, updatedParentLits) = pos_funExt_step(origLit, edLit, state.currentUnencParent, state.currParentLits, permutation, state.lastStepName, bVarMap, sig, idx)
+            val (error, pfeSteps, pfeUsedSymbols, pfeStepName, pfeRwImplicitTrans, updatedParentLits) = posFuncExtStep(origLit, edLit, state.currentUnencParent, state.currParentLits, permutation, state.lastStepName, bVarMap, sig, idx)
 
             Out.lp_debug_info(s"pfeRwImplicitTrans:\n${pfeRwImplicitTrans.map(_.pretty)}}")
             // Return a new state with the updated values
@@ -286,11 +283,65 @@ object ModularProofEncoding {
       postPfeState.copy(allSteps = (postPfeState.allSteps ++ postPfeState.literalsToEqRW):+ lpRefine(lpFunctionApp(postPfeState.lastStepName, Seq())))
     }
 
-  if (postPermStep.cantEncode.isDefined) (lpProofScript(postPermStep.allSteps),postPermStep.usedSymbols, Some(s"FunExt can not be encoded: ${postPermStep.cantEncode.get}"))
+  if (postPermStep.cantEncode.isDefined) (lpProofScript(postPermStep.allSteps),postPermStep.usedSymbols, Some(s"FuncExt can not be encoded: ${postPermStep.cantEncode.get}"))
   else (lpProofScript(postPermStep.allSteps),postPermStep.usedSymbols, None)
 }
 
-  def identifyAppliedTerm(origLit: Literal, encOrigLit: lpOlTerm, edLit: Literal, bVarMap: Map[Int, String], sig:Signature): lpOlTerm = {
+  private def posFuncExtStep(origLit: Literal, edLit: Literal, currentUnencParent: Seq[Literal], currParentLits: Seq[lpOlTerm], permutation: Seq[Int], lastStepName: lpTerm, bVarMap: Map[Int, String], sig: Signature, editLitCount: Int): (Option[String], Seq[lpProofScriptStep], Set[lpStatement], lpTerm, Seq[lpProofScriptStep], Seq[lpOlTerm]) = {
+    // encode the application of an individual step
+
+    /////////////////////////////////////////////////////
+    //// Preliminary
+
+    val encOrigLit = lpLiteral(origLit, bVarMap, sig)
+    val encEditLit = term2LP(asTerm(edLit), bVarMap, sig)._1
+    val indexOfLit = currentUnencParent.indexOf(origLit)
+    Out.lp_debug_info(s"Applying FuncExt to literal ${encOrigLit.term.pretty}, resulting in ${encEditLit.pretty}")
+
+    val appliedVar = identifyAppliedTerm(origLit, encOrigLit.term, edLit, bVarMap, sig)
+    Out.lp_debug_info(s"applying: ${appliedVar}")
+
+    /////////////////////////////////////////////////////
+    //// 2.   Instantiate PFE and use it to define a new hypothesis
+
+    val namefuncExtStep = s"${encPFE().name.pretty}_$editLitCount"
+    // Construction of the literal to be proved
+    val currentTypeSeq: Seq[lpOlType] = encOrigLit.tyLhs match {
+      case lpOlFunctionType(types) => types
+      case _ => throw new Exception(s"LP-ENCODING: Expected function type but found ${encOrigLit.tyLhs.pretty}")
+    }
+    val appliedType = currentTypeSeq.tail
+    val appliedLit = lpLiteral(
+      betaReduceLpApplication(lpOlFunctionApp(encOrigLit.left, Seq(Left(appliedVar)))),
+      betaReduceLpApplication(lpOlFunctionApp(encOrigLit.right, Seq(Left(appliedVar)))),
+      if (appliedType.length == 1) appliedType.head else lpOlFunctionType(appliedType),
+      true, true)
+    // Instanciation of the step
+    val impToProve = lpMlFunctionType(Seq(encOrigLit.term.prf, appliedLit.term.prf))
+    val funcExtImp = lpRefine(encPFE().instanciate(None, encOrigLit.left, encOrigLit.right, appliedVar))
+    val pfeInst = lpHave(namefuncExtStep, impToProve, lpProofScript(Seq(funcExtImp)))
+    Out.lp_debug_info(s"Instance of $namefuncExtStep to prove ${impToProve.pretty}")
+    Out.lp_debug_info(s"Types of the literal before application: ${currentTypeSeq.map(_.pretty)} after: ${appliedType.map(_.pretty)}")
+    Out.lp_debug_info(s"reduced applied lit ${appliedLit.term.pretty}")
+
+    /////////////////////////////////////////////////////
+    //// 3.   Use the proven hypothesis to apply the changes to the (instantiated) parent formula, using the appropriate transform rule
+    val applicationStepName = lpConstantTerm(s"${namefuncExtStep}_app")
+    // if the length of the parent is greater than one, we need to use transform
+    val (pfeApp, usedSymbols, newParentLits) = applyInstFuncExtRule(currParentLits, appliedLit, indexOfLit, namefuncExtStep, applicationStepName, lastStepName)
+    val allSteps = Seq(pfeInst, pfeApp)
+
+    /////////////////////////////////////////////////////
+    //// 4. Apply necessary implicit transformations
+    // Compare the derived literal with the literal that it is mapped to and apply any necessary transformations
+    val (cantEncode, usedSymbolsTrans, literalsToEqRW) = implicitRwTransFuncEx(encEditLit, appliedLit.term, permutation, indexOfLit, currParentLits.length)
+    if (cantEncode) {
+      Out.lp_debug_info(s"Implicit RW transformation necessary but can not be applied")
+      (Some("unencoded transformation necessary"), Seq(), Set(), lastStepName, Seq(), Seq())
+    } else (None, allSteps, usedSymbols ++ usedSymbolsTrans, applicationStepName, literalsToEqRW, newParentLits)
+  }
+
+  private def identifyAppliedTerm(origLit: Literal, encOrigLit: lpOlTerm, edLit: Literal, bVarMap: Map[Int, String], sig:Signature): lpOlTerm = {
     // Given two literals, identify a term that we can apply to both sides of the original one to obtain the edited one
     // Usually, this will be variables, but in some cases we need to use witness terms.
 
@@ -308,7 +359,7 @@ object ModularProofEncoding {
             case Right(_) => throw new Exception(s"LP-Encoding: found unexpected type variables")
           }
         case _ =>
-          throw new Exception(s"LP-Encoding: Unable to infer applied variable in FunEx encoding")
+          throw new Exception(s"LP-Encoding: Unable to infer applied variable in FuncEx encoding")
       }
       Out.lp_debug_info(s"Witness-Term is needed")
       encTypes match {
@@ -318,92 +369,35 @@ object ModularProofEncoding {
     } else allApppliedVars.head
   }
 
-  def applyInstFunExtRule(currParentLits: Seq[lpOlTerm], appliedLit: lpLiteral, indexOfLit: Int, namefunExtStep:String,  applicationStepName: lpConstantTerm, lastStepName: lpTerm): (lpHave, Set[lpStatement], Seq[lpOlTerm])={
+  private def applyInstFuncExtRule(currParentLits: Seq[lpOlTerm], appliedLit: lpLiteral, indexOfLit: Int, namefuncExtStep:String,  applicationStepName: lpConstantTerm, lastStepName: lpTerm): (lpHave, Set[lpStatement], Seq[lpOlTerm])={
     // use the instiaciated rule for PFE or NFE and apply it to the desired literal in the parent
     val (proofTerm, usedSymbols): (lpTerm, Set[lpStatement]) = if (currParentLits.length > 1)
-     ( metaTransform.instanciate(currParentLits, indexOfLit, lpConstantTerm(namefunExtStep), lastStepName), Set(funExtPosEq_rev(), metaPermutation))
+     ( metaTransform.instanciate(currParentLits, indexOfLit, lpConstantTerm(namefuncExtStep), lastStepName), Set(encPFE(), metaPermutation))
     else
-      (lpFunctionApp(lpConstantTerm(namefunExtStep), Seq(lastStepName)), Set(funExtPosEq_rev()))
+      (lpFunctionApp(lpConstantTerm(namefuncExtStep), Seq(lastStepName)), Set(encPFE()))
     // todo: when encoding NFE, make sure we do not by default add PFE as a needed Rule
-    //val usedSymbols: Set[lpStatement] = if (newParentLits.length > 1) Set(funExtPosEq_rev(), metaPermutation) else Set(funExtPosEq_rev())
     val refineWithFunExt = lpRefine(lpFunctionApp(proofTerm, Seq()))
     val newParentLits = currParentLits.updated(indexOfLit, appliedLit.term)
     val pfeApp = lpHave(applicationStepName.name, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, newParentLits).prf, lpProofScript(Seq(refineWithFunExt)))
-    Out.lp_debug_info(s"Successfully applied $namefunExtStep (in setp $applicationStepName)")
+    Out.lp_debug_info(s"Successfully applied $namefuncExtStep (in setp $applicationStepName)")
     Out.lp_debug_info(s"updatedParent: ${lpOlUntypedBinaryConnectiveTerm_multi(lpOr, newParentLits).pretty}")
     (pfeApp,usedSymbols,newParentLits)
   }
 
-  def implicitRwTransFunEx()={
-
-  }
-
-  def pos_funExt_step(origLit: Literal, edLit: Literal, currentUnencParent: Seq[Literal],  currParentLits: Seq[lpOlTerm], permutation: Seq[Int], lastStepName: lpTerm,  bVarMap: Map[Int, String], sig: Signature, editLitCount: Int): (Option[String], Seq[lpProofScriptStep],Set[lpStatement],lpTerm,Seq[lpProofScriptStep], Seq[lpOlTerm])={
-    // encode the application of an individual step
-
-    /////////////////////////////////////////////////////
-    //// preliminary
-
-    val encOrigLit = lpLiteral(origLit,bVarMap,sig)
-    val encEditLit = term2LP(asTerm(edLit), bVarMap, sig)._1
-    val indexOfLit = currentUnencParent.indexOf(origLit)
-    Out.lp_debug_info(s"Applying FunExt to literal ${encOrigLit.term.pretty}, resulting in ${encEditLit.pretty}")
-
-    val appliedVar = identifyAppliedTerm(origLit, encOrigLit.term, edLit, bVarMap, sig)
-    Out.lp_debug_info(s"applying: ${appliedVar}")
-
-    /////////////////////////////////////////////////////
-    //// 2.   Instantiate PFE and use it to define a new hypothesis
-
-    val namefunExtStep = s"${funExtPosEq_rev().name.pretty}_$editLitCount"
-    // Construction of the literal to be proved
-    val currentTypeSeq: Seq[lpOlType] = encOrigLit.tyLhs match {
-      case lpOlFunctionType(types) => types
-      case _ => throw new Exception(s"LP-ENCODING: Expected function type but found ${encOrigLit.tyLhs.pretty}")
-    }
-    //val unappliedLit = lpOlTypedBinaryConnectiveTerm(lpEq, lpOlFunctionType(currentTypeSeq), encOrigLit.left, encOrigLit.right)
-    //val (appliedLhs, appliedRhs) = (betaReduceLpApplication(lpOlFunctionApp(encOrigLit.left, Seq(Left(appliedVar)))), betaReduceLpApplication(lpOlFunctionApp(encOrigLit.right, Seq(Left(appliedVar)))))
-    val appliedType = currentTypeSeq.tail
-    //val appliedLitTerm = lpOlTypedBinaryConnectiveTerm(lpEq, lpOlFunctionType(appliedType), appliedLhs, appliedRhs)
-    val appliedLit = lpLiteral(
-      betaReduceLpApplication(lpOlFunctionApp(encOrigLit.left, Seq(Left(appliedVar)))),
-      betaReduceLpApplication(lpOlFunctionApp(encOrigLit.right, Seq(Left(appliedVar)))),
-      lpOlFunctionType(appliedType),true,true)
-    // Instanciation of the step
-    val impToProve = lpMlFunctionType(Seq(encOrigLit.term.prf, appliedLit.term.prf))
-    val funExtImp = lpRefine(funExtPosEq_rev().instanciate(None, encOrigLit.left, encOrigLit.right, appliedVar))
-    val pfeInst = lpHave(namefunExtStep, impToProve, lpProofScript(Seq(funExtImp)))
-    Out.lp_debug_info(s"Instance of $namefunExtStep to prove ${impToProve.pretty}")
-    Out.lp_debug_info(s"Types of the literal before application: ${currentTypeSeq.map(_.pretty)} after: ${appliedType.map(_.pretty)}")
-
-    /////////////////////////////////////////////////////
-    //// 3.   Use the proven hypothesis to apply the changes to the (instantiated) parent formula, using the appropriate transform rule
-    val applicationStepName = lpConstantTerm(s"${namefunExtStep}_app")
-    // if the length of the parent is greater than one, we need to use transform
-    val (pfeApp, usedSymbols, newParentLits) = applyInstFunExtRule(currParentLits,appliedLit,indexOfLit,namefunExtStep,applicationStepName,lastStepName)
-    val allSteps = Seq(pfeInst, pfeApp)
-
-    /////////////////////////////////////////////////////
-    //// 4. Apply necessary implicit transformations
-    // Compare the derived literal with the literal that it is mapped to and apply any necessary transformations
-    val finalType: lpOlType = if (appliedType.length == 1) appliedType.head else lpOlFunctionType(appliedType)
-    val reducedAppliedLit = lpOlTypedBinaryConnectiveTerm(lpEq, finalType, appliedLit.left, appliedLit.right)
-    Out.lp_debug_info(s"reduced applied lit ${reducedAppliedLit.pretty}")
-    //val updatedParent = currParentLits.updated(indexOfLit, reducedAppliedLit)
-    if (!alphaEquivalent(encEditLit, reducedAppliedLit)) {
-      Out.lp_debug_info(s"Looking for transformations to get from ${encEditLit.pretty} to ${reducedAppliedLit.pretty}\n${encEditLit} to \n${reducedAppliedLit}")
+  private def implicitRwTransFuncEx(encEditLitTerm: lpOlTerm,appliedLitTerm: lpOlTerm, permutation: Seq[Int], indexOfLit: Int, lenParent: Int):(Boolean, Set[lpStatement], Seq[lpProofScriptStep])={
+    if (!alphaEquivalent(encEditLitTerm, appliedLitTerm)) {
+      Out.lp_debug_info(s"Looking for transformations to get from \n${encEditLitTerm} to \n${appliedLitTerm}}")
       // if we had a permutation, we need to infer the index in the clause modulo application
       val indexModuloPerm = permutation.indexOf(indexOfLit)
-      val (literalsToEqRW0, usedSymbolsTrans, canEncode0) = transformLiteral(encEditLit, reducedAppliedLit, indexModuloPerm, currParentLits.length)
+      val (literalsToEqRW, usedSymbolsTrans, canEncode0) = transformLiteral(encEditLitTerm, appliedLitTerm, indexModuloPerm, lenParent)
       if (canEncode0) {
-        Out.lp_debug_info(s"Transformation to equational form is applied: ${literalsToEqRW0.map(_.pretty)}")
-        val newUsedSymbols: Set[lpStatement] = usedSymbols ++ usedSymbolsTrans
-        (None, allSteps, newUsedSymbols, applicationStepName, literalsToEqRW0,newParentLits)
+        Out.lp_debug_info(s"Transformation to equational form is applied: ${literalsToEqRW.map(_.pretty)}")
+        (false, usedSymbolsTrans, literalsToEqRW)
       } else {
         Out.lp_debug_info(s"Transformation to equational form necessary but can not be applied")
-        (Some("unencoded transformation necessary"),Seq(),Set(),lastStepName,Seq(),Seq())
+        (true, Set(), Seq())
       }
-    } else (None, allSteps, usedSymbols, applicationStepName, Seq(),newParentLits)
+    } else (false, Set(), Seq())
   }
 
 

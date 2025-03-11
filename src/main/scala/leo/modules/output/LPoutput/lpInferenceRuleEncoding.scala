@@ -89,7 +89,7 @@ object lpInferenceRuleEncoding {
   ////////// Extensionality
   ////////////////////////////////////////////////////////////////
 
-  case class funExtPosEq_rev() extends inferenceRules {
+  case class encPFE() extends inferenceRules {
     // Π T: Set, Π S: Set, Π f: τ (S ⤳ T), Π g: τ (S ⤳ T), Π x: τ S, π (f = g) → π (f x = g x)
 
     override val proofIsDefined = true

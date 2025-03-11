@@ -417,7 +417,7 @@ package object LPoutput {
 
   private def alphaEquivalent(t1: lpTerm, t2: lpTerm, env: Map[lpTerm, lpTerm]): Boolean = {
     // Checks whether two lpTerms are equal modulo renaming of bound variables.
-    //Out.lp_debug_info(s"comparing ${t1.pretty} and ${t2.pretty} with mapping $env")
+    //Out.lp_debug_info(s"comparing \n${t1} and \n${t2} with mapping $env")
     (t1, t2) match {
     // First, we handle terms with binders:
     case (lam1: lpOlLambdaTerm, lam2: lpOlLambdaTerm) =>
@@ -442,11 +442,18 @@ package object LPoutput {
       if (q1.quantifier != q2.quantifier) false
       else {
         (q1.variables, q2.variables) match {
-          case (v1: lpOlTypedVar, v2: lpOlTypedVar) =>
-            if (v1.ty != v2.ty) false // todo: Once polymorhic types are implemented, also include them
-            else {
-              val newEnv = env + (v1 -> v2)
-              alphaEquivalent(q1.body, q2.body, newEnv)
+          case (vars1: Seq[`lpOlTypedVar`], vars2: Seq[`lpOlTypedVar`]) =>
+            val newEnvOpt = vars1.zip(vars2).foldLeft(Option(env)) { (maybeEnv, v1v2) =>
+              maybeEnv.flatMap { currentEnv =>
+                if (v1v2._1.ty != v1v2._2.ty) None
+                else {
+                  Some(currentEnv + (v1v2._1 -> v1v2._2))
+                }
+              }
+            }
+            newEnvOpt match {
+              case Some(newEnv) => alphaEquivalent(q1.body, q2.body, newEnv)
+              case None => false
             }
           // only typed vars are allowed in mono-quantified terms
           case _ => false
