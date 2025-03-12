@@ -148,11 +148,13 @@ object LPoutput {
          */
 
           case leo.modules.calculus.Simp =>
+            val annotation = if (cl.furtherInfo.addInfoSimpRule.isDefined) Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
+            else Some("Simp: Unidentified formula simplification unencoded")
             //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
             // todo: eta expansion
             //val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
             //("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
-            (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, Option("Formula simplification not encoded yet"))
+            (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, annotation)
 
           case leo.modules.calculus.PreUni =>
             val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
