@@ -749,6 +749,21 @@ object Simp extends CalculusRule {
     }
   }
 
+  final private def eqSimp_rwUnderBinder(l: Literal)(implicit sig: Signature): (Literal, Boolean) = {
+    if (!l.equational) {
+      val (simpLit, rwUnderBinder) = normalize_rwUnderBinder(l.left)
+      (Literal(simpLit, l.polarity), rwUnderBinder)
+    } else {
+      val (normLeft,rwUnderBinderLeft) = normalize_rwUnderBinder(l.left)
+      val (normRight,rwUnderBinderRight) = normalize_rwUnderBinder(l.right)
+      val rwUnderBinder = rwUnderBinderLeft || rwUnderBinderRight
+      (normLeft, normRight) match {
+        case (a, b) if a == b => (Literal(LitTrue(), l.polarity),rwUnderBinder)
+        case _ => (Literal.mkLit(normLeft, normRight, l.polarity, l.oriented), rwUnderBinder)
+      }
+    }
+  }
+
   final private def eqSimp_andTrack(l: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], Int)]) = {
     if (!l.equational) {
       val (norm, addInfo) = normalize_andTrack(l.left)
@@ -783,6 +798,11 @@ object Simp extends CalculusRule {
   }
 
   final def apply(lit: Literal)(implicit sig: Signature): Literal = PolaritySwitch(eqSimp(lit))
+
+  final def apply_infoUnderBinder(lit: Literal)(implicit sig: Signature): (Literal, Boolean) = {
+    val (simpTerm, rewrittenUnderBinder) = eqSimp_rwUnderBinder(lit)
+    (PolaritySwitch(simpTerm),rewrittenUnderBinder)
+  }
 
   final def apply_andTrack(lit: Literal)(implicit sig: Signature): (Literal, Seq[(Seq[Int], Int)]) = {
     val (simpTerm, addInfo) = eqSimp_andTrack(lit)
@@ -878,6 +898,23 @@ object Simp extends CalculusRule {
     newLits
   }
 
+  final def shallowSimp_rwUnderBinder(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Boolean) = {
+    var newLits: Seq[Literal] = Vector.empty
+    val litIt = lits.iterator
+    var rewrittenUnderBinder = false
+    while (litIt.hasNext) {
+      val lit0 = litIt.next()
+      val (lit, rewrittenUnderBinder0) = apply_infoUnderBinder(lit0)(sig)
+      if (rewrittenUnderBinder0) rewrittenUnderBinder = true
+      if (!Literal.isFalse(lit)) {
+        if (!newLits.contains(lit)) {
+          newLits = newLits :+ lit
+        }
+      }
+    }
+    (newLits, rewrittenUnderBinder)
+  }
+
   final def shallowSimp_andTrack(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Seq[(Seq[Int], Int)]) = {
     var newLits: Seq[Literal] = Vector.empty
     var addInfo:  Seq[(Seq[Int], Int)] = Seq.empty
@@ -897,6 +934,11 @@ object Simp extends CalculusRule {
 
   final def shallowSimp(cl: Clause)(implicit sig: Signature): Clause = {
     Clause(shallowSimp(cl.lits)(sig))
+  }
+
+  final def shallowSimp_rwUnderBinder(cl: Clause)(implicit sig: Signature): (Clause, Boolean) = {
+    val (simpLits, rewrittenUnderBinder) = shallowSimp_rwUnderBinder(cl.lits)(sig)
+    (Clause(simpLits),rewrittenUnderBinder)
   }
 
   final def shallowSimp_andTrack(cl: Clause)(implicit sig: Signature): (Clause, Seq[(Seq[Int], Int)]) = {
@@ -1042,6 +1084,17 @@ object Simp extends CalculusRule {
     val result = simp
     if (t.sharing) Term.insert(result)
     else result
+  }
+
+  final def normalize_rwUnderBinder(t: Term): (Term, Boolean) = {
+    // termSimp(t)
+    import leo.modules.procedures.{Simplification, GroundArithmeticEval}
+    val arith = GroundArithmeticEval.apply(t)
+    val (simp, rewrittenUnderBinder) = Simplification.apply_rwUnderBinder(arith)
+
+    val result = simp
+    if (t.sharing) (Term.insert(result), rewrittenUnderBinder)
+    else (result, rewrittenUnderBinder)
   }
 
   final def normalize_andTrack(t: Term): (Term, Seq[(Seq[Int], Int)]) = {

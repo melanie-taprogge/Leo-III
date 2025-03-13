@@ -8,6 +8,7 @@ import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
+import leo.modules.calculus.Simp.normalize
 
 import scala.collection.mutable
 
@@ -1096,6 +1097,120 @@ object ModularProofEncoding {
   }
 
   // encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
+
+  def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpConstantTerm, sig: Signature)={
+
+    Out.lp_debug_info("Verifying exhaustive application of boolean identities")
+
+    // Encoding of the simplification via exhaustive application of the encoded boolean equalities via the rewrite tactic
+    // The modular proof script can consist of the following steps:
+    // 1. Abstract over free variables
+    // 2. Instaniate a subproof (SimpApp) using have to proof that the parent implies the child by applying all of the simplification rules to the parent
+    //    -> If the parent has implicitly quantified variables that disappear as an effect of the simplification,
+    //       we include them in the Have-step, assume them and apply their corresponding witness terms in the Refine-step
+    // 3. Apply Implicit transformations: Deletion of double literals and eqSym
+    // 4. Refine with the parent applied to SimpApp
+
+    // todo: handle quantifier simplification instances (not currently included in list of simp rules)
+
+    // todo: implicit transformation: delete double literals and apply eqSym if necessary
+
+    /////////////////////////////////////////////////////
+    //// preliminary
+
+    val encParent = lpClauseInst(parent, sig)
+    val encChild = lpClauseInst(child, sig)
+
+
+    /////////////////////////////////////////////////////
+    //// 1. Abstract over free variables
+
+    val bVarMap = clauseVars2LP(parent.implicitlyBound, sig, Set.empty)._2
+    val freeVarsChild = encChild.metaVars//child.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
+    val freeVarsParent = encParent.metaVars//parent.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
+    // Identify any variables that were implicitly quantified in the parent but not in the child
+    val disappearingVars = freeVarsParent.diff(freeVarsChild)
+    if (disappearingVars.nonEmpty) {
+      Out.lp_debug_info(s"Implicitly quantified variables disappear due to simplification: ${disappearingVars.map(_.pretty).mkString(", ")}")
+    }
+    // Instanciate the initial step abstracting over the free variables of the child
+    val initialStep = if (freeVarsChild.nonEmpty) Seq(lpAssume(freeVarsChild)) else Seq()
+
+    /////////////////////////////////////////////////////
+    //// 2. Instaniate a subproof (SimpApp) using have to proof that the parent implies the child
+    ////    by applying all of the simplification rules to the parent
+
+    val simpAppStepName = "SimpApp"
+    val impToProve = lpOlUntypedBinaryConnectiveTerm(lpImp,encParent.term,encChild.term)
+    // todo: update this
+    // Step applying all of the RW-rules encoding the simplifications
+    val AllRwtTactic = lpProofScriptStringProof("repeat orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse rewrite ∨_idem rewrite em_eq_l rewrite em_eq_r rewrite ∨⊤_l rewrite ∨⊤_r rewrite ∨⊥_l rewrite ∨⊥_r rewrite ∧_idem rewrite ∧_contra_r rewrite ∧_contra_l rewrite ∧⊤_l rewrite ∧⊤_r rewrite ∧⊥_l rewrite ∧⊥_r rewrite addRule1 rewrite addRule2 rewrite addRule3 rewrite addRule14 rewrite addRule4 rewrite addRule5 rewrite addRule6 rewrite addRule7 rewrite ddRule8 rewrite addRule9 rewrite ¬⊤ rewrite ¬⊥ rewrite ¬¬ₑ_eq rewrite eq⊤_l rewrite eq⊤_r rewrite addRule10 rewrite addRule11 rewrite eqxx rewrite addRule12 rewrite addRule13 rewrite ¬eq⊤_l rewrite ¬eq⊤_r rewrite ¬eqxx refine ⊤ᵢ fail")
+    // If we need to account for disappearing variables, we wrap the implication to proof in a quantification
+    val (maybeQuanrifiedImpToProve, simpAppProofScript) =
+      if (disappearingVars.isEmpty) (impToProve.prf, lpProofScript(Seq(AllRwtTactic)))
+      else (lpMlDependType(disappearingVars,impToProve.prf), lpProofScript(Seq(lpAssume(disappearingVars),AllRwtTactic)))
+    // Combine everything into one step
+    val haveSimpAppStep = lpHave(simpAppStepName,maybeQuanrifiedImpToProve,simpAppProofScript)
+
+
+    /////////////////////////////////////////////////////
+    //// 3. Apply Implicit transformations: Deletion of double literals and eqSym
+
+    // Detect necessary implicit transformations
+    Out.lp_debug_info(s"Encoding simplification of ${encParent.term.pretty} to ${encChild.term.pretty}")
+    if (child.lits.length != parent.lits.length) Out.lp_debug_info(s"Double literal deletion necessary")
+
+    var simpLits: Seq[Literal] = Seq.empty
+    var indicesToDelete: Seq[Int] = Seq.empty
+    var indicesToFlip: Seq[Int] = Seq.empty
+
+    parent.lits.zip(child.lits) foreach { pLitCLit =>
+      val (parentLit, childLit) = pLitCLit
+      if (!parentLit.equational) {
+        val lit = Literal(normalize(parentLit.left), parentLit.polarity)
+        indicesToDelete = indicesToDelete :+ (if (simpLits.contains(lit)) 1 else 0)
+        indicesToFlip = indicesToFlip :+ 0
+        simpLits = simpLits :+ lit
+      } else {
+        val normLeft = normalize(parentLit.left)
+        val normRight = normalize(parentLit.right)
+        (normLeft, normRight) match {
+          case (a, b) if a == b =>
+            val lit = Literal(LitTrue(), parentLit.polarity)
+            indicesToDelete = indicesToDelete :+ (if (simpLits.contains(lit)) 1 else 0)
+            indicesToFlip = indicesToFlip :+ 0
+            simpLits = simpLits :+ lit
+          case _ =>
+            val maybeOrderedLit = Literal.mkLit(normLeft, normRight, parentLit.polarity, parentLit.oriented)
+            val unorderedLit = Literal.mkLit(normLeft, normRight, parentLit.polarity, false)
+            indicesToDelete = indicesToDelete :+ (if (simpLits.contains(unorderedLit)) 1 else 0)
+            indicesToFlip = indicesToFlip :+ (if (maybeOrderedLit == unorderedLit) 0 else 1)
+            simpLits = simpLits :+ unorderedLit
+        }
+      }
+    }
+    //assert(simpLits == child.lits, s"LP-Encoding: Derived and given simplifications differ:\n${simpLits.map(_.pretty)}\n${child.lits.map(_.pretty)}}")
+
+    Out.lp_debug_info(s"Necessary deletion of literals: $indicesToDelete")
+    Out.lp_debug_info(s"Necessary eqSym of literals: $indicesToFlip")
+
+    /////////////////////////////////////////////////////
+    //// 4. Refine with the parent applied to SimpApp
+
+    // If variables disappeared as a consequence of simplification, we need to apply witness terms to both the SimpApp step and the parent
+
+    val witnessTermsToApply = disappearingVars.map(var0 => lpWitness.fromAnyType(var0.ty))
+    // todo: you may need to change the order to ensure that they are applied to the child in the correct order
+    val allTermsToApplyToParent = freeVarsChild ++ witnessTermsToApply
+    val appliedParent = lpFunctionApp(parentNameLpEnc, allTermsToApplyToParent)
+    val appliedSimpAppStepName = lpFunctionApp(lpConstantTerm(simpAppStepName),allTermsToApplyToParent)
+    val refineStep = lpRefine(lpFunctionApp(appliedSimpAppStepName,Seq(appliedParent)))
+
+    val allSteps : Seq[lpProofScriptStep] = (initialStep :+ haveSimpAppStep) :+ refineStep
+
+    allSteps
+  }
+
   def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Option[String]) = { //: (lpProofScript, Set[lpStatement]) = {
 
     // encode the lift of equality literals

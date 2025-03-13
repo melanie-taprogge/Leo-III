@@ -8,7 +8,7 @@ import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{calculus, symbolsInProof, userSignature}
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpDne, permLib}
+import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpDne, permLib, simpLib}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding.metaPermutation
@@ -29,16 +29,18 @@ object LPoutput {
 
   val nameLogicFile = "extt"
   val permlibFile = "permuteLib"
+  val simplibFile = "simpLib"
   val nameRulesFile = "rules"
   val nameProofFile = "encodedProof"
 
   var inclduePermLib = false
+  var incldueSimpLib = true
 
   def generateSignature(usedSymbols: Set[lpStatement], nameLpOutputFolder: String): (mutable.StringBuilder) = {
 
     val rulesFileSB: mutable.StringBuilder = new StringBuilder()
     // todo: once lambdapi is fixed, remove the declaration here
-    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Bool ${nameLpOutputFolder}.$nameLogicFile;\n\n") // maybe it will be necessary for now to add \nnotation ∨ infix right 6;
+    rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Nat Stdlib.Bool ${nameLpOutputFolder}.$nameLogicFile;\n\n") // maybe it will be necessary for now to add \nnotation ∨ infix right 6;
 
     var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
@@ -148,13 +150,21 @@ object LPoutput {
          */
 
           case leo.modules.calculus.Simp =>
-            val annotation = if (cl.furtherInfo.addInfoSimpRule.isDefined) Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
-            else Some("Simp: Unidentified formula simplification unencoded")
-            //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoSimp}")
-            // todo: eta expansion
-            //val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
-            //("?", encodingsSimp._1, (0, 0, 0, 0), encodingsSimp._2)
-            (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, annotation)
+            if (cl.furtherInfo.addInfoSimpRule.isDefined) {
+              if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp"){
+                if (cl.furtherInfo.rwUnderBinder) (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, Some("Simp: This instance can not be encoded yet as it requires RW under Binder"))
+                else {
+                  val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
+                  (s"FormulaSimp", lpProofScript(allSteps), Set.empty, None)
+                }
+              }else{
+                val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
+                (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, annotation)
+              }
+            }else{
+              val annotation = Some("Simp: Unidentified formula simplification unencoded")
+              (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, annotation)
+            }
 
           case leo.modules.calculus.PreUni =>
             val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
@@ -460,7 +470,10 @@ object LPoutput {
         if (inclduePermLib) f"${nameLpOutputFolder}.${permlibFile}"
         else ""
       }
-      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      val simpLibStr: String = {
+        f"${nameLpOutputFolder}.${simplibFile}"
+      }
+      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $simpLibStr $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
 
 
       // create a folder for the lambdapi package
@@ -480,6 +493,9 @@ object LPoutput {
 
       val permLibFilePath = lpOutputPath.resolve(s"$permlibFile.lp")
       if (inclduePermLib) Files.write(permLibFilePath, permLib.getBytes(StandardCharsets.UTF_8))
+
+      val simpLibFilePath = lpOutputPath.resolve(s"$simplibFile.lp")
+      if (incldueSimpLib) Files.write(simpLibFilePath, simpLib.getBytes(StandardCharsets.UTF_8))
 
       val rulesFilePath = lpOutputPath.resolve(s"$nameRulesFile.lp")
       Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))

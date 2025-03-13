@@ -171,7 +171,8 @@ abstract sealed class ClauseAnnotation extends Pretty {
   def parents: Seq[_ <: ClauseProxy]
 }
 
-case class FurtherInfo (val addInfoSimpRule: Option[String] = None){
+case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
+                        val rwUnderBinder: Boolean = false){
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
   var addInfoBoolExt: Set[(Literal,Seq[Literal])] = Set.empty
   var addInfoSimp: Seq[(Seq[Int],Int)] = Seq.empty

@@ -436,4 +436,23 @@ object Encodings {
       }
     }
   }
+
+  case class lpClauseInst(
+                     term: lpOlTerm,
+                     lits: Seq[lpOlTerm],
+                     vars: Seq[Either[lpOlTypedVar, lpOlTyVar]]
+                     ){
+    /** Returns `vars` as a plain sequence of `lpOlTerm`. */
+    def metaVars: Seq[lpTypedVar] = vars.map{
+      case Left(typedVar) => typedVar.asMlVar
+      case Right(tyVar) => tyVar.asMlVar
+    }
+  }
+
+  object lpClauseInst{
+    def apply(cl: Clause, sig: Signature): lpClauseInst ={
+      val encClause = clause2LP_unquantified(cl,Set.empty,sig)
+      lpClauseInst(encClause._2,encClause._2.args,encClause._1)
+    }
+  }
 }
