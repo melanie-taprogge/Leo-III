@@ -401,7 +401,14 @@ object Encodings {
                         term: lpOlTerm,
                         pol: Boolean,
                         eq: Boolean
-                      )
+                      ){
+    def normPol: lpLiteral = {
+      if (eq) (left, right) match {
+        case (lpOlUnaryConnectiveTerm(`lpNot`,left0),lpOlUnaryConnectiveTerm(`lpNot`,right0)) => lpLiteral(left0,right0,lpOtype,pol,eq)
+        case _ => this
+      } else this
+    }
+  }
   object lpLiteral {
     def constructFullLit (encLeft: lpOlTerm, encRight: lpOlTerm, encTy: lpOlType, pol: Boolean, eq: Boolean): lpOlTerm ={
       val encTerm0 = if (eq) lpOlTypedBinaryConnectiveTerm(lpEq, encTy, encLeft, encRight) else encLeft

@@ -1,9 +1,10 @@
 package leo.modules.output.LPoutput
 import leo.Out
-import leo.datastructures.Literal.{asTerm}
+import leo.datastructures.Literal.asTerm
 import leo.modules.output.LPoutput.Encodings._
 import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term}
 import leo.modules.HOLSignature._
+import leo.modules.calculus.PolaritySwitch
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
@@ -1147,7 +1148,6 @@ object ModularProofEncoding {
 
     var simpLits: Seq[Literal] = Seq.empty
     var doubleLiterals: Seq[Int] = Seq.empty
-    var indicesToFlip: Seq[Int] = Seq.empty
     var implicitRwTransf: Seq[lpProofScriptStep] = Seq.empty
     var usedSymbolsTransf: Seq[lpStatement] = Seq.empty
 
@@ -1157,13 +1157,10 @@ object ModularProofEncoding {
     // -> it needs to be tranformed in any way (e.g. eqSym)
     parent.lits foreach { parentLit =>
       // find the corresponding literal in the child to compare and find implicit transformations
-      val indxLitInChild = simpLits.length
-      val corrChildLit = child.lits(indxLitInChild)
         if (!parentLit.equational) {
         val lit = Literal(normalize(parentLit.left), parentLit.polarity)
         if (!Literal.isFalse(lit)) {
           doubleLiterals = doubleLiterals :+ (if (simpLits.contains(lit)) simpLits.indexOf(lit) else doubleLiterals.distinct.length)
-          indicesToFlip = indicesToFlip :+ 0
           if (!simpLits.contains(lit)) simpLits = simpLits :+ lit
         }
       } else {
@@ -1171,13 +1168,12 @@ object ModularProofEncoding {
         val normRight = normalize(parentLit.right)
         (normLeft, normRight) match {
           case (a, b) if a == b =>
-            val lit = Literal(LitTrue(), parentLit.polarity)
+            val lit = PolaritySwitch(Literal(LitTrue(), parentLit.polarity))
             doubleLiterals = doubleLiterals :+ (if (simpLits.contains(lit)) simpLits.indexOf(lit) else doubleLiterals.distinct.length)
-            indicesToFlip = indicesToFlip :+ 0
             if (!simpLits.contains(lit)) simpLits = simpLits :+ lit
           case _ =>
-            val maybeOrderedLit = Literal.mkLit(normLeft, normRight, parentLit.polarity, parentLit.oriented)
-            val unorderedLit = Literal.mkLit(normLeft, normRight, parentLit.polarity, false)
+            val maybeOrderedLit = PolaritySwitch(Literal.mkLit(normLeft, normRight, parentLit.polarity, parentLit.oriented))
+            val unorderedLit = PolaritySwitch(Literal.mkLit(normLeft, normRight, parentLit.polarity, false))
             val encOrigLit = lpLiteral(maybeOrderedLit, bVarMap, sig)
             val encDesiredLit = lpLiteral(unorderedLit, bVarMap, sig)
             Out.lp_debug_info(s"maybe ordered lit: ${encOrigLit.term.pretty}, unorderedLit: ${encDesiredLit.term.pretty}")
@@ -1187,18 +1183,20 @@ object ModularProofEncoding {
               simpLits = simpLits :+ unorderedLit
 
               if (maybeOrderedLit != unorderedLit) {
+                throw new Exception(s"Required implicit transformation in SIMP encoding!")
                 val (tranformSteps, usedSymbols0, canEncode) = transformLiteral(encOrigLit.term, encDesiredLit.term, simpLits.length, child.lits.length)
                 if (!canEncode) throw new Exception(s"LP-Encoding SIMP: could not transform ${encOrigLit.term.pretty} to ${encDesiredLit.term.pretty}")
                 implicitRwTransf = implicitRwTransf ++ tranformSteps
                 usedSymbolsTransf = usedSymbolsTransf ++ usedSymbols0
               }
             }
-            indicesToFlip = indicesToFlip :+ (if (maybeOrderedLit == unorderedLit) 0 else 1)
         }
       }
     }
     if (simpLits.isEmpty) simpLits = Seq(Literal(LitFalse(),true))
     assert(simpLits.length == child.lits.length, s"LP-Encoding: Derived and given simplifications differ:\n${simpLits.map(_.pretty)}\n${child.lits.map(_.pretty)},\nIn LP encoding:\n${simpLits.map(lit => term2LP(asTerm(lit),bVarMap,sig)._1.pretty)}\n${child.lits.map(lit => term2LP(asTerm(lit),bVarMap,sig)._1.pretty)}")
+
+    val encSimpLits = simpLits.map(simpLit => lpLiteral(simpLit,bVarMap,sig).term)
 
     /////////////////////////////////////////////////////
     //// 2. Instaniate a subproof (SimpApp) using have to proof that the parent implies the child
@@ -1207,7 +1205,7 @@ object ModularProofEncoding {
     val simpAppStepName = "SimpApp"
     // If we need to account for the deletion of double literals, we include the duplicates in the implication we construct
     //    and remove them in an additional step
-    val clauseToProve = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,doubleLiterals.map(indx => encChild.lits(indx)))
+    val clauseToProve = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,doubleLiterals.map(indx => encSimpLits(indx)))
     val impToProve = lpOlUntypedBinaryConnectiveTerm(lpImp,encParent.term,clauseToProve)
     // todo: update this
     // Step applying all of the RW-rules encoding the simplifications
@@ -1233,13 +1231,11 @@ object ModularProofEncoding {
       // todo: exclude cases where the rewrite rule applied by LP would also handle it. (should only happen if the relevant literals are at the two most left ones right?)
       // we need to account for this in the type of the implication we are proven in step ?
       Out.lp_debug_info(s"need to prove ${doubleLiterals.map(indx => encChild.lits(indx).pretty)}")
-      val clAfterSimp: Seq[lpOlTerm] = doubleLiterals.map(indx => encChild.lits(indx))
       val instMetaDelTheorem = metaDeletion.instanciate(encChild.lits,doubleLiterals,simpParent)
       (Set(metaPermutation),instMetaDelTheorem)
     } else (Set(), simpParent)
 
 
-    Out.lp_debug_info(s"Necessary eqSym of literals: $indicesToFlip")
 
     /////////////////////////////////////////////////////
     //// 4. Refine with the parent applied to SimpApp
