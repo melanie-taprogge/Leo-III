@@ -1158,7 +1158,7 @@ object ModularProofEncoding {
     parent.lits foreach { parentLit =>
       // find the corresponding literal in the child to compare and find implicit transformations
         if (!parentLit.equational) {
-        val lit = Literal(normalize(parentLit.left), parentLit.polarity)
+        val lit = PolaritySwitch(Literal(normalize(parentLit.left), parentLit.polarity))
         if (!Literal.isFalse(lit)) {
           doubleLiterals = doubleLiterals :+ (if (simpLits.contains(lit)) simpLits.indexOf(lit) else doubleLiterals.distinct.length)
           if (!simpLits.contains(lit)) simpLits = simpLits :+ lit
@@ -1169,8 +1169,10 @@ object ModularProofEncoding {
         (normLeft, normRight) match {
           case (a, b) if a == b =>
             val lit = PolaritySwitch(Literal(LitTrue(), parentLit.polarity))
-            doubleLiterals = doubleLiterals :+ (if (simpLits.contains(lit)) simpLits.indexOf(lit) else doubleLiterals.distinct.length)
-            if (!simpLits.contains(lit)) simpLits = simpLits :+ lit
+            if (!Literal.isFalse(lit)) {
+              doubleLiterals = doubleLiterals :+ (if (simpLits.contains(lit)) simpLits.indexOf(lit) else doubleLiterals.distinct.length)
+              if (!simpLits.contains(lit)) simpLits = simpLits :+ lit
+            }
           case _ =>
             val maybeOrderedLit = PolaritySwitch(Literal.mkLit(normLeft, normRight, parentLit.polarity, parentLit.oriented))
             val unorderedLit = PolaritySwitch(Literal.mkLit(normLeft, normRight, parentLit.polarity, false))
@@ -1179,7 +1181,7 @@ object ModularProofEncoding {
             Out.lp_debug_info(s"maybe ordered lit: ${encOrigLit.term.pretty}, unorderedLit: ${encDesiredLit.term.pretty}")
             doubleLiterals = doubleLiterals :+ (if (simpLits.contains(unorderedLit)) simpLits.indexOf(unorderedLit) else doubleLiterals.distinct.length)
             // here we may have eq-lit specific transformations
-            if (!simpLits.contains(unorderedLit)) {
+            if (!simpLits.contains(unorderedLit) && !Literal.isFalse(unorderedLit)) {
               simpLits = simpLits :+ unorderedLit
 
               if (maybeOrderedLit != unorderedLit) {
@@ -1193,8 +1195,9 @@ object ModularProofEncoding {
         }
       }
     }
-    if (simpLits.isEmpty) simpLits = Seq(Literal(LitFalse(),true))
     assert(simpLits.length == child.lits.length, s"LP-Encoding: Derived and given simplifications differ:\n${simpLits.map(_.pretty)}\n${child.lits.map(_.pretty)},\nIn LP encoding:\n${simpLits.map(lit => term2LP(asTerm(lit),bVarMap,sig)._1.pretty)}\n${child.lits.map(lit => term2LP(asTerm(lit),bVarMap,sig)._1.pretty)}")
+    if (simpLits.isEmpty) simpLits = Seq(Literal(LitFalse(),true))
+    if (doubleLiterals.isEmpty) doubleLiterals = Seq(0)
 
     val encSimpLits = simpLits.map(simpLit => lpLiteral(simpLit,bVarMap,sig).term)
 
@@ -1224,7 +1227,7 @@ object ModularProofEncoding {
     Out.lp_debug_info(s"Necessary deletion of literals: $doubleLiterals")
     val witnessTermsToApply = disappearingVars.map(var0 => lpWitness.fromAnyType(var0.ty))
     val allTermsToApplyToParent = freeVarsChild ++ witnessTermsToApply
-    val appliedSimpAppStepName = lpFunctionApp(lpConstantTerm(simpAppStepName),disappearingVars)
+    val appliedSimpAppStepName = lpFunctionApp(lpConstantTerm(simpAppStepName),witnessTermsToApply)
     val simpParent = lpFunctionApp(appliedSimpAppStepName,Seq(lpFunctionApp(parentNameLpEnc, allTermsToApplyToParent)))
     val (maybePerm, mapbePermParent): (Set[lpStatement], lpFunctionApp) = if (doubleLiterals != doubleLiterals.indices) {
       // Application of delete literal is necessary
