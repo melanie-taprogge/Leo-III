@@ -281,6 +281,20 @@ object lpInferenceRuleEncoding {
     }
   }
 
+  case object metaDeletion extends inferenceRules {
+    override def name: lpConstantTerm = lpConstantTerm(s"double_lit_del_theorem")
+    override def ty: lpMlType = throw new Exception(s"trying to print type of meta deletion")
+
+    override def proof: lpProofScript = throw new Exception(s"trying to print proof of meta deletion")
+    override def dec: lpDeclaration = throw new Exception(s"trying to print dec of meta deletion")
+    override def pretty: String = throw new Exception(s"trying to pretty type of meta deletion")
+
+    def instanciate(c: Seq[lpOlTerm], indxList: Seq[Int], before: lpTerm): lpFunctionApp = {
+      val outputIndx = indxList.distinct
+      lpFunctionApp(name, Seq(lpList(indxList.map(indx => lpNum(indx))), lpList(outputIndx.map(indx => lpNum(indx))), lpList(c), lpOlTop_i, before))
+    }
+  }
+
   case object metaTransform extends inferenceRules {
 
     // opaque symbol transformation_theorem [l : τ o] (c: 𝕃 o) (n : τ nat) :

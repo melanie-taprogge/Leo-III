@@ -154,8 +154,8 @@ object LPoutput {
               if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp"){
                 if (cl.furtherInfo.rwUnderBinder) (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, Some("Simp: This instance can not be encoded yet as it requires RW under Binder"))
                 else {
-                  val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
-                  (s"FormulaSimp", lpProofScript(allSteps), Set.empty, None)
+                  val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
+                  (s"FormulaSimp", lpProofScript(allSteps), usedSymbols, None)
                 }
               }else{
                 val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
@@ -495,7 +495,8 @@ object LPoutput {
       if (inclduePermLib) Files.write(permLibFilePath, permLib.getBytes(StandardCharsets.UTF_8))
 
       val simpLibFilePath = lpOutputPath.resolve(s"$simplibFile.lp")
-      if (incldueSimpLib) Files.write(simpLibFilePath, simpLib.getBytes(StandardCharsets.UTF_8))
+      val completeSimpLibFile = s"require open Stdlib.Set Stdlib.Prop Stdlib.Eq Stdlib.Impred Stdlib.FOL Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile;\n\n"
+      if (incldueSimpLib) Files.write(simpLibFilePath, (completeSimpLibFile + simpLib).getBytes(StandardCharsets.UTF_8))
 
       val rulesFilePath = lpOutputPath.resolve(s"$nameRulesFile.lp")
       Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))

@@ -1098,7 +1098,7 @@ object ModularProofEncoding {
 
   // encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
 
-  def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpConstantTerm, sig: Signature)={
+  def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpConstantTerm, sig: Signature):(Seq[lpProofScriptStep],Set[lpStatement])={
 
     Out.lp_debug_info("Verifying exhaustive application of boolean identities")
 
@@ -1136,15 +1136,82 @@ object ModularProofEncoding {
     // Instanciate the initial step abstracting over the free variables of the child
     val initialStep = if (freeVarsChild.nonEmpty) Seq(lpAssume(freeVarsChild)) else Seq()
 
+
+    /////////////////////////////////////////////////////
+    ////  Process the literals to infer weather we will need to account for any implicit transformations and construct
+    ////  the steps accordingly
+
+    // Detect necessary implicit transformations
+    Out.lp_debug_info(s"Encoding simplification of ${encParent.term.pretty} to ${encChild.term.pretty}")
+    if (child.lits.length != parent.lits.length) Out.lp_debug_info(s"Double literal deletion necessary")
+
+    var simpLits: Seq[Literal] = Seq.empty
+    var doubleLiterals: Seq[Int] = Seq.empty
+    var indicesToFlip: Seq[Int] = Seq.empty
+    var implicitRwTransf: Seq[lpProofScriptStep] = Seq.empty
+    var usedSymbolsTransf: Seq[lpStatement] = Seq.empty
+
+    // for each literal of the parent, we test weather it...
+    // -> becomes F, and is hence omitted from the result,
+    // -> occurs twice in the result and the second occurence is hence omitted
+    // -> it needs to be tranformed in any way (e.g. eqSym)
+    parent.lits foreach { parentLit =>
+      // find the corresponding literal in the child to compare and find implicit transformations
+      val indxLitInChild = simpLits.length
+      val corrChildLit = child.lits(indxLitInChild)
+        if (!parentLit.equational) {
+        val lit = Literal(normalize(parentLit.left), parentLit.polarity)
+        if (!Literal.isFalse(lit)) {
+          doubleLiterals = doubleLiterals :+ (if (simpLits.contains(lit)) simpLits.indexOf(lit) else doubleLiterals.distinct.length)
+          indicesToFlip = indicesToFlip :+ 0
+          if (!simpLits.contains(lit)) simpLits = simpLits :+ lit
+        }
+      } else {
+        val normLeft = normalize(parentLit.left)
+        val normRight = normalize(parentLit.right)
+        (normLeft, normRight) match {
+          case (a, b) if a == b =>
+            val lit = Literal(LitTrue(), parentLit.polarity)
+            doubleLiterals = doubleLiterals :+ (if (simpLits.contains(lit)) simpLits.indexOf(lit) else doubleLiterals.distinct.length)
+            indicesToFlip = indicesToFlip :+ 0
+            if (!simpLits.contains(lit)) simpLits = simpLits :+ lit
+          case _ =>
+            val maybeOrderedLit = Literal.mkLit(normLeft, normRight, parentLit.polarity, parentLit.oriented)
+            val unorderedLit = Literal.mkLit(normLeft, normRight, parentLit.polarity, false)
+            val encOrigLit = lpLiteral(maybeOrderedLit, bVarMap, sig)
+            val encDesiredLit = lpLiteral(unorderedLit, bVarMap, sig)
+            Out.lp_debug_info(s"maybe ordered lit: ${encOrigLit.term.pretty}, unorderedLit: ${encDesiredLit.term.pretty}")
+            doubleLiterals = doubleLiterals :+ (if (simpLits.contains(unorderedLit)) simpLits.indexOf(unorderedLit) else doubleLiterals.distinct.length)
+            // here we may have eq-lit specific transformations
+            if (!simpLits.contains(unorderedLit)) {
+              simpLits = simpLits :+ unorderedLit
+
+              if (maybeOrderedLit != unorderedLit) {
+                val (tranformSteps, usedSymbols0, canEncode) = transformLiteral(encOrigLit.term, encDesiredLit.term, simpLits.length, child.lits.length)
+                if (!canEncode) throw new Exception(s"LP-Encoding SIMP: could not transform ${encOrigLit.term.pretty} to ${encDesiredLit.term.pretty}")
+                implicitRwTransf = implicitRwTransf ++ tranformSteps
+                usedSymbolsTransf = usedSymbolsTransf ++ usedSymbols0
+              }
+            }
+            indicesToFlip = indicesToFlip :+ (if (maybeOrderedLit == unorderedLit) 0 else 1)
+        }
+      }
+    }
+    if (simpLits.isEmpty) simpLits = Seq(Literal(LitFalse(),true))
+    assert(simpLits.length == child.lits.length, s"LP-Encoding: Derived and given simplifications differ:\n${simpLits.map(_.pretty)}\n${child.lits.map(_.pretty)},\nIn LP encoding:\n${simpLits.map(lit => term2LP(asTerm(lit),bVarMap,sig)._1.pretty)}\n${child.lits.map(lit => term2LP(asTerm(lit),bVarMap,sig)._1.pretty)}")
+
     /////////////////////////////////////////////////////
     //// 2. Instaniate a subproof (SimpApp) using have to proof that the parent implies the child
     ////    by applying all of the simplification rules to the parent
 
     val simpAppStepName = "SimpApp"
-    val impToProve = lpOlUntypedBinaryConnectiveTerm(lpImp,encParent.term,encChild.term)
+    // If we need to account for the deletion of double literals, we include the duplicates in the implication we construct
+    //    and remove them in an additional step
+    val clauseToProve = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,doubleLiterals.map(indx => encChild.lits(indx)))
+    val impToProve = lpOlUntypedBinaryConnectiveTerm(lpImp,encParent.term,clauseToProve)
     // todo: update this
     // Step applying all of the RW-rules encoding the simplifications
-    val AllRwtTactic = lpProofScriptStringProof("repeat orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse orelse rewrite ∨_idem rewrite em_eq_l rewrite em_eq_r rewrite ∨⊤_l rewrite ∨⊤_r rewrite ∨⊥_l rewrite ∨⊥_r rewrite ∧_idem rewrite ∧_contra_r rewrite ∧_contra_l rewrite ∧⊤_l rewrite ∧⊤_r rewrite ∧⊥_l rewrite ∧⊥_r rewrite addRule1 rewrite addRule2 rewrite addRule3 rewrite addRule14 rewrite addRule4 rewrite addRule5 rewrite addRule6 rewrite addRule7 rewrite ddRule8 rewrite addRule9 rewrite ¬⊤ rewrite ¬⊥ rewrite ¬¬ₑ_eq rewrite eq⊤_l rewrite eq⊤_r rewrite addRule10 rewrite addRule11 rewrite eqxx rewrite addRule12 rewrite addRule13 rewrite ¬eq⊤_l rewrite ¬eq⊤_r rewrite ¬eqxx refine ⊤ᵢ fail")
+    val AllRwtTactic = lpProofScriptStringProof("eval applyAllSimplifications")
     // If we need to account for disappearing variables, we wrap the implication to proof in a quantification
     val (maybeQuanrifiedImpToProve, simpAppProofScript) =
       if (disappearingVars.isEmpty) (impToProve.prf, lpProofScript(Seq(AllRwtTactic)))
@@ -1156,59 +1223,30 @@ object ModularProofEncoding {
     /////////////////////////////////////////////////////
     //// 3. Apply Implicit transformations: Deletion of double literals and eqSym
 
-    // Detect necessary implicit transformations
-    Out.lp_debug_info(s"Encoding simplification of ${encParent.term.pretty} to ${encChild.term.pretty}")
-    if (child.lits.length != parent.lits.length) Out.lp_debug_info(s"Double literal deletion necessary")
+    Out.lp_debug_info(s"Necessary deletion of literals: $doubleLiterals")
+    val witnessTermsToApply = disappearingVars.map(var0 => lpWitness.fromAnyType(var0.ty))
+    val allTermsToApplyToParent = freeVarsChild ++ witnessTermsToApply
+    val appliedSimpAppStepName = lpFunctionApp(lpConstantTerm(simpAppStepName),disappearingVars)
+    val simpParent = lpFunctionApp(appliedSimpAppStepName,Seq(lpFunctionApp(parentNameLpEnc, allTermsToApplyToParent)))
+    val (maybePerm, mapbePermParent): (Set[lpStatement], lpFunctionApp) = if (doubleLiterals != doubleLiterals.indices) {
+      // Application of delete literal is necessary
+      // todo: exclude cases where the rewrite rule applied by LP would also handle it. (should only happen if the relevant literals are at the two most left ones right?)
+      // we need to account for this in the type of the implication we are proven in step ?
+      Out.lp_debug_info(s"need to prove ${doubleLiterals.map(indx => encChild.lits(indx).pretty)}")
+      val clAfterSimp: Seq[lpOlTerm] = doubleLiterals.map(indx => encChild.lits(indx))
+      val instMetaDelTheorem = metaDeletion.instanciate(encChild.lits,doubleLiterals,simpParent)
+      (Set(metaPermutation),instMetaDelTheorem)
+    } else (Set(), simpParent)
 
-    var simpLits: Seq[Literal] = Seq.empty
-    var indicesToDelete: Seq[Int] = Seq.empty
-    var indicesToFlip: Seq[Int] = Seq.empty
 
-    parent.lits.zip(child.lits) foreach { pLitCLit =>
-      val (parentLit, childLit) = pLitCLit
-      if (!parentLit.equational) {
-        val lit = Literal(normalize(parentLit.left), parentLit.polarity)
-        indicesToDelete = indicesToDelete :+ (if (simpLits.contains(lit)) 1 else 0)
-        indicesToFlip = indicesToFlip :+ 0
-        simpLits = simpLits :+ lit
-      } else {
-        val normLeft = normalize(parentLit.left)
-        val normRight = normalize(parentLit.right)
-        (normLeft, normRight) match {
-          case (a, b) if a == b =>
-            val lit = Literal(LitTrue(), parentLit.polarity)
-            indicesToDelete = indicesToDelete :+ (if (simpLits.contains(lit)) 1 else 0)
-            indicesToFlip = indicesToFlip :+ 0
-            simpLits = simpLits :+ lit
-          case _ =>
-            val maybeOrderedLit = Literal.mkLit(normLeft, normRight, parentLit.polarity, parentLit.oriented)
-            val unorderedLit = Literal.mkLit(normLeft, normRight, parentLit.polarity, false)
-            indicesToDelete = indicesToDelete :+ (if (simpLits.contains(unorderedLit)) 1 else 0)
-            indicesToFlip = indicesToFlip :+ (if (maybeOrderedLit == unorderedLit) 0 else 1)
-            simpLits = simpLits :+ unorderedLit
-        }
-      }
-    }
-    //assert(simpLits == child.lits, s"LP-Encoding: Derived and given simplifications differ:\n${simpLits.map(_.pretty)}\n${child.lits.map(_.pretty)}}")
-
-    Out.lp_debug_info(s"Necessary deletion of literals: $indicesToDelete")
     Out.lp_debug_info(s"Necessary eqSym of literals: $indicesToFlip")
 
     /////////////////////////////////////////////////////
     //// 4. Refine with the parent applied to SimpApp
 
-    // If variables disappeared as a consequence of simplification, we need to apply witness terms to both the SimpApp step and the parent
+    val allSteps : Seq[lpProofScriptStep] = ((initialStep :+ haveSimpAppStep) ++ implicitRwTransf) :+ lpRefine(mapbePermParent)
 
-    val witnessTermsToApply = disappearingVars.map(var0 => lpWitness.fromAnyType(var0.ty))
-    // todo: you may need to change the order to ensure that they are applied to the child in the correct order
-    val allTermsToApplyToParent = freeVarsChild ++ witnessTermsToApply
-    val appliedParent = lpFunctionApp(parentNameLpEnc, allTermsToApplyToParent)
-    val appliedSimpAppStepName = lpFunctionApp(lpConstantTerm(simpAppStepName),allTermsToApplyToParent)
-    val refineStep = lpRefine(lpFunctionApp(appliedSimpAppStepName,Seq(appliedParent)))
-
-    val allSteps : Seq[lpProofScriptStep] = (initialStep :+ haveSimpAppStep) :+ refineStep
-
-    allSteps
+    (allSteps,maybePerm ++ usedSymbolsTransf)
   }
 
   def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Option[String]) = { //: (lpProofScript, Set[lpStatement]) = {

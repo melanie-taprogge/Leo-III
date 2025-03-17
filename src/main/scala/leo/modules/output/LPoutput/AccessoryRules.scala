@@ -451,6 +451,7 @@ object AccessoryRules {
     else None
   }
 
+  // todo: restructure to use lpLiterl as input
   def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
     Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
     // todo: compare modulo alpha conversion?
@@ -759,6 +760,11 @@ object AccessoryRules {
   def permutationStepSkript(literals0: Seq[lpOlTerm], literals1: Seq[lpOlTerm],before:lpTerm)={
     val permutation = literals0.map(item => literals1.indexOf(item))
     metaPermutation.instanciate(permutation,literals0,before)
+  }
+
+  def deleteDoubleLiterals(literals0: Seq[lpOlTerm], indxList: Seq[Int], before: lpTerm) = {
+    val outputIndx = indxList.distinct
+    //metaPermutation.instanciate(permutation, literals0, before)
   }
 
   ////////////////////////////////////////////////////////////////
