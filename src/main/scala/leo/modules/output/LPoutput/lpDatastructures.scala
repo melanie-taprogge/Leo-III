@@ -208,12 +208,16 @@ object lpDatastructures {
       }
   }
 
-  case class lpFunctionApp(f: lpTerm, args: Seq[lpTerm], implicitArgs: Seq[lpTerm]= Seq.empty) extends lpTerm {
+  case class lpFunctionApp(f: lpTerm, args: Seq[lpTerm]= Seq.empty, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpTerm {
     override def pretty: String = {
       val gap1 = if(implicitArgs.isEmpty) "" else " "
       val gap2 = if(args.isEmpty) "" else " "
       s"(${f.pretty}$gap1${implicitArgs.map(arg => s"[${arg.pretty}]").mkString(" ")}$gap2${args.map(_.pretty).mkString(" ")})"
     }
+  }
+  object lpFunctionApp{
+    def toDefName(headSymbolName: String, args: Seq[lpTerm] = Seq.empty, implicitArgs: Seq[lpTerm] = Seq.empty): lpFunctionApp =
+      lpFunctionApp(lpConstantTerm(headSymbolName), args, implicitArgs)
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -827,18 +831,19 @@ object lpDatastructures {
     }
   }
 
-  case class lpRewrite(rewritePattern0: Option[lpRewritePattern], rewriteTerm: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int){
-    def addTab(i : Int): lpRewrite =lpRewrite(rewritePattern0, rewriteTerm, tab + i)
+  case class lpRewrite(rewritePattern0: Option[lpRewritePattern], rewriteTerm: lpTerm, rwRhs: Boolean = false, tab: Int = 0) extends lpProofScriptStep(tab: Int){
+    def addTab(i : Int): lpRewrite =lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab + i)
     override def pretty: String = {
       val tabs: String = "\t" * tab
+      val maybeLeft: String = if(rwRhs) " left " else ""
       val rewritePattern = if (rewritePattern0.isDefined) s"${rewritePattern0.get.pretty} " else ""
-      s"${tabs}rewrite $rewritePattern${rewriteTerm.pretty}"
+      s"${tabs}rewrite$maybeLeft $rewritePattern${rewriteTerm.pretty}"
     }
 
     val tabs = "\t" * tab
     override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm).pretty}"
 
-    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, tab)))
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab)))
   }
 
   case class lpReflexivity(tab: Int = 0) extends lpProofScriptStep(tab: Int) {

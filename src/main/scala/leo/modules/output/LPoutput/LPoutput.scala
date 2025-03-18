@@ -42,7 +42,7 @@ object LPoutput {
     // todo: once lambdapi is fixed, remove the declaration here
     rulesFileSB.append(s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Nat Stdlib.Bool ${nameLpOutputFolder}.$nameLogicFile;\n\n") // maybe it will be necessary for now to add \nnotation ∨ infix right 6;
 
-    var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
+    //var simplificationRules: Set[SimplificationEncoding.simplificationRules] = Set.empty
     var otherRules: Set[lpDefinedRules] = Set.empty
     var infRules: Set[lpInferenceRuleEncoding.inferenceRules] = Set.empty
     var infRulesRWfree: Set[lpInferenceRuleEncoding.inferenceRules] = Set.empty
@@ -53,7 +53,8 @@ object LPoutput {
         //case basicRule: lpBasicRules =>
         //  basicRules = basicRules + basicRule
         case simpRule: SimplificationEncoding.simplificationRules =>
-          simplificationRules = simplificationRules + simpRule
+          //simplificationRules = simplificationRules + simpRule
+          incldueSimpLib = true
         case infRule: lpInferenceRuleEncoding.inferenceRules =>
           Out.lp_debug_info(s"used rule: $infRule")
           if (infRule == metaPermutation) {
@@ -75,11 +76,13 @@ object LPoutput {
     output.append("//SIGNATURE\n\n\n\n")
 
     // add simplification rules
+    /*
     if (simplificationRules.nonEmpty) output.append("////// Simplification Rules \n\n")
     simplificationRules foreach { simpRrule =>
       rulesFileSB.append(simpRrule.pretty)
       rulesFileSB.append("\n")
     }
+     */
 
     // add inference rules, todo: in some cases trigger the dynamic generation of rules here
     if (infRules.nonEmpty) output.append("////// Inference Rules with RW rules \n\n")

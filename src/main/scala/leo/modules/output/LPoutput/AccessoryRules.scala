@@ -16,6 +16,16 @@ import leo.modules.output.LPoutput.lpInferenceRuleEncoding.metaPermutation
 
 object AccessoryRules {
 
+  object lpStd_eq_sym extends lpTerm {
+    // note that we can not replace eqSym with it since we need a version where the lhs and rhs are not implicit to use with rw tactic
+    override def pretty: String = "eq_sym"
+
+    def inst(ty: lpOlType, lhsRhs: Option[(lpOlTerm, lpOlTerm)] = None): lpFunctionApp = {
+      val allArgs = if (lhsRhs.isDefined) Seq(ty, lhsRhs.get._1, lhsRhs.get._2) else Seq(ty)
+      lpFunctionApp(lpStd_eq_sym, Seq(), allArgs)
+    }
+  }
+
   ////////////////////////////////////////////////////////////////
   ////////// Transform from non-eauational to equational literals and back
   ////////////////////////////////////////////////////////////////
