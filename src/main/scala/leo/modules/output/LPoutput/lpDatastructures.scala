@@ -805,6 +805,22 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpHave(name,ty, proofScript, tab)))
   }
 
+  case class lpEval(tacticTerm: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+
+    def addTab(i: Int): lpEval = lpEval(tacticTerm, tab + i)
+
+    override def pretty: String = {
+      val tabs: String = "\t" * tab
+      s"${tabs}eval ${tacticTerm.pretty}"
+    }
+
+    val tabs = "\t" * tab
+
+    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{eval ${tacticTerm.pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm: lpTerm, tab)))
+  }
+
   case class lpRewritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
     override def pretty: String = {
       s".[${patternVar.pretty} in ${pattern.pretty}]"

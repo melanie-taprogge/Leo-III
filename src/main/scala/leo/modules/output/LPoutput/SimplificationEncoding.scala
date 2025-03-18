@@ -12,6 +12,8 @@ import leo.modules.output.LPoutput.lpDatastructures._
 
 object SimplificationEncoding {
 
+  val allSimpRulesTermName = lpConstantTerm("applyAllSimplifications")
+
   val implicitArguments = false
 
   // map of names to the simplification rules and a boolean decoding weather or not we need type instanciation
