@@ -58,7 +58,7 @@ object SimplificationEncoding {
 
   case object lpSimp_negEq_idem extends simplificationRules {
     // (T : Set) (x : τ T): (π (⊥ = (¬ (x = x))))
-    override def name: lpConstantTerm = lpConstantTerm("simp10")
+    override def name: lpConstantTerm = lpConstantTerm("¬eq_idem")
     override def pretty: String = name.pretty
   }
 
