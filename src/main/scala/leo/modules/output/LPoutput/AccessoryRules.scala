@@ -250,14 +250,14 @@ object AccessoryRules {
             lhs match {
               case lpOlUnaryConnectiveTerm(`lpNot`, t) =>
                 usedSymbols = usedSymbols + mkNegPropPosLit
-                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropPosLit.term)
+                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropPosLit.term, true)
                 val transformedLit = mkNegPropPosLit.origLit(t)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
               case _ =>
                 Out.lp_debug_info(s"${lhs.pretty}")
                 usedSymbols = usedSymbols + mkPosPropPosLit
-                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosPropPosLit.term)
+                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosPropPosLit.term, true)
                 val transformedLit = mkPosPropPosLit.origLit(lhs)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
@@ -267,13 +267,13 @@ object AccessoryRules {
             lhs match {
               case lpOlUnaryConnectiveTerm(lpNot, t) =>
                 usedSymbols = usedSymbols + mkPosPropNegLit
-                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosPropNegLit.term)
+                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkPosPropNegLit.term, true)
                 val transformedLit = mkPosPropNegLit.origLit(t)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
               case _ =>
                 usedSymbols = usedSymbols + mkNegPropNegLit
-                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropNegLit.term)
+                rewriteSteps = rewriteSteps :+ lpRewrite(rewritePattern, mkNegPropNegLit.term, true)
                 val transformedLit = mkNegPropNegLit.origLit(lhs)
                 litsAfter = litsAfter.updated(positionsInClause(lit), transformedLit)
                 transformations.update(lit, (transformedLit, lpOlNothing, lpOlNothing))
@@ -465,7 +465,7 @@ object AccessoryRules {
         necessaryRule match {
           case Some(rule) =>
             usedSymbols = usedSymbols + rule
-            allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.term, Seq()))
+            allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.term, Seq()), true)
             Out.lp_debug_info(s"Applying ${rule.term} to transform non-equational literal to equational form")
             if (flip) {
               usedSymbols = usedSymbols + flipLiteral()
