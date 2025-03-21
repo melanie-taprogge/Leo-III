@@ -1,23 +1,18 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.Clause.symbols
-import leo.datastructures.Literal.asTerm
-import leo.datastructures.{ClauseProxy, Literal, Role_Axiom, Role_NegConjecture, Signature}
+import leo.datastructures.{ClauseProxy, Role_Axiom, Role_NegConjecture, Signature}
 import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{calculus, symbolsInProof, userSignature}
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{ExTTenc, RwRenc, lpDne, permLib, simpLib}
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.LPSignature.{calcRuleLib, leoSimpTactic, lpDne, newPropExtLib, permLib}
+import leo.modules.output.LPoutput.lpDatastructures.{lpSimpRuleVersion, _}
 import leo.modules.output.LPoutput.ModularProofEncoding._
-import leo.modules.output.LPoutput.lpInferenceRuleEncoding.metaPermutation
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
-import scala.sys.process._
-import scala.util.{Failure, Success, Try}
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -30,6 +25,9 @@ object LPoutput {
   val nameLogicFile = "extt"
   val permlibFile = "permuteLib"
   val simplibFile = "simpLib"
+  val calcRuleLibFile = "calcRuleLib"
+  val propLibFile = "newPropExtLib"
+  val leoSimpTacticFile = "simpTactic"
   val nameRulesFile = "rules"
   val nameProofFile = "encodedProof"
 
@@ -55,7 +53,10 @@ object LPoutput {
         case simpRule: SimplificationEncoding.simplificationRules =>
           //simplificationRules = simplificationRules + simpRule
           incldueSimpLib = true
+        case simpRule: lpSimpRuleVersion =>
+          incldueSimpLib = true
         case infRule: lpInferenceRuleEncoding.inferenceRules =>
+          /*
           Out.lp_debug_info(s"used rule: $infRule")
           if (infRule == metaPermutation) {
             Out.lp_debug_info(s"Permutation-Lib is needed")
@@ -63,6 +64,8 @@ object LPoutput {
           }
           else if (infRule.proofRWfree) infRulesRWfree = infRulesRWfree + infRule
           else infRules = infRules + infRule
+           */
+
         case defRule: lpDefinedRules =>
           otherRules = otherRules + defRule
         case _ =>
@@ -469,14 +472,13 @@ object LPoutput {
       Out.lp_debug_info("Generating Signature")
       val rulesFileSB = generateSignature(usedSymbols, nameLpOutputFolder)
 
-      val permLibStr: String = {
-        if (inclduePermLib) f"${nameLpOutputFolder}.${permlibFile}"
-        else ""
-      }
-      val simpLibStr: String = {
-        f"${nameLpOutputFolder}.${simplibFile}"
-      }
-      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile ${nameLpOutputFolder}.${nameRulesFile} $simpLibStr $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      val permLibStr: String = f"${nameLpOutputFolder}.${permlibFile}"
+      //val simpLibStr: String = f"${nameLpOutputFolder}.${simplibFile}"
+      val propLibStr = f"${nameLpOutputFolder}.${propLibFile}"
+      val simpTacLibStr = f"${nameLpOutputFolder}.${leoSimpTacticFile}"
+      val calcRuleLibStr = f"${nameLpOutputFolder}.${calcRuleLibFile}"
+
+      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.Nat Stdlib.Bool Stdlib.List $propLibStr $calcRuleLibStr $simpTacLibStr $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
 
 
       // create a folder for the lambdapi package
@@ -491,18 +493,31 @@ object LPoutput {
       // write the files
       Out.info("Writing the Lambdapi files")
 
-      val exttFilePath = lpOutputPath.resolve(s"$nameLogicFile.lp")
-      Files.write(exttFilePath, ExTTenc.getBytes(StandardCharsets.UTF_8))
+      //val exttFilePath = lpOutputPath.resolve(s"$nameLogicFile.lp")
+      //Files.write(exttFilePath, ExTTenc.getBytes(StandardCharsets.UTF_8))
 
       val permLibFilePath = lpOutputPath.resolve(s"$permlibFile.lp")
-      if (inclduePermLib) Files.write(permLibFilePath, permLib.getBytes(StandardCharsets.UTF_8))
+      Files.write(permLibFilePath, permLib.getBytes(StandardCharsets.UTF_8))
 
-      val simpLibFilePath = lpOutputPath.resolve(s"$simplibFile.lp")
-      val completeSimpLibFile = s"require open Stdlib.Set Stdlib.Prop Stdlib.Eq Stdlib.Impred Stdlib.FOL Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile;\n\n"
-      if (incldueSimpLib) Files.write(simpLibFilePath, (completeSimpLibFile + simpLib).getBytes(StandardCharsets.UTF_8))
+      // propLibFile leoSimpTacticFile
+      //val simpLibFilePath = lpOutputPath.resolve(s"$simplibFile.lp")
+      //val completeSimpLibFile = s"require open Stdlib.Set Stdlib.Prop Stdlib.Eq Stdlib.Impred Stdlib.FOL Stdlib.Bool Stdlib.List ${nameLpOutputFolder}.$nameLogicFile;\n\n"
+      //if (incldueSimpLib) Files.write(simpLibFilePath, (completeSimpLibFile + simpLib).getBytes(StandardCharsets.UTF_8))
 
-      val rulesFilePath = lpOutputPath.resolve(s"$nameRulesFile.lp")
-      Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))
+      val propLibFilePath = lpOutputPath.resolve(s"$propLibFile.lp")
+      Files.write(propLibFilePath, newPropExtLib.getBytes(StandardCharsets.UTF_8))
+
+      // calcRuleLibFile
+      val calcRuleLibFilePath = lpOutputPath.resolve(s"$calcRuleLibFile.lp")
+      val reqcalcRuleLibFile = s"require open Stdlib.Set Stdlib.Prop Stdlib.FOL Stdlib.Eq Stdlib.Nat Stdlib.Classic Stdlib.Bool Stdlib.List Stdlib.HOL Stdlib.Impred ${nameLpOutputFolder}.$propLibFile;\n\n"
+      Files.write(calcRuleLibFilePath, (reqcalcRuleLibFile + calcRuleLib).getBytes(StandardCharsets.UTF_8))
+
+      val simpTacticLibFilePath = lpOutputPath.resolve(s"$leoSimpTacticFile.lp")
+      val reqSimpTacticLibFile = s"require open Stdlib.Set Stdlib.Prop Stdlib.Eq Stdlib.Impred Stdlib.Classic Stdlib.FOL Stdlib.List ${nameLpOutputFolder}.$propLibFile;\n\n"
+      Files.write(simpTacticLibFilePath, (reqSimpTacticLibFile + leoSimpTactic).getBytes(StandardCharsets.UTF_8))
+
+      //val rulesFilePath = lpOutputPath.resolve(s"$nameRulesFile.lp")
+      //Files.write(rulesFilePath, rulesFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
       val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))

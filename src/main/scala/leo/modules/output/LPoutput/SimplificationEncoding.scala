@@ -38,36 +38,118 @@ object SimplificationEncoding {
     def name: lpConstantTerm
   }
 
+  // Idempotence and Contradiction for ∧ and ∨
+
+  // 6
+  /** Rule (x : τ T): π ((x ∨ x) = x) */
   case object lpSimp_or_idem extends simplificationRules {
-    // (π (x = (x ∨ x)))
    override def name: lpConstantTerm = lpConstantTerm("∨_idem")
     override def pretty: String = name.pretty
   }
 
-  case object lpSimp_orF extends simplificationRules {
-    // π ((x ∨ ⊥) = x)
+  // Disjunction/Conjunction with ⊤ / ⊥
+
+  // 14
+  /** Rule (x : τ T): π ((x ∨ ⊥) = x) */
+  case object lpSimp_orBot extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("∨⊥")
     override def pretty: String = name.pretty
   }
 
-  case object lpSimp_eq_idem extends simplificationRules {
-    // (T : Set) (x : τ T): (π (⊤ = (x = x)))
-    override def name: lpConstantTerm = lpConstantTerm("eq_idem")
-    override def pretty: String = name.pretty
-  }
+  // Negation of ⊤ and ⊥
 
-  case object lpSimp_negEq_idem extends simplificationRules {
-    // (T : Set) (x : τ T): (π (⊥ = (¬ (x = x))))
-    override def name: lpConstantTerm = lpConstantTerm("¬eq_idem")
-    override def pretty: String = name.pretty
-  }
-
+  // 18
+  /** Rule π (¬ ⊤ = ⊥) */
   case object lpSimp_negTop extends simplificationRules {
-    // (π (⊥ = (¬ ⊤)))
     override def name: lpConstantTerm = lpConstantTerm("¬⊤")
     override def pretty: String = name.pretty
   }
 
+  //Equalities
+
+  // 20
+  /** Rule (T : Set) (x : τ T): (π ((x = x) = ⊤)) */
+  case object lpSimp_eq_idem extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("=_idem")
+    override def pretty: String = name.pretty
+  }
+
+  // 21
+  /** Rule (T : Set) (x : τ T): π (¬ (x = x) = ⊥) */
+  case object lpSimp_negEq_idem extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬=_idem")
+    override def pretty: String = name.pretty
+  }
+
+  // 22
+  /** Rule (x : τ o): π ((x = ⊤) = x) */
+  case object lpSimp_eqTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("=⊤")
+    override def pretty: String = name.pretty
+  }
+
+  // 23
+  /** Rule (x : τ o): π ((⊤ = x) = x) */
+  case object lpSimp_topEq extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("⊤=")
+    override def pretty: String = name.pretty
+  }
+
+  // 24
+  /** Rule (x : τ o): π (¬(x = ⊤) = ¬ x) */
+  case object lpSimp_negEqTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬=⊤")
+    override def pretty: String = name.pretty
+  }
+
+  // 26
+  /** Rule (x : τ o): π ((x = ⊥) = ¬ x) */
+  case object lpSimp_eqBot extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("=⊥")
+    override def pretty: String = name.pretty
+  }
+
+  // 27
+  /** Rule (x : τ o): π ((⊥ = x) = ¬ x) */
+  case object lpSimp_botEq extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("⊥=")
+    override def pretty: String = name.pretty
+  }
+
+  // 28
+  /** Rule (x : τ o): π (¬ (x = ⊥) = x) */
+  case object lpSimp_negEqBot extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬=⊥")
+    override def pretty: String = name.pretty
+  }
+
+  //Equalities with negations
+
+  // 30
+  /** Rule (x : τ o): π ((¬ x = ⊤) = ¬ x) */
+  case object lpSimp_notEqTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("neg=⊤")
+    override def pretty: String = name.pretty
+  }
+
+  // 32
+  /** Rule (x : τ o): π (¬(¬ x = ⊤) = x) */
+  case object lpSimp_negNotEqTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬neg=⊤")
+    override def pretty: String = name.pretty
+  }
+
+  // 36
+  /** Rule (x : τ o):π (¬(¬ x = ⊥) = ¬ x) */
+  case object lpSimp_negNotEqBot extends simplificationRules {
+    // π (¬(¬ x = ⊥) = ¬ x)
+    override def name: lpConstantTerm = lpConstantTerm("¬neg=⊥")
+    override def pretty: String = name.pretty
+  }
+
+  // Simplifications reflecting Classical Principles
+
+  // 52
   case object lpSimp_dne extends simplificationRules {
     // x: (π (x = (¬ ¬ x)))
     override def name: lpConstantTerm = lpConstantTerm("¬¬ₑ_eq")

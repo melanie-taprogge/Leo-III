@@ -1466,13 +1466,13 @@ object ModularProofEncoding {
           // Choose the fitting rule for the transformation todo: aso use the general skript here
           val (haveTransformStep, usedSymbols0) = if (rwPol) {
             val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTop, rwLhs)
-            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkTopEqPosProp_script(sourceBeforeEq.pretty).name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
-            (haveTransformStep0, mkTopEqPosProp_script())
+            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkTopEqPosProp.term), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
+            (haveTransformStep0, mkTopEqPosProp)
           } else {
             rwRhs = lpOlBot
             val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, rwLhs)
-            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkBotEqNegProp_script(sourceBeforeEq.pretty).name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
-            (haveTransformStep0, mkBotEqNegProp_script())
+            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkBotEqNegProp.term), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
+            (haveTransformStep0, mkBotEqNegProp)
           }
           Out.lp_debug_info(s"Transforming rewrite rule to equality...")
           //  2 b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly todo: sbustitution
@@ -1660,9 +1660,9 @@ object ModularProofEncoding {
 
     // in both cases, the second step is the removal of ⊥ from the clause. This can be done using Simp7:
     val rewritePattern_step2 = generateClausePatternTerm(Seq(position - 1), parent.lits.length - 1, None, patternVar)
-    val rewriteStep_step2 = lpRewrite(rewritePattern_step2, SimplificationEncoding.lpSimp_orF.name,true)
+    val rewriteStep_step2 = lpRewrite(rewritePattern_step2, SimplificationEncoding.lpSimp_orBot.name,true)
     rewriteSteps = rewriteSteps :+ rewriteStep_step2
-    usedSymbols = usedSymbols + SimplificationEncoding.lpSimp_orF
+    usedSymbols = usedSymbols + SimplificationEncoding.lpSimp_orBot
 
     // proof the first transformation depending on the form of the unification constraint
     val rewritePattern_step1 = generateClausePatternTerm(Seq(position), parent.lits.length, None, patternVar)
