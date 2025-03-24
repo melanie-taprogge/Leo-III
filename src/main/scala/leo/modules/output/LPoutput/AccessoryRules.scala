@@ -16,10 +16,9 @@ import leo.modules.output.LPoutput.lpInferenceRuleEncoding.metaPermutation
 
 object AccessoryRules {
 
+  /** Encoding of rule (T : Set) (x : τ T): π((x = y) = (y = x)) */
   object lpStd_eq_sym extends lpTerm {
-    // [T] (x y : τ T) : π((x = y) = (y = x))
-    override def pretty: String = "=_sym"
-
+    override def pretty: String = "eq_sym"
     def inst(ty: lpOlType, lhsRhs: Option[(lpOlTerm, lpOlTerm)] = None): lpFunctionApp = {
       val allArgs = if (lhsRhs.isDefined) Seq(ty, lhsRhs.get._1, lhsRhs.get._2) else Seq(ty)
       lpFunctionApp(lpStd_eq_sym, Seq(), allArgs)
@@ -29,15 +28,48 @@ object AccessoryRules {
   ////////////////////////////////////////////////////////////////
   ////////// Transform from non-eauational to equational literals and back
   ////////////////////////////////////////////////////////////////
-  //
+
+  // positive propositional literals to equational ones
+
+  /** Encoding of rule (x : τ o): π (x = (x = ⊤)) */
+  case object mkPosPropPosLit extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_eqTop.name
+    override def rwLeft: Boolean = true
+    def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop), x0, lpOlTop)
+    def origLit(x0: lpOlTerm): (lpOlTerm) = x0
+  }
+
+  /** Encoding of rule (x : τ o): π (x = (¬ ((¬ x) = ⊤))) */
+  case object mkPosPropNegLit extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_negNotEqTop.name
+    override def rwLeft: Boolean = true
+    def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)
+    def origLit(x0: lpOlTerm): (lpOlTerm) = x0
+  }
+
+  /** Encoding of rule (x : τ o): π (x = ¬ (x = ⊥)) */
+  case object mkPosPropNegEqBot extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_negEqBot.name
+    override def rwLeft: Boolean = true
+  }
+
+  /** Encoding of rule (x : τ o): π (x = (¬ x = ⊥)) */
+  case object mkPropEqBot extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_negNotEqBot.name
+    override def rwLeft: Boolean = true
+  }
+
+  // negative propositional literals to equational ones
+
+  /** Encoding of rule (x : τ o): π (¬ x = (¬ x = ⊤)) */
   case object mkNegPropPosLit extends lpSimpRuleVersion {
-    // x: (π ((¬ x) = ((¬ x) = ⊤)))
     override def term: lpTerm = lpSimp_notEqTop.name
     override def rwLeft: Boolean = true
     def transformLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
     def origLit(x0: lpOlTerm): (lpOlTerm) =  lpOlUnaryConnectiveTerm(lpNot, x0)
   }
-//
+
+  /** Encoding of rule (x : τ o): π ((¬ x) = (¬ (x = ⊤))) */
   case object mkNegPropNegLit extends lpSimpRuleVersion {
     // x: (π ((¬ x) = (¬ (x = ⊤))))
     override def term: lpConstantTerm = lpSimp_negEqTop.name
@@ -45,56 +77,24 @@ object AccessoryRules {
     def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop)), x0, lpOlTop)
     def origLit(x0: lpOlTerm): (lpOlTerm) = lpOlUnaryConnectiveTerm(lpNot, x0)
   }
-//
-  case object mkPosPropNegLit extends lpSimpRuleVersion {
-    // x: (π (x = (¬ ((¬ x) = ⊤))))
-    override def term: lpConstantTerm = lpSimp_negNotEqTop.name
+
+  /** Encoding of rule (x : τ o): π (¬ x = (x = ⊥)) */
+  case object mkNegPropEqBot extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_eqBot.name
     override def rwLeft: Boolean = true
-    def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)
-    def origLit(x0: lpOlTerm): (lpOlTerm) = x0
   }
-//
-  case object mkPosPropPosLit extends lpSimpRuleVersion {
-    // Π x: τ o, π (x = (x = ⊤))
-    override def term: lpConstantTerm = lpSimp_eqTop.name
+
+  /** Encoding of rule (x : τ o): π (¬ x = ¬ (¬ x = ⊥)) */
+  case object mkNegPropNegEqBot extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_negNotEqBot.name
     override def rwLeft: Boolean = true
-    def transformLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop), x0, lpOlTop)
-    def origLit(x0: lpOlTerm): (lpOlTerm) = x0
   }
 
-  //
-  case object mkNegLitPosProp extends lpSimpRuleVersion {
-    // x: (π ((¬ ((¬ x) = ⊤)) = x))
-    override def term: lpConstantTerm = lpSimp_negNotEqTop.name
-    override def rwLeft: Boolean = false
-    def instanciate(x0: lpOlTerm) = lpFunctionApp(term, Seq(x0))
-    def transformLit(x0: lpOlTerm): (lpOlTerm) = x0
-    def origLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
-  }
 
-  //
-  case object mkNegLitNegProp extends lpSimpRuleVersion {
-    // x: (π ((¬ (x = ⊤)) = (¬ x)))
-    override def term: lpConstantTerm = lpSimp_negEqTop.name
-    override def rwLeft: Boolean = false
-    def instanciate(x0: lpOlTerm) = lpFunctionApp(term, Seq(x0))
-    def transformLit(x0: lpOlTerm): (lpOlTerm) = lpOlUnaryConnectiveTerm(lpNot, x0)
-    def origLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop)), x0, lpOlTop)
-  }
+  // positive equational literals to propositional one
 
-  //
-  case object mkPosLitNegProp extends lpSimpRuleVersion {
-    // x: (π (((¬ x) = ⊤) = (¬ x)))
-    override def term: lpConstantTerm = lpSimp_notEqTop.name
-    override def rwLeft: Boolean = false
-    def instanciate(x0: lpOlTerm) = lpFunctionApp(term, Seq(x0))
-    def transformLit(x0: lpOlTerm): (lpOlTerm) =  lpOlUnaryConnectiveTerm(lpNot, x0)
-    def origLit(x0: lpOlTerm): (lpOlTerm,lpOlTerm,lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype.lift2Poly,lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop),lpOlUnaryConnectiveTerm(lpNot,x0),lpOlTop)
-  }
-
-  //
+  /** Encoding of rule (x : τ o): π ((x = ⊤) = x) */
   case object mkPosLitPosProp extends lpSimpRuleVersion {
-    // x: (π ((x = ⊤) = x))
     override def term: lpConstantTerm = lpSimp_eqTop.name
     override def rwLeft: Boolean = false
     def instanciate(x0: lpOlTerm) = lpFunctionApp(term, Seq(x0))
@@ -102,60 +102,47 @@ object AccessoryRules {
     def origLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop), x0, lpOlTop)
   }
 
-  //
-  case object mkNegPropEqBot extends lpSimpRuleVersion {
-    // Π x: τ o, π (¬ x = (x = ⊥))
-    override def term: lpConstantTerm = lpSimp_eqBot.name
-    override def rwLeft: Boolean = true
-  }
-
-  case object mkNegPropNegEqBot extends lpSimpRuleVersion {
-    // Π x: Prop, π (¬ x = ¬ (¬ x = ⊥))
-    override def term: lpConstantTerm = lpSimp_negNotEqBot.name
-    override def rwLeft: Boolean = true
-  }
-
-  //
-  case object mkPosPropNegEqBot extends lpSimpRuleVersion {
-    // Π x: τ o, π (x = ¬ (x = ⊥))
-    override def term: lpConstantTerm = lpSimp_negEqBot.name
-    override def rwLeft: Boolean = true
-  }
-
-  case object mkPropEqBot extends lpSimpRuleVersion {
-    // Π x: Prop, π (x = (¬ x = ⊥))
-    override def term: lpConstantTerm = lpSimp_negNotEqBot.name
-    override def rwLeft: Boolean = true
-  }
-
-  case object mkBotEqNegProp extends lpSimpRuleVersion {
-    // x: (π ((⊥ = x) = (¬ x)))
-    override def term: lpConstantTerm = lpSimp_botEq.name
-    override def rwLeft: Boolean = false
-  }
-
+  /** Encoding of rule (x : τ o): π ((⊤ = x) = x) */
   case object mkTopEqPosProp extends lpSimpRuleVersion {
-    // x: (π ((⊤ = x) = x))
     override def term: lpConstantTerm = lpSimp_topEq.name
     override def rwLeft: Boolean = false
   }
 
-  case class eqLift_script(patternVarName1: String = "x", patternVarName2: String = "y", typeVarName: String = "a") extends lpDefinedRules {
-    // Π [a: Set], Π x: τ a, Π y: τ a, π ((x = y) = ((x = y) = ⊤))
-
-    val a = lpOlUserDefinedType(typeVarName)
-    val x = lpOlTypedVar(lpOlConstantTerm(patternVarName1),a)
-    val y = lpOlTypedVar(lpOlConstantTerm(patternVarName2),a)
-    override def name: lpConstantTerm = lpConstantTerm("liftEqExlicit")
-    // [a: Set] (x y : τ a) :(π ((x = y) = ((x = y) = ⊤)))
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y), lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x,y) , lpOlTop)).prf
-
-    override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume a x y;\n    refine propExt (x = y) ((x = y) = ⊤) _ _ \n        {assume h1;\n        refine propExt (x = y) ⊤ _ _\n            {assume h2;\n            refine ⊤ᵢ}\n            {assume h2;\n            refine h1}}\n        {assume h1;\n        refine ind_eq h1 (λ z, z) ⊤ᵢ}")))
-
-    override def dec: lpDeclaration = lpDeclaration(name, Seq(x,y), ty, Seq(a))
-
-    override def pretty: String = lpDefinition(name, Seq(x,y), Some(ty), proof, Seq(a)).pretty
+  /** Encoding of rule (x : τ o): π (((¬ x) = ⊤) = (¬ x)) */
+  case object mkPosLitNegProp extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_notEqTop.name
+    override def rwLeft: Boolean = false
+    def instanciate(x0: lpOlTerm) = lpFunctionApp(term, Seq(x0))
+    def transformLit(x0: lpOlTerm): (lpOlTerm) = lpOlUnaryConnectiveTerm(lpNot, x0)
+    def origLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop), lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)
   }
+
+  /** Encoding of rule (x : τ o): π ((⊥ = x) = (¬ x)) */
+  case object mkBotEqNegProp extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_botEq.name
+    override def rwLeft: Boolean = false
+  }
+
+  // negative equational literals to propositional ones
+
+  /** Encoding of rule (x : τ o): π ((¬ (x = ⊤)) = (¬ x)) */
+  case object mkNegLitNegProp extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_negEqTop.name
+    override def rwLeft: Boolean = false
+    def instanciate(x0: lpOlTerm) = lpFunctionApp(term, Seq(x0))
+    def transformLit(x0: lpOlTerm): (lpOlTerm) = lpOlUnaryConnectiveTerm(lpNot, x0)
+    def origLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, x0, lpOlTop)), x0, lpOlTop)
+  }
+
+  /** Encoding of rule (x : τ o): π ((¬ ((¬ x) = ⊤)) = x) */
+  case object mkNegLitPosProp extends lpSimpRuleVersion {
+    override def term: lpConstantTerm = lpSimp_negNotEqTop.name
+    override def rwLeft: Boolean = false
+    def instanciate(x0: lpOlTerm) = lpFunctionApp(term, Seq(x0))
+    def transformLit(x0: lpOlTerm): (lpOlTerm) = x0
+    def origLit(x0: lpOlTerm): (lpOlTerm, lpOlTerm, lpOlTerm) = (lpOlUnaryConnectiveTerm(lpNot, lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype.lift2Poly, lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)), lpOlUnaryConnectiveTerm(lpNot, x0), lpOlTop)
+  }
+
 
   def equationalForm(lit: lpOlTerm, desiredPolarity: Boolean): (lpOlTerm, lpOlTerm, lpOlTerm) = {
     lit match {
@@ -494,9 +481,8 @@ object AccessoryRules {
         } // In this case, the sides are already the same
       } else if ((lhs1.get == lit0) && (rhs1.get == lpOlTop)){
         // transformation to equality literal for positive case
-        usedSymbols = usedSymbols + eqLift_script()
-        allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(eqLift_script().name,Seq(lhs0.get,rhs0.get)))
-        Out.lp_debug_info(s"Applying ${eqLift_script().name.pretty} to un-lift literal ${lit0.pretty}")
+        allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(lpStd_eq_sym,Seq(lpFunctionApp(mkPosPropPosLit.term,Seq(lpOlTypedBinaryConnectiveTerm(lpEq,ty0.get,lhs0.get,rhs0.get))))))
+        //Out.lp_debug_info(s"Applying ${eqLift_script().name.pretty} to un-lift literal ${lit0.pretty}")
         true
       } else {
         Out.lp_debug_info(s"Unencoded transformation between equational literals, $lit0")
@@ -652,13 +638,5 @@ object AccessoryRules {
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
     override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
-
   }
-
-  ////////////////////////////////////////////////////////////////
-  ////////// Transform rule
-  ////////////////////////////////////////////////////////////////
-
-
-
 }

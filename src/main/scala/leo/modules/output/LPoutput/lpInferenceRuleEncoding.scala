@@ -262,7 +262,7 @@ object lpInferenceRuleEncoding {
   ////////////////////////////////////////////////////////////////
 
   case object  metaPermutation extends inferenceRules {
-    override def name: lpConstantTerm = lpConstantTerm(s"perm_theorem")
+    override def name: lpConstantTerm = lpConstantTerm(s"permute")
 
     val σ = lpOlConstantTerm("σ")
     val c = lpOlConstantTerm("c")
@@ -282,7 +282,7 @@ object lpInferenceRuleEncoding {
   }
 
   case object metaDeletion extends inferenceRules {
-    override def name: lpConstantTerm = lpConstantTerm(s"double_lit_del_theorem")
+    override def name: lpConstantTerm = lpConstantTerm(s"delete")
     override def ty: lpMlType = throw new Exception(s"trying to print type of meta deletion")
 
     override def proof: lpProofScript = throw new Exception(s"trying to print proof of meta deletion")
@@ -297,9 +297,9 @@ object lpInferenceRuleEncoding {
 
   case object metaTransform extends inferenceRules {
 
-    // opaque symbol transformation_theorem [l : τ o] (c: 𝕃 o) (n : τ nat) :
+    // opaque symbol transform [l : τ o] (c: 𝕃 o) (n : τ nat) :
     //    π ((nth ⊥ c n) ⇒ l) → π (disj c) → π (disj (set_nth ⊥ c n l))
-    override def name: lpConstantTerm = lpConstantTerm(s"transformation_theorem")
+    override def name: lpConstantTerm = lpConstantTerm(s"transform")
     override def ty: lpMlType = throw new Exception(s"trying to access type of Lambdapi-Meta theorem transform")
 
     override def proof: lpProofScript = throw new Exception(s"trying to access proof of Lambdapi-Meta theorem transform")
