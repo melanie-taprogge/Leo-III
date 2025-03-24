@@ -53,6 +53,17 @@ object Simplification extends Function1[Term, Term] {
     *
     * @return The term that is created by exhaustively applying all the rewriting rules given in [[Simplification]].
     */
+  final class RewriteState {
+    var rewriteUnderBinderHappened: Boolean = false
+  }
+  final def apply_rwUnderBinder(term: Term, extensional: Boolean): (Term, Boolean) = {
+    val st = new RewriteState
+    val term0 = term.betaNormalize
+    (apply0(term0, extensional, st).betaNormalize, st.rewriteUnderBinderHappened)
+  }
+  final def apply_rwUnderBinder(term: Term): (Term, Boolean) = apply_rwUnderBinder(term, extensional = true)
+
+
   final def apply(term: Term, extensional: Boolean): Term = {
     val term0 = term.betaNormalize
     apply0(term0, extensional).betaNormalize
@@ -76,7 +87,7 @@ object Simplification extends Function1[Term, Term] {
     (restult.betaNormalize,Seq.empty)
   }
 
-  private[this] final def apply0(term: Term, extensional: Boolean): Term = {
+  private[this] final def apply0(term: Term, extensional: Boolean, st: RewriteState = new RewriteState): Term = {
     import leo.datastructures.Term.{:::>, TypeLambda, Bound, Symbol, ∙, Rational, Real}
     import leo.modules.HOLSignature.{
       Exists, Forall, TyForall, &, |||, LitTrue, LitFalse, ===, !===, Not, Impl, <=>,
@@ -84,15 +95,21 @@ object Simplification extends Function1[Term, Term] {
     }
 
     @inline def simpTermOrType(arg: Either[Term, Type]): Either[Term, Type] = arg match {
-      case Left(arg0) => Left(apply0(arg0, extensional))
+      case Left(arg0) => Left(apply0(arg0, extensional, st))
       case Right(arg0) => Right(arg0)
     }
 
     term match {
       case Bound(_, _) => term
       case Symbol(_) => term
-      case ty :::> body => mkTermAbs(ty, apply0(body, extensional))
-      case TypeLambda(body) => mkTypeAbs(apply0(body, extensional))
+      case ty :::> body =>
+        val simpBody = apply0(body, extensional, st)
+        if (body != simpBody) st.rewriteUnderBinderHappened = true
+        mkTermAbs(ty, simpBody)
+      case TypeLambda(body) =>
+        val simpBody = apply0(body, extensional, st)
+        if (body != simpBody) st.rewriteUnderBinderHappened = true
+        mkTypeAbs(simpBody)
       case Rational(n, d) => (mkRational _).tupled(normalizeRat(n, d))
       case Real(w, d, e) => (mkReal _).tupled(normalizeReal(w, d, e))
       case f ∙ args if f.isConstant && args.length <= 3 =>
@@ -101,8 +118,8 @@ object Simplification extends Function1[Term, Term] {
             (id: @switch) match {
               case |||.key =>
                 val (left, right) = |||.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 (simpLeft, simpRight) match {
                   // - `s \/ s -> s`
                   case (l, r) if l == r => l
@@ -119,8 +136,8 @@ object Simplification extends Function1[Term, Term] {
                 }
               case &.key =>
                 val (left, right) = &.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 (simpLeft, simpRight) match {
                   // - `s /\ s -> s`
                   case (l, r) if l == r => l
@@ -137,37 +154,45 @@ object Simplification extends Function1[Term, Term] {
                 }
               case Impl.key =>
                 val (left, right) = Impl.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 (simpLeft, simpRight) match {
+                  // s => T -> T
                   case (_, LitTrue()) => LitTrue
+                  // F => s -> T
                   case (LitFalse(), _) => LitTrue
+                  // T => s -> s
                   case (LitTrue(), r) => r
+                  // s => F -> ~s
                   case (_, LitFalse()) =>
                     val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft)
-                    apply0(intermediate, extensional)
+                    apply0(intermediate, extensional, st)
+                  // s => s -> T
                   case (l, r) if l == r => LitTrue()
                   case (l, r) => mkTermApp(f, Seq(l, r))
                 }
               case <=>.key =>
                 val (left, right) = <=>.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 (simpLeft, simpRight) match {
+                  // s <=> T -> s
                   case (l, LitTrue()) => l
                   case (LitTrue(), r) => r
+                  // F <=> s -> ~s
                   case (LitFalse(), _) =>
                     val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpRight)
-                    apply0(intermediate, extensional)
+                    apply0(intermediate, extensional, st)
                   case (_, LitFalse()) =>
                     val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft)
-                    apply0(intermediate, extensional)
+                    apply0(intermediate, extensional, st)
+                  // s <=> s -> T
                   case (l, r) if l == r => LitTrue()
                   case (l, r) => mkTermApp(f, Seq(l, r))
                 }
               case Not.key =>
                 val body = Not.unapply(term).get
-                val simpBody = apply0(body, extensional)
+                val simpBody = apply0(body, extensional, st)
                 simpBody match {
                   // - `~T -> F`
                   case LitTrue() => LitFalse
@@ -179,8 +204,8 @@ object Simplification extends Function1[Term, Term] {
                 }
               case ===.key =>
                 val (left, right) = ===.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 if (extensional) {
                   (simpLeft, simpRight) match {
                     // - `s = T -> s`
@@ -189,10 +214,10 @@ object Simplification extends Function1[Term, Term] {
                     // - `s = F -> ~s`
                     case (_, LitFalse()) =>
                       val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft)
-                      apply0(intermediate, extensional)
+                      apply0(intermediate, extensional, st)
                     case (LitFalse(), _) =>
                       val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpRight)
-                      apply0(intermediate, extensional)
+                      apply0(intermediate, extensional, st)
                     // - `t = t -> T`
                     case (l, r) if l == r => LitTrue
                     case (l, r) => mkApp(f, Seq(Right(l.ty), Left(l), Left(r)))
@@ -206,8 +231,8 @@ object Simplification extends Function1[Term, Term] {
                 }
               case !===.key =>
                 val (left, right) = !===.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 if (extensional) {
                   (simpLeft, simpRight) match {
                     // - `s != F -> s`
@@ -216,10 +241,10 @@ object Simplification extends Function1[Term, Term] {
                     // - `s != T -> ~s`
                     case (_, LitTrue()) =>
                       val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpLeft)
-                      apply0(intermediate, extensional)
+                      apply0(intermediate, extensional, st)
                     case (LitTrue(), _) =>
                       val intermediate = mkTermApp(mkAtom(Not.key, Not.ty), simpRight)
-                      apply0(intermediate, extensional)
+                      apply0(intermediate, extensional, st)
                     // - `t != t -> F`
                     case (l, r) if l == r => LitFalse
                     case (l, r) => mkApp(f, Seq(Right(l.ty), Left(l), Left(r)))
@@ -233,7 +258,8 @@ object Simplification extends Function1[Term, Term] {
                 }
               case Forall.key =>
                 val body = Forall.unapply(term).get
-                val simpBody = apply0(body, extensional)
+                val simpBody = apply0(body, extensional, st)
+                if (body != simpBody) st.rewriteUnderBinderHappened = true
                 simpBody match {
                   // - ∀x. s -> s if x not free in s
                   // - ∃x. s -> s if x not free in s
@@ -242,7 +268,8 @@ object Simplification extends Function1[Term, Term] {
                 }
               case Exists.key =>
                 val body = Exists.unapply(term).get
-                val simpBody = apply0(body, extensional)
+                val simpBody = apply0(body, extensional, st)
+                if (body != simpBody) st.rewriteUnderBinderHappened = true
                 simpBody match {
                   // - ∀x. s -> s if x not free in s
                   // - ∃x. s -> s if x not free in s
@@ -251,7 +278,8 @@ object Simplification extends Function1[Term, Term] {
                 }
               case TyForall.key =>
                 val body = TyForall.unapply(term).get
-                val simpBody = apply0(body, extensional)
+                val simpBody = apply0(body, extensional, st)
+                if (body != simpBody) st.rewriteUnderBinderHappened = true
                 simpBody match {
                   // - Πx. s -> s if x is not free in s
                   case TypeLambda(absBody) if !absBody.tyFV.contains(1) => absBody.lift(0, -1)
@@ -259,23 +287,23 @@ object Simplification extends Function1[Term, Term] {
                 }
               case HOLDifference.key =>
                 val (left, right) = HOLDifference.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 mkTermApp(mkTypeApp(HOLSum, simpLeft.ty), Seq(simpLeft, mkTermApp(mkTypeApp(HOLUnaryMinus, simpRight.ty), simpRight)))
               case HOLLessEq.key =>
                 val (left, right) = HOLLessEq.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 mkTermApp(mkAtom(|||.key, |||.ty), Seq(mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpLeft, simpRight)), ===(simpLeft, simpRight)))
               case HOLGreater.key =>
                 val (left, right) = HOLGreater.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpRight, simpLeft))
               case HOLGreaterEq.key =>
                 val (left, right) = HOLGreaterEq.unapply(term).get
-                val simpLeft = apply0(left, extensional)
-                val simpRight = apply0(right, extensional)
+                val simpLeft = apply0(left, extensional, st)
+                val simpRight = apply0(right, extensional, st)
                 mkTermApp(mkAtom(|||.key, |||.ty), Seq(mkTermApp(mkTypeApp(HOLLess, simpLeft.ty), Seq(simpRight, simpLeft)), ===(simpLeft, simpRight)))
               case _ => mkApp(f, args.map(simpTermOrType))
             }

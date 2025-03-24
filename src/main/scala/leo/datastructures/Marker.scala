@@ -147,6 +147,11 @@ case class AnnotatedClause(id: Long, cl: Clause, role: Role, annotation: ClauseA
 object AnnotatedClause {
   @volatile private var counter: Long = 0
 
+  def apply(cl: Clause, annotation: ClauseAnnotation, propFlag: ClauseAnnotation.ClauseProp, fI: FurtherInfo): AnnotatedClause = {
+    counter += 1 // lets try it without sync ... see what happens
+    AnnotatedClause(counter, cl, Role_Plain, annotation, propFlag, fI)
+  }
+
   def apply(cl: Clause, r: Role, annotation: ClauseAnnotation, propFlag: ClauseAnnotation.ClauseProp, fI: FurtherInfo): AnnotatedClause = {
     counter += 1 // lets try it without sync ... see what happens
     AnnotatedClause(counter, cl, r, annotation, propFlag, fI)
@@ -166,9 +171,8 @@ abstract sealed class ClauseAnnotation extends Pretty {
   def parents: Seq[_ <: ClauseProxy]
 }
 
-class FurtherInfo (val literalsBeforeAfter0: Seq[Seq[Literal]] = Seq.empty, val test : String = ""){
-  val literalsBeforeAfter = literalsBeforeAfter0
-  var testInst:String = testInst + test
+case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
+                        val rwUnderBinder: Boolean = false){
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
   var addInfoBoolExt: Set[(Literal,Seq[Literal])] = Set.empty
   var addInfoSimp: Seq[(Seq[Int],Int)] = Seq.empty

@@ -120,6 +120,13 @@ object lpDatastructures {
 
   }
 
+  abstract class lpSimpRuleVersion extends lpStatement {
+    def term: lpTerm
+    def rwLeft: Boolean
+
+    def pretty = term.pretty
+  }
+
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
   ////////////////////////// LP META LOGIC /////////////////////////////////////////////////////////////////////////////////////////
@@ -208,12 +215,16 @@ object lpDatastructures {
       }
   }
 
-  case class lpFunctionApp(f: lpTerm, args: Seq[lpTerm], implicitArgs: Seq[lpTerm]= Seq.empty) extends lpTerm {
+  case class lpFunctionApp(f: lpTerm, args: Seq[lpTerm]= Seq.empty, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpTerm {
     override def pretty: String = {
       val gap1 = if(implicitArgs.isEmpty) "" else " "
       val gap2 = if(args.isEmpty) "" else " "
       s"(${f.pretty}$gap1${implicitArgs.map(arg => s"[${arg.pretty}]").mkString(" ")}$gap2${args.map(_.pretty).mkString(" ")})"
     }
+  }
+  object lpFunctionApp{
+    def toDefName(headSymbolName: String, args: Seq[lpTerm] = Seq.empty, implicitArgs: Seq[lpTerm] = Seq.empty): lpFunctionApp =
+      lpFunctionApp(lpConstantTerm(headSymbolName), args, implicitArgs)
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -483,13 +494,31 @@ object lpDatastructures {
     override def prf: liftedProp = throw new Exception(s"trying to lift ${lpElWitness.pretty} to meta")
   }
 
-  case class lpWitness(ty: lpType) extends lpOlTerm {
+  /*case class lpWitness(ty: lpType) extends lpOlTerm {
 
     if (! ty.isInstanceOf[lpOlType]) {throw new Exception(s"trying to create a witness of meta-level type ${ty.pretty}")}
     override def pretty: String = s"(${lpElWitness.pretty} ${ty.pretty})"
     override def prf: liftedProp =
       if (ty == lpOtype) liftedProp(lpWitness(ty))
       else throw new Exception(s"trying to encode ${lpWitness(ty).pretty} as a proof")
+  }
+
+   */
+  case class lpWitness(ty: lpOlType) extends lpOlTerm {
+    override def pretty: String =
+      s"(${lpElWitness.pretty} ${ty.pretty})"
+
+    override def prf: liftedProp = {
+      if (ty == lpOtype) liftedProp(lpWitness(ty))
+      else throw new Exception(s"trying to encode ${lpWitness(ty).pretty} as a proof")
+    }
+  }
+  object lpWitness {
+    def fromAnyType(ty: lpType): lpWitness = ty match {
+      case t: lpOlType => lpWitness(t)
+      case lpliftedObjectType(t0) => lpWitness(t0)
+      case _ => throw new Exception(s"trying to generate witness term for a type that is not an encoded HOL type: ${ty.pretty}")
+    }
   }
 
   case object lpOlNothing extends lpOlTerm {
@@ -787,24 +816,41 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpHave(name,ty, proofScript, tab)))
   }
 
+  case class lpEval(tacticTerm: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+
+    def addTab(i: Int): lpEval = lpEval(tacticTerm, tab + i)
+
+    override def pretty: String = {
+      val tabs: String = "\t" * tab
+      s"${tabs}eval ${tacticTerm.pretty}"
+    }
+
+    val tabs = "\t" * tab
+
+    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{eval ${tacticTerm.pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm: lpTerm, tab)))
+  }
+
   case class lpRewritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
     override def pretty: String = {
       s".[${patternVar.pretty} in ${pattern.pretty}]"
     }
   }
 
-  case class lpRewrite(rewritePattern0: Option[lpRewritePattern], rewriteTerm: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int){
-    def addTab(i : Int): lpRewrite =lpRewrite(rewritePattern0, rewriteTerm, tab + i)
+  case class lpRewrite(rewritePattern0: Option[lpRewritePattern], rewriteTerm: lpTerm, rwRhs: Boolean = false, tab: Int = 0) extends lpProofScriptStep(tab: Int){
+    def addTab(i : Int): lpRewrite =lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab + i)
     override def pretty: String = {
       val tabs: String = "\t" * tab
+      val maybeLeft: String = if(rwRhs) " left " else ""
       val rewritePattern = if (rewritePattern0.isDefined) s"${rewritePattern0.get.pretty} " else ""
-      s"${tabs}rewrite $rewritePattern${rewriteTerm.pretty}"
+      s"${tabs}rewrite$maybeLeft $rewritePattern${rewriteTerm.pretty}"
     }
 
     val tabs = "\t" * tab
-    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm).pretty}"
+    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm, rwRhs).pretty}"
 
-    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, tab)))
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab)))
   }
 
   case class lpReflexivity(tab: Int = 0) extends lpProofScriptStep(tab: Int) {

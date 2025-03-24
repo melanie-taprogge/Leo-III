@@ -12,157 +12,148 @@ import leo.modules.output.LPoutput.lpDatastructures._
 
 object SimplificationEncoding {
 
+  val allSimpRulesTermName = lpConstantTerm("applyAllSimplifications")
+
+  val allSimpRuleApplicationStep = lpEval(allSimpRulesTermName)
+
   val implicitArguments = false
 
   // map of names to the simplification rules and a boolean decoding weather or not we need type instanciation
   val SimpNeedsTyping:  Map[simplificationRules,Boolean] =
-    Map(Simp1_eq -> false,
-        Simp9_eq -> true,
-        Simp10_eq -> true,
-        Simp16_eq -> false,
+    Map(lpSimp_or_idem -> false,
+        lpSimp_eq_idem -> true,
+        lpSimp_negEq_idem -> true,
+        lpSimp_negTop -> false,
         )
 
   // map the names of the simplification rules to the names of the functions encoding them and a boolean indicating weather or not they need to be instanciated
   val SimpRuleMap: Map[Int,(simplificationRules,Boolean)] =
-    Map(1 -> (Simp1_eq, SimpNeedsTyping(Simp1_eq)),
-        31 -> (Simp9_eq, SimpNeedsTyping(Simp9_eq)),
-        37 -> (Simp10_eq, SimpNeedsTyping(Simp10_eq)),
-        24 -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)),
-        26 -> (Simp16_eq, SimpNeedsTyping(Simp16_eq)))
+    Map(1 -> (lpSimp_or_idem, SimpNeedsTyping(lpSimp_or_idem)),
+        31 -> (lpSimp_eq_idem, SimpNeedsTyping(lpSimp_eq_idem)),
+        37 -> (lpSimp_negEq_idem, SimpNeedsTyping(lpSimp_negEq_idem)),
+        24 -> (lpSimp_negTop, SimpNeedsTyping(lpSimp_negTop)),
+        26 -> (lpSimp_negTop, SimpNeedsTyping(lpSimp_negTop)))
 
   abstract class simplificationRules extends lpStatement{
     def name: lpConstantTerm
-
-    def ty: lpMlType
-
-    def proof: lpProofScript
-
-    def dec: lpDeclaration
   }
 
-  case object Simp1_eq extends simplificationRules {
-    // (π (x = (x ∨ x)))
+  // Idempotence and Contradiction for ∧ and ∨
 
-    val x1 = lpOlConstantTerm("x")
-
-    override def name: lpConstantTerm = lpConstantTerm("Simp1")
-
-    override def ty: lpMlType = lpMlDependType(Seq(lpUntypedVar(x1)),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,x1),x1).prf)
-
-    override def proof: lpProofScript = {
-      lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt x (x ∨ x) _ _ \n        {assume h2;\n        refine ∨ᵢ₁ h2}\n        {assume h1;\n        refine ∨ₑ h1 _ _\n            {assume h2;\n            refine h2}\n            {assume h2;\n            refine h2}}")))
-    }
-
-    val arguments: Seq[lpVariable] =
-      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${x1.pretty}]")))
-      else Seq(lpUntypedVar(x1))
-
-    override def dec: lpDeclaration = lpDeclaration(Simp1_eq.name,arguments,ty)
-
-    override def pretty: String = lpDefinition(Simp1_eq.name, arguments, Some(ty), proof).pretty
+  // 6
+  /** Rule (x : τ T): π ((x ∨ x) = x) */
+  case object lpSimp_or_idem extends simplificationRules {
+   override def name: lpConstantTerm = lpConstantTerm("∨_idem")
+    override def pretty: String = name.pretty
   }
 
-  case object Simp7_eq extends simplificationRules {
+  // Disjunction/Conjunction with ⊤ / ⊥
 
-    val x1 = lpOlConstantTerm("x")
-
-    override def name: lpConstantTerm = lpConstantTerm("simp7")
-
-    // π (x = (x ∨ ⊥))
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,x1,lpOlUntypedBinaryConnectiveTerm(lpOr,x1,lpOlBot)).prf
-
-    override def proof: lpProofScript = {
-      lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt x (x ∨ ⊥) _ _ \n        {assume h1;\n        refine ∨ᵢ₁ h1}\n        {assume h1;\n        refine ∨ₑ h1 _ _\n            {assume h2;\n            refine h2}\n            {assume h2;\n            refine ⊥ₑ h2}}")))
-    }
-
-    val arguments: Seq[lpVariable] =
-      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${x1.pretty}]")))
-      else Seq(lpUntypedVar(x1))
-
-    override def dec: lpDeclaration = lpDeclaration(Simp7_eq.name,arguments,ty)
-
-    override def pretty: String = lpDefinition(Simp7_eq.name, arguments, Some(ty), proof).pretty
+  // 14
+  /** Rule (x : τ T): π ((x ∨ ⊥) = x) */
+  case object lpSimp_orBot extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("∨⊥")
+    override def pretty: String = name.pretty
   }
 
-  case object Simp9_eq extends simplificationRules {
+  // Negation of ⊤ and ⊥
 
-    val T =lpOlUserDefinedType("T")
-    val x1 = lpOlConstantTerm("x")
-
-    override def name: lpConstantTerm = lpConstantTerm("Simp9")
-
-    // (T : Set) (x : τ T): (π ( ⊤ = (x = x)))
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,T,x1,x1),lpOlTop).prf
-
-    override def proof: lpProofScript = {
-      lpProofScript(Seq(lpProofScriptStringProof("assume T x;\n    refine propExt ⊤ (x = x) _ _ \n        {assume h1;\n        refine eq_refl x}\n        {assume h1;\n        refine ⊤ᵢ}")))
-    }
-
-    val arguments: Seq[lpVariable] =
-      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${T.pretty}${x1.pretty}]")))
-      else Seq(lpUntypedVar(T),lpUntypedVar(x1))
-
-    override def dec: lpDeclaration = lpDeclaration(Simp9_eq.name,arguments,ty)
-
-    override def pretty: String = lpDefinition(Simp9_eq.name, arguments, Some(ty), proof).pretty
+  // 18
+  /** Rule π (¬ ⊤ = ⊥) */
+  case object lpSimp_negTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬⊤")
+    override def pretty: String = name.pretty
   }
 
-  case object Simp10_eq extends simplificationRules {
+  //Equalities
 
-    val T = lpOlUserDefinedType("T")
-    val x1 = lpOlTypedVar(lpOlConstantTerm("x"),T)
-
-    override def name: lpConstantTerm = lpConstantTerm("simp10")
-
-    // (T : Set) (x : τ T): (π (⊥ = (¬ (x = x))))
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, lpOlTypedBinaryConnectiveTerm(lpInEq, T, x1.name, x1.name)).prf
-
-    override def proof: lpProofScript = {
-      lpProofScript(Seq(lpProofScriptStringProof("assume T x;\n    refine propExt ⊥ (¬ (x = x)) _ _ \n        {assume h1;\n        refine ⊥ₑ h1}\n        {assume h1;\n        have H1: π (x = x) → π ⊥\n            {assume h2;\n            refine h1 h2};\n        refine H1 (eq_refl [T] x)}")))
-    }
-
-    val arguments: Seq[lpVariable] =
-      if (implicitArguments) Seq(lpUntypedVar(lpConstantTerm(s"[${T.pretty}${x1.pretty}]")))
-      else Seq(lpUntypedVar(T),lpUntypedVar(x1))
-
-    override def dec: lpDeclaration = lpDeclaration(Simp10_eq.name,arguments,ty)
-
-    override def pretty: String = lpDefinition(Simp10_eq.name, arguments, Some(ty), proof).pretty
+  // 20
+  /** Rule (T : Set) (x : τ T): (π ((x = x) = ⊤)) */
+  case object lpSimp_eq_idem extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("=_idem")
+    override def pretty: String = name.pretty
   }
 
-  case object Simp16_eq extends simplificationRules {
-
-    override def name: lpConstantTerm = lpConstantTerm("simp16")
-
-    // (π (⊥ = (¬ ⊤)))
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype, lpOlBot, lpOlUnaryConnectiveTerm(lpNot,lpOlTop)).prf
-
-    override def proof: lpProofScript = {
-      lpProofScript(Seq(lpProofScriptStringProof("refine propExt ⊥ (¬ ⊤) _ _ \n        {assume h1;\n        refine ⊥ₑ h1}\n        {assume h1;\n        refine h1 ⊤ᵢ}")))
-    }
-
-    override def dec: lpDeclaration = lpDeclaration(Simp16_eq.name,Seq.empty,ty)
-
-    override def pretty: String = lpDefinition(Simp16_eq.name, Seq.empty, Some(ty), proof).pretty
+  // 21
+  /** Rule (T : Set) (x : τ T): π (¬ (x = x) = ⊥) */
+  case object lpSimp_negEq_idem extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬=_idem")
+    override def pretty: String = name.pretty
   }
 
-  case object Simp17_eq extends simplificationRules {
+  // 22
+  /** Rule (x : τ o): π ((x = ⊤) = x) */
+  case object lpSimp_eqTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("=⊤")
+    override def pretty: String = name.pretty
+  }
 
-    val x = lpOlConstantTerm("x")
+  // 23
+  /** Rule (x : τ o): π ((⊤ = x) = x) */
+  case object lpSimp_topEq extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("⊤=")
+    override def pretty: String = name.pretty
+  }
 
-    override def name: lpConstantTerm = lpConstantTerm("simp17")
+  // 24
+  /** Rule (x : τ o): π (¬(x = ⊤) = ¬ x) */
+  case object lpSimp_negEqTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬=⊤")
+    override def pretty: String = name.pretty
+  }
 
+  // 26
+  /** Rule (x : τ o): π ((x = ⊥) = ¬ x) */
+  case object lpSimp_eqBot extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("=⊥")
+    override def pretty: String = name.pretty
+  }
+
+  // 27
+  /** Rule (x : τ o): π ((⊥ = x) = ¬ x) */
+  case object lpSimp_botEq extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("⊥=")
+    override def pretty: String = name.pretty
+  }
+
+  // 28
+  /** Rule (x : τ o): π (¬ (x = ⊥) = x) */
+  case object lpSimp_negEqBot extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬=⊥")
+    override def pretty: String = name.pretty
+  }
+
+  //Equalities with negations
+
+  // 30
+  /** Rule (x : τ o): π ((¬ x = ⊤) = ¬ x) */
+  case object lpSimp_notEqTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("neg=⊤")
+    override def pretty: String = name.pretty
+  }
+
+  // 32
+  /** Rule (x : τ o): π (¬(¬ x = ⊤) = x) */
+  case object lpSimp_negNotEqTop extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("¬neg=⊤")
+    override def pretty: String = name.pretty
+  }
+
+  // 36
+  /** Rule (x : τ o):π (¬(¬ x = ⊥) = ¬ x) */
+  case object lpSimp_negNotEqBot extends simplificationRules {
+    // π (¬(¬ x = ⊥) = ¬ x)
+    override def name: lpConstantTerm = lpConstantTerm("¬neg=⊥")
+    override def pretty: String = name.pretty
+  }
+
+  // Simplifications reflecting Classical Principles
+
+  // 52
+  case object lpSimp_dne extends simplificationRules {
     // x: (π (x = (¬ ¬ x)))
-    override def ty: lpMlType = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, x, lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,x))).prf
-
-    override def proof: lpProofScript = {
-      lpProofScript(Seq(lpProofScriptStringProof("assume x;\n    refine propExt x (¬ ¬ x) _ _ \n        {assume h1 h2;\n        refine h2 h1}\n        {assume h1;\n        refine dne x h1}")))
-    }
-
-    override def dec: lpDeclaration = lpDeclaration(Simp17_eq.name, Seq(x), ty)
-
-    override def pretty: String = lpDefinition(Simp17_eq.name, Seq(x), Some(ty), proof).pretty
-
+    override def name: lpConstantTerm = lpConstantTerm("¬¬ₑ_eq")
+    override def pretty: String = name.pretty
     def instanciate(a: lpOlTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(a))
     }

@@ -1,13 +1,15 @@
 package leo.modules.output.LPoutput
 import leo.Out
-import leo.datastructures.Literal.{asTerm}
+import leo.datastructures.Literal.asTerm
 import leo.modules.output.LPoutput.Encodings._
-import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term}
+import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature._
+import leo.modules.calculus.PolaritySwitch
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
+import leo.modules.calculus.Simp.normalize
 
 import scala.collection.mutable
 
@@ -84,11 +86,11 @@ object ModularProofEncoding {
 
           // i)  Define an equality term to rewrite (¬ ¬ a) to a using the have tactic
           val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encLeft, lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,encLeft)))
-          val polaritySwitchStep = lpRefine(Simp17_eq.instanciate(encLeft))
+          val polaritySwitchStep = lpRefine(lpFunctionApp(lpStd_eq_sym,Seq(lpSimp_dne.instanciate(encLeft))))
           val polaritySwitchName = s"PolaritySwitch_lit$litCount"
           val havepolaritySwitchStep = lpHave(polaritySwitchName, equalityToProve.prf, lpProofScript(Seq(polaritySwitchStep)))
           allSteps = allSteps :+ havepolaritySwitchStep
-          usedSymbols = usedSymbols + Simp17_eq
+          usedSymbols = usedSymbols + lpSimp_dne
 
           // ii) Rewrite the Literal
           val posInClause = findLitInClause(transfLit, child.cl)
@@ -1095,7 +1097,167 @@ object ModularProofEncoding {
     (proofScript, usedSymbols)
   }
 
-  // encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
+  def inferImplicitTransformationsSimp(parentLits: Seq[Literal], childLen: Int, bVarMap: Map[Int, String], sig: Signature): (Seq[Literal], Seq[Int], Seq[lpProofScriptStep], Seq[lpStatement]) = {
+
+    // Applies simplification to the given literals and then applies the operations carried out by Leo-III that can potentialy lead to the literal
+    // being flipped or transformed in any other way. Then forms a new sequence omitting any literals that reduce to F or have already been
+    // derived and - in the process - keeps track of this information in order to apply the necessary implicit transformations
+
+    var simpLits = Seq.empty[Literal]
+    var doubleLiterals = Seq.empty[Int]
+    var implicitRwTransf = Seq.empty[lpProofScriptStep]
+    var usedSymbolsTransf = Seq.empty[lpStatement]
+
+    // Helper function that updates doubleLiterals and simpLits if the literal is not false.
+    def addLiteral(lit: Literal): Unit = {
+      if (!Literal.isFalse(lit)) {
+        val idx = if (simpLits.contains(lit)) simpLits.indexOf(lit) else doubleLiterals.distinct.length
+        doubleLiterals = doubleLiterals :+ idx
+        if (!simpLits.contains(lit)) simpLits = simpLits :+ lit
+      }
+    }
+
+    // Process each literal from the parent.
+    parentLits.foreach { parentLit =>
+      if (!parentLit.equational) {
+        val lit = PolaritySwitch(Literal(normalize(parentLit.left), parentLit.polarity))
+        addLiteral(lit)
+      } else {
+        val normLeft = normalize(parentLit.left)
+        val normRight = normalize(parentLit.right)
+        if (normLeft == normRight) {
+          val lit = PolaritySwitch(Literal(LitTrue(), parentLit.polarity))
+          addLiteral(lit)
+        } else {
+          val maybeOrderedLit = PolaritySwitch(Literal.mkLit(normLeft, normRight, parentLit.polarity, parentLit.oriented))
+          val unorderedLit = PolaritySwitch(Literal.mkLit(normLeft, normRight, parentLit.polarity, false))
+          addLiteral(unorderedLit)
+          // Update doubleLiterals for the unordered literal.
+          //doubleLiterals = doubleLiterals :+ (
+          //  if (simpLits.contains(unorderedLit)) simpLits.indexOf(unorderedLit)
+          //  else doubleLiterals.distinct.length
+          //  )
+          if (!simpLits.contains(unorderedLit) && !Literal.isFalse(unorderedLit)) {
+          //  simpLits = simpLits :+ unorderedLit
+
+            // Test if a transformation is required
+            if (maybeOrderedLit != unorderedLit) {
+              val encOrigLit = lpLiteral(maybeOrderedLit, bVarMap, sig)
+              val encDesiredLit = lpLiteral(unorderedLit, bVarMap, sig)
+              throw new Exception(s"Required implicit transformation in SIMP encoding from ${encOrigLit.term.pretty} to ${encDesiredLit.term.pretty}!")
+              // todo: the following implments implicit transformations, but it is not yet tested.
+              //  Comment the exception and test carefully.
+              val (transformSteps, usedSymbols0, canEncode) = transformLiteral(encOrigLit.term, encDesiredLit.term, simpLits.length, childLen)
+              if (!canEncode) throw new Exception(s"LP-Encoding SIMP: could not transform ${encOrigLit.term.pretty} to ${encDesiredLit.term.pretty}")
+              implicitRwTransf = implicitRwTransf ++ transformSteps
+              usedSymbolsTransf = usedSymbolsTransf ++ usedSymbols0
+            }
+          }
+        }
+      }
+    }
+
+    assert(simpLits.length == childLen, s"LP-Encoding: Lengths of derived and given simplifications differ. Derived clause: ${simpLits.length} literals, given Clause: ${childLen} literals.")
+    // If no literals were added, default to false.
+    if (simpLits.isEmpty)
+      simpLits = Seq(Literal(LitFalse(), true))
+    if (doubleLiterals.isEmpty)
+      doubleLiterals = Seq(0)
+
+    (simpLits, doubleLiterals, implicitRwTransf, usedSymbolsTransf)
+  }
+
+  def lpEncodingPrelim(child: Clause, parents: Seq[Clause], allVariables: Seq[(Int, Type)], sig: Signature):(lpClauseInst, Seq[ lpClauseInst], Map[Int, String], Seq[lpAssume])={
+    val encParents = parents.map(parent => lpClauseInst(parent, sig))
+    val encChild = lpClauseInst(child, sig)
+    val bVarMap = clauseVars2LP(allVariables, sig, Set.empty)._2
+    // Instanciate the initial step abstracting over the free variables of the child
+    val initialStep = if (encChild.metaVars.nonEmpty) Seq(lpAssume(encChild.metaVars)) else Seq()
+    (encChild, encParents, bVarMap, initialStep)
+  }
+
+  def lpImpHaveStepConstructor(stepName: String, quantifiedVars: Seq[lpTypedVar], termBefore: lpOlTerm, termAfter: lpOlTerm, proofScriptSteps: Seq[lpProofScriptStep]): lpHave = {
+    // Function constructing subproofs for one clause implying another using the have-tactic with potential...
+    // - Abstraction over variables
+
+    val impToProve = lpOlUntypedBinaryConnectiveTerm(lpImp, termBefore, termAfter)
+    // Quantify over variables if necessary
+    val (maybeQuanrifiedImpToProve, fullProofScript) =
+      if (quantifiedVars.isEmpty) (impToProve.prf, lpProofScript(proofScriptSteps))
+      else (lpMlDependType(quantifiedVars, impToProve.prf), lpProofScript(Seq(lpAssume(quantifiedVars)) ++ proofScriptSteps))
+    // Complete substep using have-tactic
+    val haveSimpAppStep = lpHave(stepName, maybeQuanrifiedImpToProve, fullProofScript)
+    haveSimpAppStep
+  }
+
+  def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpConstantTerm, sig: Signature):(Seq[lpProofScriptStep],Set[lpStatement])={
+
+    // Encoding of the simplification via exhaustive application of the encoded boolean equalities via the rewrite tactic
+    // The modular proof script can consist of the following steps:
+    // 1. Abstract over free variables
+    // 2. Instaniate a subproof (SimpApp) using the "have"-tactic to proof that the parent implies the child by applying
+    //    all of the simplification rules as well as the rule for polarity switch to the parent
+    //    -> If the parent has implicitly quantified variables that disappear as an effect of the simplification,
+    //       we include them in the have-step, assume them and apply their corresponding witness terms in the Refine-step
+    // 3. Apply Implicit transformations: Deletion of double literals and eqSym
+    // 4. Refine with the parent applied to SimpApp (and apply witness terms in case the parent has disappearing vars as a
+    //    consequence of simplification)
+
+    // todo: No example needed implicit eq-sym or other literal transformations so far
+    //  Even though thi is implemented, it is therefore not yet tested -> test implementation
+
+    /////////////////////////////////////////////////////
+    //// preliminary and 1. Abstract over free variables
+
+    val (encChild,encParent0,bVarMap,initialStep) = lpEncodingPrelim(child,Seq(parent),parent.implicitlyBound,sig)
+    assert(encParent0.length == 1)
+    val encParent = encParent0.head
+    Out.lp_debug_info(s"Encoding simplification of ${encParent.term.pretty} to ${encChild.term.pretty}")
+
+    // Identify any implicit transformations that may need to be encoded
+    val (simpLits, doubleLiterals, implicitRwTransf, usedSymbolsTransf) = inferImplicitTransformationsSimp(parent.lits,child.lits.length,bVarMap,sig)
+    val encSimpLits = simpLits.map(simpLit => lpLiteral(simpLit,bVarMap,sig).term)
+
+
+    /////////////////////////////////////////////////////
+    //// 2. Instaniate a subproof (SimpApp) using have to proof that the parent implies the child
+    ////    by applying all of the simplification rules to the parent
+
+    // If we need to account for the deletion of double literals, we include the duplicates in the implication we construct
+    //    and remove them in an additional step
+    val clauseToProve = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,doubleLiterals.map(indx => encSimpLits(indx)))
+    // Identify any variables that were implicitly quantified in the parent but not in the child
+    val disappearingVars = encParent.metaVars.diff(encChild.metaVars)
+    // Step applying all of the RW-rules encoding the simplifications
+    val simpAppStepName = "SimpApp"
+    val haveSimpAppStep = lpImpHaveStepConstructor(simpAppStepName,disappearingVars,encParent.term,clauseToProve,Seq(allSimpRuleApplicationStep))
+
+
+    /////////////////////////////////////////////////////
+    //// 3. Apply Implicit transformations: Deletion of double literals and eqSym
+
+    val witnessTermsToApply = disappearingVars.map(var0 => lpWitness.fromAnyType(var0.ty))
+    val allTermsToApplyToParent = encParent.metaVars.map(var0 => if (disappearingVars.contains(var0)) lpWitness.fromAnyType(var0.ty) else var0)
+    val appliedSimpAppStepName = lpFunctionApp.toDefName(simpAppStepName,witnessTermsToApply)
+    val simpStepName = lpFunctionApp(appliedSimpAppStepName,Seq(lpFunctionApp(parentNameLpEnc, allTermsToApplyToParent)))
+    val (maybePerm, maybePermStepName): (Set[lpStatement], lpFunctionApp) = if (doubleLiterals != doubleLiterals.indices) {
+      // Application of delete literal is necessary
+      // todo: exclude cases where the rewrite rule applied by LP would also handle it. (should only happen if the relevant literals are at the two most left ones right?)
+      Out.lp_debug_info(s"need to prove ${doubleLiterals.map(indx => encChild.lits(indx).pretty)}")
+      val instMetaDelTheorem = metaDeletion.instanciate(encChild.lits,doubleLiterals,simpStepName)
+      (Set(metaPermutation),instMetaDelTheorem)
+    } else (Set(), simpStepName)
+
+
+    /////////////////////////////////////////////////////
+    //// 4. Refine with the parent applied to SimpApp
+
+    val refineStep = lpRefine(maybePermStepName)
+    val allSteps : Seq[lpProofScriptStep] = ((initialStep :+ haveSimpAppStep) ++ implicitRwTransf) :+ refineStep
+
+    (allSteps,maybePerm ++ usedSymbolsTransf)
+  }
+
   def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Option[String]) = { //: (lpProofScript, Set[lpStatement]) = {
 
     // encode the lift of equality literals
@@ -1304,13 +1466,13 @@ object ModularProofEncoding {
           // Choose the fitting rule for the transformation todo: aso use the general skript here
           val (haveTransformStep, usedSymbols0) = if (rwPol) {
             val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTop, rwLhs)
-            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkTopEqPosProp_script(sourceBeforeEq.pretty).name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
-            (haveTransformStep0, mkTopEqPosProp_script())
+            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkTopEqPosProp.term), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
+            (haveTransformStep0, mkTopEqPosProp)
           } else {
             rwRhs = lpOlBot
             val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, rwLhs)
-            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkBotEqNegProp_script(sourceBeforeEq.pretty).name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
-            (haveTransformStep0, mkBotEqNegProp_script())
+            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkBotEqNegProp.term), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
+            (haveTransformStep0, mkBotEqNegProp)
           }
           Out.lp_debug_info(s"Transforming rewrite rule to equality...")
           //  2 b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly todo: sbustitution
@@ -1498,9 +1660,9 @@ object ModularProofEncoding {
 
     // in both cases, the second step is the removal of ⊥ from the clause. This can be done using Simp7:
     val rewritePattern_step2 = generateClausePatternTerm(Seq(position - 1), parent.lits.length - 1, None, patternVar)
-    val rewriteStep_step2 = lpRewrite(rewritePattern_step2, SimplificationEncoding.Simp7_eq.name)
+    val rewriteStep_step2 = lpRewrite(rewritePattern_step2, SimplificationEncoding.lpSimp_orBot.name,true)
     rewriteSteps = rewriteSteps :+ rewriteStep_step2
-    usedSymbols = usedSymbols + SimplificationEncoding.Simp7_eq
+    usedSymbols = usedSymbols + SimplificationEncoding.lpSimp_orBot
 
     // proof the first transformation depending on the form of the unification constraint
     val rewritePattern_step1 = generateClausePatternTerm(Seq(position), parent.lits.length, None, patternVar)
@@ -1516,16 +1678,16 @@ object ModularProofEncoding {
           case _ =>
             throw new Exception("attempting to instanciate Simp10 inappropriateley")
         }
-        val rewriteStep_step1 = lpRewrite(rewritePattern_step1, lpFunctionApp(SimplificationEncoding.Simp10_eq.name,Seq(ty, lastLit)))
+        val rewriteStep_step1 = lpRewrite(rewritePattern_step1, lpFunctionApp(SimplificationEncoding.lpSimp_negEq_idem.name,Seq(ty, lastLit)),true)
         rewriteSteps = rewriteSteps :+ rewriteStep_step1
-        usedSymbols = usedSymbols + SimplificationEncoding.Simp10_eq
+        usedSymbols = usedSymbols + SimplificationEncoding.lpSimp_negEq_idem
       } else throw new Exception(s"Equational positive unification constratint passed on to lambdapi post eqFact encoding?")
     }else{
       // in this case simply we need to prove that 1. ¬⊤ = ⊥
       if (!uniC.polarity){
-        val rewriteStep_step1 = lpRewrite(rewritePattern_step1, SimplificationEncoding.Simp16_eq.name)
+        val rewriteStep_step1 = lpRewrite(rewritePattern_step1, SimplificationEncoding.lpSimp_negTop.name,true)
         rewriteSteps = rewriteSteps :+ rewriteStep_step1
-        usedSymbols = usedSymbols + SimplificationEncoding.Simp16_eq
+        usedSymbols = usedSymbols + SimplificationEncoding.lpSimp_negTop
       }else{
         throw new Exception(s"Error: unification constraint passed to LP encoding is non equational and positive")
       }

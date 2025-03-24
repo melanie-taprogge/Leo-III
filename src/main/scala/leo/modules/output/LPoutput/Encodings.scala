@@ -401,7 +401,14 @@ object Encodings {
                         term: lpOlTerm,
                         pol: Boolean,
                         eq: Boolean
-                      )
+                      ){
+    def normPol: lpLiteral = {
+      if (eq) (left, right) match {
+        case (lpOlUnaryConnectiveTerm(`lpNot`,left0),lpOlUnaryConnectiveTerm(`lpNot`,right0)) => lpLiteral(left0,right0,lpOtype,pol,eq)
+        case _ => this
+      } else this
+    }
+  }
   object lpLiteral {
     def constructFullLit (encLeft: lpOlTerm, encRight: lpOlTerm, encTy: lpOlType, pol: Boolean, eq: Boolean): lpOlTerm ={
       val encTerm0 = if (eq) lpOlTypedBinaryConnectiveTerm(lpEq, encTy, encLeft, encRight) else encLeft
@@ -434,6 +441,25 @@ object Encodings {
         case lhs =>
           lpLiteral(lhs, lpOlTop, lpOtype, true, false)
       }
+    }
+  }
+
+  case class lpClauseInst(
+                     term: lpOlTerm,
+                     lits: Seq[lpOlTerm],
+                     vars: Seq[Either[lpOlTypedVar, lpOlTyVar]]
+                     ){
+    /** Returns `vars` as a plain sequence of `lpOlTerm`. */
+    def metaVars: Seq[lpTypedVar] = vars.map{
+      case Left(typedVar) => typedVar.asMlVar
+      case Right(tyVar) => tyVar.asMlVar
+    }
+  }
+
+  object lpClauseInst{
+    def apply(cl: Clause, sig: Signature): lpClauseInst ={
+      val encClause = clause2LP_unquantified(cl,Set.empty,sig)
+      lpClauseInst(encClause._2,encClause._2.args,encClause._1)
     }
   }
 }
