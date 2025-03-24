@@ -10,12 +10,19 @@ In this version, LEO-III has been enhanced to generate verifiable proof output f
 - Generally, the proofs follow the same pattern as the proofs given by LEO-III in the TSTP format, but the steps of the proof are presented as substeps in the Lambdapi scripts.
 - So far, only a part of the inference rules have been implemented and some of their instances my requre additional steps that have not yet been encoded. Any steps that cannot be encoded yet are given as assumptions.
 
-**Requirements:**  
-- You must have the latest releases of both [Lambdapi](https://github.com/Deducteam/lambdapi) and the [Lambdapi Standard Library](https://github.com/Deducteam/lambdapi-stdlib) installed.
+
+**Dependencies:**  
+Some of the encodings rely on features added after the latest stable releases of Lambdapi and the Lambdapi Standard Library. You must install the latest development versions of both. Please follow the instructions in the respective repositories for:
+- [Lambdapi](https://github.com/Deducteam/lambdapi)
+- [Lambdapi Standard Library](https://github.com/Deducteam/lambdapi-stdlib)
+
+Furthermore, the [library for Leo-III encodings in Lambdapi](https://github.com/melanie-taprogge/Leo-III-lambdapi-lib) is required and can be installed by following the instructions provided in its GitHub repository.
+
 
 **References:**  
 - This project is described in a paper currently submitted for publication: *"Towards the Verification of Higher-Order Logic Automated Reasoning"* by Taprogge, Blanqui, and Steen.
 - It originates from the work presented in the Master's thesis available [here](https://inria.hal.science/hal-04733263v1).
+
 
 <details>
 <summary>Original LEO-III README.md</summary>
