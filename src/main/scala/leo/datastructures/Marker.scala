@@ -178,7 +178,7 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
   var addInfoSimp: Seq[(Seq[Int],Int)] = Seq.empty
   // unification of types and simplification are represented as booleans for now, eventually I can replace this with information necessary to also encode these steps
   var addInfoEqFac: (Literal,Literal,Literal,Literal,Boolean,Boolean) = (Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),false,false)
-  var addInfoDefExp: Seq[Signature.Key] = Seq.empty
+  var addInfoDefExp:Option[Literal] = None
   var addInfoUniRule: (String,(Literal,Literal)) = ("",(Literal(LitFalse(),false),Literal(LitFalse(),false))) // todo for now I am doing it this way but maybe if i do not need this for other rules as well it would be better to use tuples
   var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
   var addInfoRewriting: Option[Clause] = None

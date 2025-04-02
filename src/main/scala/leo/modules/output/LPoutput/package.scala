@@ -72,7 +72,7 @@ package object LPoutput {
 
   final def lpEscapeName(str: String, sig: Signature): String = {
     if (partiallyAlliedTPTPmap.keySet.contains(str)) {
-      throw new Exception(s"trying to escape name for parially applied connective, this should not happen")
+      throw new Exception(s"trying to escape name for parially applied connective $str, this should not happen")
     } //throw new Exception(s"found illegal $str")
     else if (lpKeywords.contains(str)) {
       val newName = findSafeName(str, sig)
@@ -96,6 +96,11 @@ package object LPoutput {
       val safeName = lpEscapeName(str, sig)
       lpOlConstantTerm(safeName)
     }
+  }
+
+  def applyAnyStep(listOfTacitcs: lpOlTerm) = {
+    // todo: figure out where this sould actually be
+    lpOlFunctionApp(lpOlConstantTerm("applyAny"), Seq(Left(listOfTacitcs)))
   }
 
   def liftVarsToMeta(vars:  Seq[Either[lpOlTypedVar, lpOlTyVar]]): Seq[lpTypedVar]={

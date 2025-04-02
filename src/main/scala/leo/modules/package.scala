@@ -117,6 +117,33 @@ package object modules {
     sb.dropRight(1).toString()
   }
 
+  def saturatedUserSignature(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): Set[Signature.Key] = {
+    // Recursively generate a list of all symbols that that occur in definitions
+
+    // Start with user constants that appear in the proof or are type symbols
+    val relevantSymbols = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)
+
+    // Keep track of which symbols we have already processed
+    var visited = Set.empty[Signature.Key]
+
+    def saturate(sym: Signature.Key): Unit = {
+      // Only explore sym if it is not already visited
+      if (!visited.contains(sym)) {
+        visited += sym
+        val info = sig(sym)
+        // If the symbol has a definition, recursively saturate all symbols in that definition
+        if (info.hasDefn) {
+          val defnSymbols = info._defn.symbols.toSet intersect sig.allUserConstants
+          defnSymbols.foreach(saturate)
+        }
+      }
+    }
+
+    // Recursively saturate all initially relevant symbols
+    relevantSymbols.foreach(saturate)
+    relevantSymbols ++ visited
+  }
+
   def userSignature(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): (Set[Signature.Key],Set[Signature.Key]) ={
     /* start with user symbols that occur in the proof, plus type symbols */
     val relevantSymbols: Set[Signature.Key] = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)

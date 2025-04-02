@@ -348,8 +348,11 @@ object Encodings {
 
       case TypeLambda(_) =>
         val (tyAbsCount, body) = collectTyLambdas(0, t)
+        val tyVars = (1 to tyAbsCount).map(n => Right(lpOlTyVar(s"T${intToName(n -1)}")))
+        val (encBody, updatedUsedSymbols) = term2LP(body,bVars,sig,usedSymbols)
         // todo: not really sure how this should be encoded, check with examples
-        throw new Error(s"encountered typeLambda, this is not encoded yet ${t.pretty}")
+        //throw new Error(s"encountered typeLambda, this is not encoded yet ${t.pretty}")
+        (lpOlLambdaTerm(tyVars,encBody),updatedUsedSymbols)
 
       // match pattern of application
       case _@Symbol(id) ∙ args if leo.modules.input.InputProcessing.adHocPolymorphicArithmeticConstants.contains(id) =>

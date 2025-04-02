@@ -71,11 +71,8 @@ object lpDatastructures {
     }
   }
 
-  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], typing: Option[lpMlType], proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier0: Seq[lpKeyword]= Seq.empty) extends lpStatement {
+  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], maybeTyping: Option[lpMlType], proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier: Seq[lpKeyword]= Seq.empty) extends lpStatement {
     override def pretty: String = {
-
-      var modifier = modifier0
-      if (!modifier.contains(lpOpaque)) modifier = modifier :+ lpOpaque
 
       val proofEnc = proof match {
         case _ : lpTerm =>
@@ -95,9 +92,11 @@ object lpDatastructures {
         case others => s"${others.pretty}"
       }
 
+      val typing = if (maybeTyping.isDefined) s": ${maybeTyping.get.pretty}" else ""
+
       val gap1 = if (implicitArgs.isEmpty) "" else " "
       val gap2 = if (variables.isEmpty) "" else " "
-      s"${modifier.map(mod => s"${mod.pretty} ").mkString("")}symbol ${name.pretty}$gap1${typedImpArgs.mkString(" ")}$gap2${typedVars.mkString(" ")}:${if (typing.isDefined) typing.get.pretty} ≔\n${proofEnc};\n"
+      s"${modifier.map(mod => s"${mod.pretty} ").mkString("")}symbol ${name.pretty}$gap1${typedImpArgs.mkString(" ")}$gap2${typedVars.mkString(" ")}$typing ≔${if (maybeTyping.isDefined) "\n" else " "}${proofEnc};\n"
     }
   }
 
@@ -782,7 +781,7 @@ object lpDatastructures {
 
   }
 
-  case class lpRefine(t: lpFunctionApp, subproofs: Seq[lpProofScript] = Seq.empty, tab: Int = 0) extends lpProofScriptStep(tab: Int){
+  case class lpRefine(t: lpTerm, subproofs: Seq[lpProofScript] = Seq.empty, tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpRefine = lpRefine(t, subproofs, tab + i)
     override def pretty: String = {
       val tabs = "\t"*tab
@@ -840,6 +839,17 @@ object lpDatastructures {
 
   case class lpRewrite(rewritePattern0: Option[lpRewritePattern], rewriteTerm: lpTerm, rwRhs: Boolean = false, tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpRewrite =lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab + i)
+
+    val asOlTerm = "#rewrite"
+
+    lazy val olTermApp = {
+      assert(!rewritePattern0.isDefined && rwRhs == false, s"LP-Encoding: Trying to use $asOlTerm with rewrite pattern or keyword left")
+      rewriteTerm match {
+        case t:lpOlTerm => lpOlFunctionApp(lpOlConstantTerm(asOlTerm),Seq(Left(t)))
+        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${rewriteTerm.pretty} to $asOlTerm")
+      }
+    }
+
     override def pretty: String = {
       val tabs: String = "\t" * tab
       val maybeLeft: String = if(rwRhs) " left " else ""
@@ -878,4 +888,44 @@ object lpDatastructures {
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpAssume(vars, tab)))
   }
+
+  case class lpTacSimplify(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    def addTab(i: Int): lpTacSimplify = lpTacSimplify(tab + i)
+
+    override def pretty: String = {
+      val tabs: String = "\t" * tab
+      s"${tabs}simplify"
+    }
+
+    val tabs = "\t" * tab
+
+    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{simplify"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpTacSimplify(tab)))
+  }
+
+  case class lpRepeat(stepToRepeat: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    def addTab(i: Int): lpRepeat = lpRepeat(stepToRepeat, tab + i)
+
+    val asOlTerm = "#repeat"
+
+    val olTermApp = {
+      stepToRepeat match {
+        case t: lpOlTerm => lpOlFunctionApp(lpOlConstantTerm(asOlTerm), Seq(Left(t)))
+        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${stepToRepeat.pretty} to $asOlTerm")
+      }
+    }
+
+    override def pretty: String = {
+      val tabs: String = "\t" * tab
+      s"${tabs}repeat ${stepToRepeat.pretty}"
+    }
+
+    val tabs = "\t" * tab
+
+    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{repeat ${stepToRepeat.pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRepeat(stepToRepeat, tab)))
+  }
+
 }

@@ -1831,11 +1831,10 @@ package inferenceControl {
         assert(Clause.unit(cl.cl))
         val lit = cl.cl.lits.head
         assert(!lit.equational)
-        val (newleft, addInfoSimp, addInforDefExp) = DefExpSimp.apply_andTrack(lit.left)(sig)
-        val information: FurtherInfo = cl.furtherInfo
-        information.addInfoSimp = information.addInfoSimp ++ addInfoSimp
-        information.addInfoDefExp = information.addInfoDefExp ++ addInforDefExp
-        val result = AnnotatedClause(Clause(Literal(newleft, lit.polarity)), Role_Plain, InferredFrom(DefExpSimp, cl), cl.properties, information)
+        val (newleft, rwUnderBinder0, addInforDefExp) = DefExpSimp.apply_andTrack(lit.left)(sig)
+        val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rwUnderBinder0)
+        furtherInfo.addInfoDefExp = Some(Literal(addInforDefExp, lit.polarity))
+        val result = AnnotatedClause(Clause(Literal(newleft, lit.polarity)), Role_Plain, InferredFrom(DefExpSimp, cl), cl.properties, furtherInfo)
         Out.trace(s"Def expansion: ${result.pretty(sig)}")
         result
       }

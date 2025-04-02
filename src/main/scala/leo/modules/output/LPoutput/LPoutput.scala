@@ -4,10 +4,10 @@ import leo.Out
 import leo.datastructures.{ClauseProxy, Role_Axiom, Role_NegConjecture, Signature}
 import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
-import leo.modules.{calculus, symbolsInProof, userSignature}
+import leo.modules.{calculus, saturatedUserSignature, symbolsInProof, userSignature}
 import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.lpDne
-import leo.modules.output.LPoutput.lpDatastructures.{lpSimpRuleVersion, _}
+import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
@@ -28,7 +28,9 @@ object LPoutput {
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
 
-  def step2LP(cl: ClauseProxy, parentInLpEncID: Seq[lpConstantTerm], sig: Signature, rule: calculus.CalculusRule): (String, lpProofScript, Set[lpStatement], Option[String]) = {
+  val applyAllDefsTacName = "applyAllDefinitions"
+
+  def step2LP(cl: ClauseProxy, parentInLpEncID: Seq[lpConstantTerm], sig: Signature, rule: calculus.CalculusRule, defRuleDefined: Boolean): (String, lpProofScript, Set[lpStatement], Option[String]) = {
 
     if (!Seq(leo.datastructures.Role_Conjecture).contains(cl.role)) {
       if (rule== null) ("Tautology", lpProofScript(Seq.empty), Set.empty, Some("Tautology generation not yet encoded"))
@@ -51,46 +53,43 @@ object LPoutput {
             val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
             ("OrderedEqFac", encodings._1, encodings._2, None)
 
-          /*
         case leo.modules.calculus.DefExpSimp =>
           //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
           // todo: eta expansion
-          val encodingsSimp = encDefExSimp(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoDefExp, parentInLpEncID.head, sig)
-          print(s"RESPULT: ${encodingsSimp._4}\n\n")
-          ("DexExpand", encodingsSimp._1, encodingsSimp._2, encodingsSimp._4)
-         */
+          val (proofSteps, cantENcode) = newEncDefExSimp(cl, cl.annotation.parents.head, defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName, parentInLpEncID.head, sig)
+          ("DexExpand", lpProofScript(proofSteps), Set(), cantENcode)
 
-          case leo.modules.calculus.Simp =>
-            if (cl.furtherInfo.addInfoSimpRule.isDefined) {
-              if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp"){
-                if (cl.furtherInfo.rwUnderBinder) (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, Some("Simp: This instance can not be encoded yet as it requires RW under Binder"))
-                else {
-                  val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
-                  (s"FormulaSimp", lpProofScript(allSteps), usedSymbols, None)
-                }
-              }else{
-                val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
-                (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, annotation)
+        case leo.modules.calculus.Simp =>
+          if (cl.furtherInfo.addInfoSimpRule.isDefined) {
+            if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp"){
+              if (cl.furtherInfo.rwUnderBinder) (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, Some("Simp: This instance can not be encoded yet as it requires RW under Binder"))
+              else {
+                val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
+                (s"FormulaSimp", lpProofScript(allSteps), usedSymbols, None)
               }
             }else{
-              val annotation = Some("Simp: Unidentified formula simplification unencoded")
+              val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
               (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, annotation)
             }
+          }else{
+            val annotation = Some("Simp: Unidentified formula simplification unencoded")
+            (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, annotation)
+          }
 
-          case leo.modules.calculus.PreUni =>
-            val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
-            ("PreUni", encodingPreUni._1, encodingPreUni._2, encodingPreUni._3)
+        case leo.modules.calculus.PreUni =>
+          val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
+          ("PreUni", encodingPreUni._1, encodingPreUni._2, encodingPreUni._3)
 
-          case leo.modules.calculus.RewriteSimp =>
-            val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
-            ("RewriteSimp", encodingRewrite._1, encodingRewrite._2, encodingRewrite._3)
+        case leo.modules.calculus.RewriteSimp =>
+          val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
+          ("RewriteSimp", encodingRewrite._1, encodingRewrite._2, encodingRewrite._3)
 
-          case leo.modules.calculus.LiftEq =>
-            val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
-            ("LiftEq", encodingLiftEq._1, encodingLiftEq._2, encodingLiftEq._3)
-          case _ =>
-            val parentIDs = parentInLpEncID.map(id => id.name)
-            ("", lpProofScript(Seq.empty), Set.empty, Option(s"Unencoded rule ${rule.name} applied to ${parentIDs.mkString(", ")}"))
+        case leo.modules.calculus.LiftEq =>
+          val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
+          ("LiftEq", encodingLiftEq._1, encodingLiftEq._2, encodingLiftEq._3)
+        case _ =>
+          val parentIDs = parentInLpEncID.map(id => id.name)
+          ("", lpProofScript(Seq.empty), Set.empty, Option(s"Unencoded rule ${rule.name} applied to ${parentIDs.mkString(", ")}"))
         }
       }
     } //todo: either introduce else or filter out conj before!
@@ -159,12 +158,15 @@ object LPoutput {
       val proof = state.proof
 
       var tptpDefinedSymbols:Set[lpStatement] = Set.empty
+      var definitions: Set[String] = Set.empty
       val typeDecSB: mutable.StringBuilder = new StringBuilder()
       val defSB: mutable.StringBuilder = new StringBuilder()
 
       // add symbols of the user defined TPTP problem signature if necessary
-      val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof(proof))(sig)
-      (relevantSymbols union additionalSymbols).foreach {key =>
+      val signatureSymbols = saturatedUserSignature(symbolsInProof(proof))(sig)
+      signatureSymbols.foreach { key =>
+      //val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof(proof))(sig)
+      //(relevantSymbols union additionalSymbols).foreach {key =>
         val symbol = sig.apply(key)
         val sName = lpEscapeName(symbol.name,sig)
 
@@ -178,7 +180,7 @@ object LPoutput {
             typeDecSB.append(lpDeclaration(lpConstantTerm(sName),Seq.empty,typeDec.lift2Meta).pretty)
           }
 
-          if (symbol.hasDefn && (! additionalSymbols.contains(key))) {
+          if (symbol.hasDefn){// && (! additionalSymbols.contains(key))) {
 
             val (bVarTys, _) = collectLambdasLP(symbol._defn)
             val newBVars = makeBVarList(bVarTys,0)
@@ -188,13 +190,29 @@ object LPoutput {
             val defTermType = type2LP(symbol._defn.ty, sig)
             val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(sName), Seq.empty), definition)
             val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
-            Out.lp_debug_info(s"${symbol._defn.pretty}")
-            Out.lp_debug_info(s"${encodedDef.pretty}")
+            //Out.lp_debug_info(s"${symbol._defn.pretty}")
+            //Out.lp_debug_info(s"${encodedDef.pretty}")
             defSB.append(encodedDef.pretty)
+
+            // furthermore, we need to build a tactic that combines all of our definitions into one
+            definitions += s"${sName}_def"
           }
         }
       }
+
+      if (definitions.nonEmpty){
+        // define a tactic rewriting with all of the definitions
+        val allDefsListName = "allDefinitions"
+        val decAllDefs = lpDefinition(lpConstantTerm(allDefsListName), Seq(), None, lpList(definitions.map(defName => lpRewrite(None, lpOlConstantTerm(defName)).olTermApp).toSeq))
+        val applyAllDefsTact = lpDefinition(lpConstantTerm(applyAllDefsTacName), Seq(), None, lpRepeat(applyAnyStep(lpOlConstantTerm(allDefsListName))).olTermApp)
+        //lpRepeat(lpOlConstantTerm(allDefsListName)).olTermApp
+        defSB.append("\n")
+        defSB.append(decAllDefs.pretty)
+        defSB.append(applyAllDefsTact.pretty)
+      }
+
       val objectDecSB = typeDecSB.append(defSB)
+
 
       // encode the clauses representing the steps
       // todo: Also make it possible to just output one long lambda-term
@@ -270,7 +288,7 @@ object LPoutput {
               val rule = step.annotation.fromRule
               Out.lp_debug_info(s"Encoding step $stepName: application of caluclus rule ${if (rule==null) "Tautology" else rule.name}")
               Out.lp_debug_info(s"The parents are ${parentInLpEncID.map(term => term.pretty).mkString(", ")}")
-              val (ruleName,proofTerm, updatedUsedSymbols, notEncoded) = step2LP(step, parentInLpEncID, sig, rule)
+              val (ruleName,proofTerm, updatedUsedSymbols, notEncoded) = step2LP(step, parentInLpEncID, sig, rule, definitions.nonEmpty)
 
               // if the step is actually new, we want to add it to the output
               if (notEncoded.isDefined) {
@@ -353,7 +371,7 @@ object LPoutput {
         case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last.pretty}")
       }
       proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep,Seq.empty))
-      val completeProof = lpDefinition(lpConstantTerm("encodedProof"),Seq.empty,Some(conjecture.prf),lpProofScript(proofSteps))
+      val completeProof = lpDefinition(lpConstantTerm("encodedProof"),Seq.empty,Some(conjecture.prf),lpProofScript(proofSteps),Seq(),Seq(lpOpaque))
       proofFileSB.append(completeProof.pretty)
 
       val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
