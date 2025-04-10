@@ -164,14 +164,16 @@ package inferenceControl {
 
     private final def cnf2(cl: AnnotatedClause, s: GeneralState[AnnotatedClause]): Set[AnnotatedClause] = {
       Out.trace(s"Rename CNF of ${cl.pretty(s.signature)}")
-      val cnfresult = RenameCNF(leo.modules.calculus.freshVarGen(cl.cl), s.renamingCash, cl.cl)(s.signature).toSet
+      val (cnfresult0, unencodableCNF0) = RenameCNF.apply_rwUnderBinder(leo.modules.calculus.freshVarGen(cl.cl), s.renamingCash, cl.cl)(s.signature)
+      val cnfresult = cnfresult0.toSet
       if (cnfresult.size == 1 && cnfresult.head == cl.cl) {
         // no CNF step at all
         Out.trace(s"CNF result:\n\t${cl.pretty(s.signature)}")
         Set(cl)
       } else {
         val cnfsimp = cnfresult //.map(Simp.shallowSimp)
-        val result = cnfsimp.map {c => AnnotatedClause(c, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties))} // TODO Definitions other way into the CNF.
+        val furtherInfo = FurtherInfo(unencodableCNF = unencodableCNF0)
+        val result = cnfsimp.map {c => AnnotatedClause(c, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties),furtherInfo)} // TODO Definitions other way into the CNF.
         Out.trace(s"CNF result:\n\t${result.map(_.pretty(s.signature)).mkString("\n\t")}")
         result
       }

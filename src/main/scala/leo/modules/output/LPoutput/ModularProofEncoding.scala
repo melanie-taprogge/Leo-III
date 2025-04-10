@@ -168,40 +168,24 @@ object ModularProofEncoding {
     t match {
       case lpOlMonoQuantifiedTerm(`lpOlForAll`,v0,t0,_) =>
         findBeginningVariables(t0, accVars :+ v0)
-      case lpOlQuantifiedTerm(`lpOlForAll`,v0,t0) =>
+      case lpOlBoundTerm(`lpOlForAll`,v0,t0) =>
         findBeginningVariables(t0, accVars ++ v0)
       case _ => (t, accVars)
     }
   }
 
   def newEncDefExSimp(child: ClauseProxy, parent: ClauseProxy, defRuleDefined: Boolean, additionalInfoSimp: Boolean, reducedTerm0: Option[Literal], applyAllDefsTacName: String, parentNameLpEnc: lpConstantTerm, sig: Signature):(Seq[lpProofScriptStep],Option[String]) = {//: (lpProofScript, Set[lpStatement], Set[Signature.Key], Option[String]) = {
-
-    // todo: handle quantifiers changing position implicitly
-
+    
     if(!additionalInfoSimp){
 
       val reducedTerm = if (reducedTerm0.isDefined) reducedTerm0.get else throw new Exception(s"LP-Encoding: Trying to encode DefExSimp but reduced Term derived by Leo-III is not defined")
 
-      val (encParent,encChild, childUnquantified, childOuterQuantified) =  initialEncUnclausified(parent.cl, child.cl, sig)
-      //val (encChild, encParent0, bVarMap, initialStep) = lpEncodingPrelim(child.cl, Seq(parent.cl), parent.cl.implicitlyBound, sig)
-      //assert(encParent0.length == 1)
-      //val encParent = encParent0.head
+      val (encParent,encChild, _, childOuterQuantified) =  initialEncUnclausified(parent.cl, child.cl, sig)
       Out.lp_debug_info(s"Encoding defExSimp of ${encParent.pretty} to ${encChild.pretty}")
 
-
-      val encExpTerm = term2LP(asTerm(reducedTerm),Map.empty,sig)._1
+      val encExpTerm = term2LP(asTerm(reducedTerm),Map.empty,sig,Set(),false)._1
       Out.lp_debug_info(s"expanded term: ${asTerm(reducedTerm)}")
       Out.lp_debug_info(s"child: ${child.cl}")
-      //Out.lp_debug_info(s"expanded term: ${encExpTerm.pretty}")
-      //Out.lp_debug_info(s"child: ${encChild.pretty}")
-      //val encRedTerm = betaReduceLpApplication(encExpTerm)
-      //Out.lp_debug_info(s"reduces to: ${encRedTerm.pretty}")
-
-
-      // the order of quantification can change, we thus abstract over all the variables that will be considered free anyways in the next step and
-      // then apply them again
-
-      //val variablesToQuantify = parent.cl.
 
       if (childOuterQuantified.length >=  2) Out.lp_debug_info(s"needs to assume vars")
 
@@ -212,35 +196,34 @@ object ModularProofEncoding {
           val applyParentToStep = lpFunctionApp(lpConstantTerm(haveStepName),Seq(parentNameLpEnc))
           val applyDefExp = Seq(lpEval(lpOlConstantTerm(applyAllDefsTacName)))
           val (assumeStep, refineStepHave): (lpAssume, lpRefine) = {
-            /*
-            if (childOuterQuantified.length >= 2) {
-              (lpAssume(Seq(assumptionName) ++ childOuterQuantified), lpRefine(lpFunctionApp(assumptionName, childOuterQuantified.reverse)))
-            } else (lpAssume(Seq(assumptionName)), lpRefine(assumptionName))
-             */
             (lpAssume(Seq(assumptionName)), lpRefine(assumptionName))
           }
-          (Seq(lpImpHaveStepConstructor(haveStepName, Seq(), encParent, encExpTerm,(applyDefExp :+ assumeStep) :+ refineStepHave)),applyParentToStep)
+          (Seq(lpImpHaveStepConstructor(haveStepName, Seq(), encParent, encExpTerm,(applyDefExp ++ Seq(assumeStep,refineStepHave)))),applyParentToStep)
         }else (Seq(),parentNameLpEnc)
-      /*
-      val (assumeStep, refineStepHave) : (Seq[lpAssume],Seq[lpRefine])=
-        if (!defRuleDefined) (Seq(),Seq())
-      else if (childOuterQuantified.length >=  2) {
-        (Seq(lpAssume(Seq(assumptionName)++ childOuterQuantified)), Seq(lpRefine(lpFunctionApp(assumptionName,childOuterQuantified.reverse))))
-      } else (Seq(lpAssume(Seq(assumptionName))), Seq(lpRefine(assumptionName)))
 
-      val step = lpImpHaveStepConstructor(haveStepName, Seq(), encParent, encChild,(( applyDefExp :+ allSimpRuleApplicationStep) ++ assumeStep) ++ refineStepHave)
+      val (maybeSimpStep, refineName) : (Seq[lpHave],lpTerm) = if (encExpTerm != encChild){
+        Out.lp_debug_info(s"reducedTerm:\n${reducedTerm.pretty}\n${Clause.asTerm(child.cl).pretty}")
+        val simpStepName = "SimpStep"
+        val SimpStep = lpImpHaveStepConstructor(simpStepName, Seq(), encExpTerm, encChild, Seq(lpProofScriptAdmit()))
+        (Seq(SimpStep), lpFunctionApp(lpConstantTerm(simpStepName), Seq(appliedParent)))
+      }else (Seq(), appliedParent)
 
-       */
+      val refineStep = lpRefine(refineName)
 
-      val simpStepName = "SimpStep"
-      val SimpStep = lpImpHaveStepConstructor(simpStepName, Seq(), encExpTerm, encChild,Seq(lpProofScriptAdmit()))
-      val refineStep = lpRefine(lpFunctionApp(lpConstantTerm(simpStepName), Seq(appliedParent)))
+      ((defExpStep ++ maybeSimpStep) :+ refineStep, None)
 
-      ((defExpStep :+ SimpStep) :+ refineStep, None)
     }else{
       Out.lp_debug_info("Rweriting under binder required in order to encode Simplification step")
       (Seq(), Some("Rweriting under binder required in order to encode Simplification step"))
     }
+  }
+
+  def encRenameCnf(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, unencodedCNF: Boolean, sig: Signature)={
+    val (encParent,encChild, childUnquantified, childOuterQuantified) =  initialEncUnclausified(parent.cl, child.cl, sig)
+
+    if (unencodedCNF) Out.lp_debug_info("Can not encode CNF since it requires rewriting under binder")
+
+    Out.lp_debug_info(s"encoding renameCNF with parent ${encParent.pretty}")
   }
 
 
@@ -1721,7 +1704,7 @@ object ModularProofEncoding {
             }
           }
           lpOlFunctionApp(substituteVarTerm(f, subsMap), encArgs)
-        case lpOlQuantifiedTerm(quantifier, variables, body) => lpOlQuantifiedTerm(quantifier, variables.map(var0 => isTermVar(substituteTypedVarsTerm(Left(var0), subsMap))), substituteVarTerm(body, subsMap))
+        case lpOlBoundTerm(quantifier, variables, body) => lpOlBoundTerm(quantifier, variables.map(var0 => isTermVar(substituteTypedVarsTerm(Left(var0), subsMap))), substituteVarTerm(body, subsMap))
         case lpOlUnaryConnectiveTerm(connective, body) => lpOlUnaryConnectiveTerm(connective, substituteVarTerm(body, subsMap))
         case lpOlUntypedBinaryConnectiveTerm(connective, lhs, rhs) => lpOlUntypedBinaryConnectiveTerm(connective, substituteVarTerm(lhs, subsMap), substituteVarTerm(rhs, subsMap))
         case lpOlTypedBinaryConnectiveTerm(connective, ty, lhs, rhs) => lpOlTypedBinaryConnectiveTerm(connective, ty, substituteVarTerm(lhs, subsMap), substituteVarTerm(rhs, subsMap))

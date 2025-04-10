@@ -425,11 +425,13 @@ object lpDatastructures {
 
   final case object lpInEq extends lpOlBinaryConnective {override def pretty: String = "≠"}
 
-  abstract class lpOlQuantifier extends lpOlConnective
+  abstract class lpOlBinders extends lpOlConnective
 
-  final case object lpOlExists extends lpOlQuantifier {override def pretty: String = "∃"}
+  final case object lpOlExists extends lpOlBinders {override def pretty: String = "∃"}
 
-  final case object lpOlForAll extends lpOlQuantifier {override def pretty: String = "∀"}
+  final case object lpOlForAll extends lpOlBinders {override def pretty: String = "∀"}
+
+  final case object lpChoice extends lpOlBinders {override def pretty: String = "ε"}
 
 
   ///////////// NATS
@@ -655,7 +657,7 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlTypedBinaryConnectiveTerm(connective, ty, lhs, rhs))
   }
 
-  case class lpOlMonoQuantifiedTerm(quantifier: lpOlQuantifier, variable: lpOlTypedVar, body: lpOlTerm, explicitlyType:Boolean = false) extends lpOlTerm {
+  case class lpOlMonoQuantifiedTerm(quantifier: lpOlBinders, variable: lpOlTypedVar, body: lpOlTerm, explicitlyType:Boolean = false) extends lpOlTerm {
     override def pretty: String = {
       // if partially applied, the variable is a function
       if (explicitlyType) {
@@ -670,14 +672,14 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlMonoQuantifiedTerm(quantifier, variable, body))
   }
 
-  case class lpOlQuantifiedTerm(quantifier: lpOlQuantifier, variables: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
+  case class lpOlBoundTerm(quantifier: lpOlBinders, variables: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
 
-    def quantEachVar(quantifier: lpOlQuantifier, variables: Seq[lpOlTypedVar], body: lpOlTerm): lpOlTerm = {
+    def quantEachVar(quantifier: lpOlBinders, variables: Seq[lpOlTypedVar], body: lpOlTerm): lpOlTerm = {
       if (variables.isEmpty) throw new Exception("trying to encode Lambdapi quanification without variables")
       else if (variables.length == 1) lpOlMonoQuantifiedTerm(quantifier, variables.head, body)
       else {
         var quantifiedTerm = body
-        variables foreach { variable =>
+        variables.reverse foreach { variable =>
           quantifiedTerm = lpOlMonoQuantifiedTerm(quantifier, variable, quantifiedTerm)
         }
         quantifiedTerm
@@ -688,7 +690,7 @@ object lpDatastructures {
       quantEachVar(quantifier, variables, body).pretty
     }
 
-    override def prf: liftedProp = liftedProp(lpOlQuantifiedTerm(quantifier, variables, body))
+    override def prf: liftedProp = liftedProp(lpOlBoundTerm(quantifier, variables, body))
   }
 
 

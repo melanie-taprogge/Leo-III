@@ -6,7 +6,7 @@ import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{calculus, saturatedUserSignature, symbolsInProof, userSignature}
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.lpDne
+import leo.modules.output.LPoutput.LPSignature.{cnfLib, lpDne}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
@@ -27,6 +27,8 @@ object LPoutput {
   val leoSimpTacticFile = "SimpTactic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
+
+  val nameCnfFile = "cnfLib"
 
   val applyAllDefsTacName = "applyAllDefinitions"
 
@@ -59,6 +61,7 @@ object LPoutput {
           val (proofSteps, cantENcode) = newEncDefExSimp(cl, cl.annotation.parents.head, defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName, parentInLpEncID.head, sig)
           ("DexExpand", lpProofScript(proofSteps), Set(), cantENcode)
 
+
         case leo.modules.calculus.Simp =>
           if (cl.furtherInfo.addInfoSimpRule.isDefined) {
             if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp"){
@@ -75,6 +78,12 @@ object LPoutput {
             val annotation = Some("Simp: Unidentified formula simplification unencoded")
             (s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Set.empty, annotation)
           }
+        /*
+        case leo.modules.calculus.RenameCNF =>
+            encRenameCnf(cl,cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.unencodableCNF, sig)
+          ("FullCNF", lpProofScript(Seq()), Set(), Some("not encoded"))
+
+         */
 
         case leo.modules.calculus.PreUni =>
           val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
@@ -377,8 +386,9 @@ object LPoutput {
       val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
       val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
       val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
+      val cnfLibStr: String = f"${nameLpOutputFolder}.${nameCnfFile}"
 
-      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List $calcRuleLibStr $simpTacLibStr $permLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $cnfLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
 
       // create a folder for the lambdapi package
       // Create the output directory if it doesn't exist
@@ -394,6 +404,11 @@ object LPoutput {
 
       val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
+
+      nameCnfFile
+
+      val cnfFilePath = lpOutputPath.resolve(s"$nameCnfFile.lp")
+      Files.write(cnfFilePath, cnfLib.getBytes(StandardCharsets.UTF_8))
 
       // create the Makefile and the pkg file
       val pkgFileName = "lambdapi.pkg"

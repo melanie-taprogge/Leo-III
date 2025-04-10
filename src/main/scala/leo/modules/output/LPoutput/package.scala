@@ -5,7 +5,7 @@ import leo.datastructures.Term.∙
 import leo.datastructures.{Clause, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature.{===, HOLBinaryConnective, Not, |||}
 import leo.modules.output.LPoutput.Encodings.type2LP
-import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlTyVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
+import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlBoundTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlTyVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
 
@@ -276,10 +276,10 @@ package object LPoutput {
         val pattern = if (counter == 0) lpOlWildcard else lpOlLambdaTerm(vars, patternbody)
         val rewrittenTerm = lpOlLambdaTerm(vars, rewrittenbody0)
         (pattern, rewrittenTerm, counter, true)
-      case lpOlQuantifiedTerm(quantifier, vars, body) =>
+      case lpOlBoundTerm(quantifier, vars, body) =>
         val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(termRwMap, body, rwUnderBinder, patternVar, 0)
-        val pattern = if (counter == 0) lpOlWildcard else lpOlQuantifiedTerm(quantifier, vars, patternbody)
-        val rewrittenTerm = lpOlQuantifiedTerm(quantifier, vars, rewrittenbody0)
+        val pattern = if (counter == 0) lpOlWildcard else lpOlBoundTerm(quantifier, vars, patternbody)
+        val rewrittenTerm = lpOlBoundTerm(quantifier, vars, rewrittenbody0)
         (pattern, rewrittenTerm, counter, true)
       case lpOlUnaryConnectiveTerm(con, term) =>
           val (patternTerm, rewrittenTerm0, counter, rwUnderBinder0) = findRWTerm0(termRwMap, term, rwUnderBinder, patternVar, 0)
@@ -387,8 +387,8 @@ package object LPoutput {
       // in all other cases we need to search substructures for reducable terms
       case lpOlLambdaTerm(vars,body) =>
         lpOlLambdaTerm(vars,betaReduceLpApplication(body))
-      case lpOlQuantifiedTerm(quantifier, vars, body) =>
-        lpOlQuantifiedTerm(quantifier, vars, betaReduceLpApplication(body))
+      case lpOlBoundTerm(quantifier, vars, body) =>
+        lpOlBoundTerm(quantifier, vars, betaReduceLpApplication(body))
       case lpOlUnaryConnectiveTerm(con, term) =>
         lpOlUnaryConnectiveTerm(con, betaReduceLpApplication(term))
       case lpOlUntypedBinaryConnectiveTerm(con,lhs,rhs) =>
@@ -443,7 +443,7 @@ package object LPoutput {
         }
         alphaEquivalent(lam1.body, lam2.body, newEnv)
       }
-    case (q1: lpOlQuantifiedTerm, q2: lpOlQuantifiedTerm) =>
+    case (q1: lpOlBoundTerm, q2: lpOlBoundTerm) =>
       if (q1.quantifier != q2.quantifier) false
       else {
         (q1.variables, q2.variables) match {

@@ -172,7 +172,8 @@ abstract sealed class ClauseAnnotation extends Pretty {
 }
 
 case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
-                        val rwUnderBinder: Boolean = false){
+                        val rwUnderBinder: Boolean = false,
+                        unencodableCNF: Boolean = false){
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
   var addInfoBoolExt: Set[(Literal,Seq[Literal])] = Set.empty
   var addInfoSimp: Seq[(Seq[Int],Int)] = Seq.empty
