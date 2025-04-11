@@ -58,7 +58,7 @@ object LPoutput {
         case leo.modules.calculus.DefExpSimp =>
           //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
           // todo: eta expansion
-          val (proofSteps, cantENcode) = newEncDefExSimp(cl, cl.annotation.parents.head, defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName, parentInLpEncID.head, sig)
+          val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName, parentInLpEncID.head, sig)
           ("DexExpand", lpProofScript(proofSteps), Set(), cantENcode)
 
 
