@@ -160,22 +160,9 @@ object ModularProofEncoding {
         }else (Seq(),parentNameLpEnc)
 
       val (maybeSimpStep, refineName) : (Seq[lpHave],lpTerm) = if (encExpTerm != encChild){
-        Out.lp_debug_info(s"reducedTerm:\n${reducedTerm.pretty}\n${Clause.asTerm(child.cl).pretty}")
-
-        // use the encoding of formula simplification to generate the proofs
-        /*
-        val encExpTermClause = lpClauseInst(encExpTerm,Seq(encExpTerm),Seq.empty)
-        val encChildClause = lpClauseInst(encChild,Seq(encChild),Seq.empty)
-        val childLitLen = if (isFalse(child.cl.lits.head)) 0 else 1
-        val (proofScript, _) = encSimpProofScript(Seq(reducedTerm),child.cl.lits,encExpTermClause,encChildClause,childLitLen,Map.empty,appliedParent,sig)
-        val simpStepName = "SimpStep"
-        val SimpStep = lpHave(simpStepName,encChild.prf,lpProofScript(proofScript))
-
-         */
-        // we only need the exhaustive simplification step, as the implicit transformations will only occur when operating on literals
+        // Use the encoding of formula simplification to generate the proofs
+        // We only need the exhaustive simplification step, as the implicit transformations will only occur when operating on literals
         val (simpStep, simpStepName) = encSimpProofSubstep(Seq.empty, encExpTerm, encChild)
-
-
         (Seq(simpStep), lpFunctionApp(lpConstantTerm(simpStepName),Seq(appliedParent)))
       }else (Seq(), appliedParent)
 
@@ -1685,7 +1672,7 @@ object ModularProofEncoding {
             }
           } else t
         case lpOlLambdaTerm(vars, body) => lpOlLambdaTerm(vars.map(var0 => substituteTypedVarsTerm(var0, subsMap)), substituteVarTerm(body, subsMap))
-        case lpOlFunctionApp(f, args) =>
+        case lpOlFunctionApp(f, args, _) =>
           var encArgs: Seq[Either[lpOlTerm, lpOlType]] = Seq.empty
           args foreach { arg =>
             arg match {

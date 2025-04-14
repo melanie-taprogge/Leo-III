@@ -59,7 +59,7 @@ object LPoutput {
           //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
           // todo: eta expansion
           val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName, parentInLpEncID.head, sig)
-          ("DexExpand", lpProofScript(proofSteps), Set(), cantENcode)
+          ("DefExpand", lpProofScript(proofSteps), Set(), cantENcode)
 
 
         case leo.modules.calculus.Simp =>
@@ -81,8 +81,7 @@ object LPoutput {
         /*
         case leo.modules.calculus.RenameCNF =>
             encRenameCnf(cl,cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.unencodableCNF, sig)
-          ("FullCNF", lpProofScript(Seq()), Set(), Some("not encoded"))
-
+          ("RenameCNF", lpProofScript(Seq()), Set(), Some("not encoded"))
          */
 
         case leo.modules.calculus.PreUni =>

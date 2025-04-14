@@ -402,36 +402,49 @@ object lpDatastructures {
 
 
   ///////////// CONNECTIVES
+
+  abstract class lpOlUnappliedConnective(val base: lpOlConnective) extends lpOlTerm {
+    def unapplied: lpOlUnappliedConnective = this
+
+    override def pretty: String = s"(${base.pretty})"
+
+    override def prf: lpMlType = throw new Exception("trying to output proof for unapplied connective")
+  }
+
   abstract class lpOlConnective extends lpTerm {
     def pretty: String
+
+    def firstArgImp: Boolean
+
+    def unapplied: lpOlUnappliedConnective =
+      new lpOlUnappliedConnective(this) {}
   }
 
   abstract class lpOlUnaryConnective extends lpOlConnective
 
-  final case object lpNot extends lpOlUnaryConnective {override def pretty: String = "¬"}
+  final case object lpNot extends lpOlUnaryConnective {override def pretty: String = "¬"; override def firstArgImp: Boolean = false}
 
-  abstract class lpOlBinaryConnective extends lpOlConnective
+  abstract class lpOlUntypedBinaryConnective extends lpOlConnective
 
-  final case object lpOr extends lpOlBinaryConnective {override def pretty: String = "∨"}
+  abstract class lpOlTypedBinaryConnective extends lpOlConnective
 
-  final case object lpAnd extends lpOlBinaryConnective {override def pretty: String = "∧"}
+  final case object lpOr extends lpOlUntypedBinaryConnective {override def pretty: String = "∨"; override def firstArgImp: Boolean = false}
 
-  final case object lpImp extends lpOlBinaryConnective {override def pretty: String = "⇒"}
+  final case object lpAnd extends lpOlUntypedBinaryConnective {override def pretty: String = "∧"; override def firstArgImp: Boolean = false}
 
-  final case object lpEq extends lpOlBinaryConnective {
-    override def pretty: String = "="
-    def definitionName(): lpConstantTerm = lpConstantTerm("ind_eq")
-  }
+  final case object lpImp extends lpOlUntypedBinaryConnective {override def pretty: String = "⇒"; override def firstArgImp: Boolean = false}
 
-  final case object lpInEq extends lpOlBinaryConnective {override def pretty: String = "≠"}
+  final case object lpEq extends lpOlTypedBinaryConnective {override def pretty: String = "="; override def firstArgImp: Boolean = true}
 
-  abstract class lpOlBinders extends lpOlConnective
+  final case object lpInEq extends lpOlTypedBinaryConnective {override def pretty: String = "≠"; override def firstArgImp: Boolean = true}
 
-  final case object lpOlExists extends lpOlBinders {override def pretty: String = "∃"}
+  abstract class lpOlBinder extends lpOlConnective
 
-  final case object lpOlForAll extends lpOlBinders {override def pretty: String = "∀"}
+  final case object lpOlExists extends lpOlBinder {override def pretty: String = "∃"; override def firstArgImp: Boolean = true}
 
-  final case object lpChoice extends lpOlBinders {override def pretty: String = "ε"}
+  final case object lpOlForAll extends lpOlBinder {override def pretty: String = "∀"; override def firstArgImp: Boolean = true}
+
+  final case object lpChoice extends lpOlBinder {override def pretty: String = "ε"; override def firstArgImp: Boolean = false}
 
 
   ///////////// NATS
@@ -598,24 +611,30 @@ object lpDatastructures {
     }
     override def prf: liftedProp = liftedProp(lpOlLambdaTerm(vars, body))
   }
-
-  case class lpOlFunctionApp(f: lpOlTerm, args: Seq[Either[lpOlTerm,lpOlType]]) extends lpOlTerm{
+  case class lpOlFunctionApp(f: lpOlTerm, args: Seq[Either[lpOlTerm,lpOlType]], implicitArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty) extends lpOlTerm{
     override def pretty: String = {
       val prettyArgs = args.map(arg => arg match {
         case Left(term) => term.pretty
         case Right(ty) => ty.pretty
       })
-      if (args.isEmpty) f.pretty else s"(${f.pretty} ${prettyArgs.mkString(" ")})"
+      val prettyImpArgs = implicitArgs.map(arg => arg match {
+        case Left(term) => s"[${term.pretty}]"
+        case Right(ty) => s"[${ty.pretty}]"
+      })
+
+      val gap0 = if (implicitArgs.isEmpty) "" else " "
+      val gap1 = if (args.isEmpty) "" else " "
+      s"(${f.pretty}$gap0${prettyImpArgs.mkString(" ")}$gap1${prettyArgs.mkString(" ")})"
     }
     override def prf: liftedProp = liftedProp(lpOlFunctionApp(f, args))
   }
 
   object lpOlFunctionApp {
-    def apply(f: lpOlTerm, args: Seq[Either[lpOlTerm, lpOlType]]): lpOlFunctionApp = f match {
-      case lpOlFunctionApp(f0, innerArgs) =>
-        new lpOlFunctionApp(f0, innerArgs ++ args)
+    def apply(f: lpOlTerm, args: Seq[Either[lpOlTerm, lpOlType]], impArgs: Seq[Either[lpOlTerm, lpOlType]] = Seq.empty): lpOlFunctionApp = f match {
+      case lpOlFunctionApp(f0, innerArgs, innerImpArgs) =>
+        new lpOlFunctionApp(f0, innerArgs ++ args, impArgs ++ innerImpArgs)
       case _ =>
-        new lpOlFunctionApp(f, args)
+        new lpOlFunctionApp(f, args, impArgs)
     }
   }
 
@@ -626,12 +645,12 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlUnaryConnectiveTerm(connective, body))
   }
 
-  case class lpOlUntypedBinaryConnectiveTerm(connective: lpOlBinaryConnective, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
+  case class lpOlUntypedBinaryConnectiveTerm(connective: lpOlUntypedBinaryConnective, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
     override def pretty: String = s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
     override def prf: liftedProp = liftedProp(lpOlUntypedBinaryConnectiveTerm(connective, lhs, rhs))
   }
 
-  case class lpOlUntypedBinaryConnectiveTerm_multi(connective: lpOlBinaryConnective, args: Seq[lpOlTerm]) extends lpOlConnectiveTerm {
+  case class lpOlUntypedBinaryConnectiveTerm_multi(connective: lpOlUntypedBinaryConnective, args: Seq[lpOlTerm]) extends lpOlConnectiveTerm {
     override def pretty: String = {
       val term = s"${args.map(arg => arg.pretty).mkString(s" ${connective.pretty} ")}"
       if (args.length == 1) term else s"($term)"
@@ -639,7 +658,7 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlUntypedBinaryConnectiveTerm_multi(connective, args))
   }
 
-  case class lpOlTypedBinaryConnectiveTerm(connective: lpOlBinaryConnective, ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
+  case class lpOlTypedBinaryConnectiveTerm(connective: lpOlTypedBinaryConnective, ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
     override def pretty: String = {
       if (monomorphic) {
         //if (connective == lpInEq) lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,ty, lhs, rhs)).pretty
@@ -657,7 +676,7 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlTypedBinaryConnectiveTerm(connective, ty, lhs, rhs))
   }
 
-  case class lpOlMonoQuantifiedTerm(quantifier: lpOlBinders, variable: lpOlTypedVar, body: lpOlTerm, explicitlyType:Boolean = false) extends lpOlTerm {
+  case class lpOlMonoQuantifiedTerm(quantifier: lpOlBinder, variable: lpOlTypedVar, body: lpOlTerm, explicitlyType:Boolean = false) extends lpOlTerm {
     override def pretty: String = {
       // if partially applied, the variable is a function
       if (explicitlyType) {
@@ -672,9 +691,9 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlMonoQuantifiedTerm(quantifier, variable, body))
   }
 
-  case class lpOlBoundTerm(quantifier: lpOlBinders, variables: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
+  case class lpOlBoundTerm(quantifier: lpOlBinder, variables: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
 
-    def quantEachVar(quantifier: lpOlBinders, variables: Seq[lpOlTypedVar], body: lpOlTerm): lpOlTerm = {
+    def quantEachVar(quantifier: lpOlBinder, variables: Seq[lpOlTypedVar], body: lpOlTerm): lpOlTerm = {
       if (variables.isEmpty) throw new Exception("trying to encode Lambdapi quanification without variables")
       else if (variables.length == 1) lpOlMonoQuantifiedTerm(quantifier, variables.head, body)
       else {

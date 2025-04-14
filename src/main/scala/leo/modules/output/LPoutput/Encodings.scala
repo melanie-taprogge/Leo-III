@@ -401,7 +401,13 @@ object Encodings {
               arguments = arguments :+ Right(encArg)
           }
         }
-        (lpOlFunctionApp(translatedF,arguments),updatedUsedSymbols)
+        // special case: unapplied connectives as head symbols
+        translatedF match {
+          case con:lpOlUnappliedConnective =>
+            (applyPartiallyAppliedConnective(con,arguments,Seq.empty),updatedUsedSymbols)
+
+          case _ => (lpOlFunctionApp(translatedF,arguments),updatedUsedSymbols)
+        }
 
       // Others should be invalid
       case _ => throw new IllegalArgumentException("Unexpected term format during conversion to LP")

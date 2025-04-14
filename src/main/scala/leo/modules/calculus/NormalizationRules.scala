@@ -253,7 +253,7 @@ object RenameCNF extends CalculusRule {
         //val boundVar1 = Term.mkBound(v._2, v._1)
         //val boundVar0 = Term.mkBound(ty,1)
         //val negA = mkTermAbs(ty, Not(mkTermApp(a,boundVar0)))
-        //val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs, Some(a))
+        //val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs, Some(negA))
         val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs)
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD, st)
       case Exists(a@(ty :::> t)) if l.polarity =>
