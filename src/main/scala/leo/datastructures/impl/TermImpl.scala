@@ -1,5 +1,6 @@
 package leo.datastructures.impl
 
+import leo.{Out, datastructures}
 import leo.datastructures.Position.HeadPos
 import leo.datastructures.Type._
 import leo.datastructures._
@@ -89,6 +90,36 @@ protected[datastructures] sealed abstract class TermImpl(protected[TermImpl] var
 
   @inline final def fvi_symbolFreqOf(symbol: Signature.Key): Int = symbolMap.getOrElse(symbol, (0,0))._1
   @inline final def fvi_symbolDepthOf(symbol: Signature.Key): Int = symbolMap.getOrElse(symbol, (0,0))._2
+
+  final def hasBinder: Boolean = {
+    import leo.datastructures.Term.{:::>, Bound, Integer, Rational, Real, TypeLambda, ∙}
+    import leo.modules.HOLSignature.{!===, &, ===, Exists, Forall, Impl, Not, TyForall, |||}
+    @tailrec
+    def check(todo: List[Term]): Boolean = todo match {
+      case Nil => false
+      case term :: rest =>
+        term match {
+          case datastructures.Term.Symbol(_) | Term.Integer(_) | Rational(_, _) | Real(_, _, _) | Bound(_, _) => check(rest)
+          case Forall(_) => true
+          case Exists(_) => true
+          case TyForall(_) => true
+          case TypeLambda(_) => true
+          case _ :::> _ => true
+          case Not(t) => check(t :: rest)
+          case lt & rt => check(lt :: rt :: rest)
+          case lt ||| rt => check(lt :: rt :: rest)
+          case Impl(lt, rt) => check(lt :: rt :: rest)
+          case tl === tr => check(tl :: tr :: rest)
+          case tl !=== tr => check(tl :: tr :: rest)
+          case f ∙ args =>
+            val argsList: List[Term] = args.collect { case Left(a) => a }.toList
+            check(f :: argsList ::: rest)
+          case _ => check(rest)
+        }
+    }
+
+    check(this :: Nil)
+  }
 }
 
 /////////////////////////////////////////////////

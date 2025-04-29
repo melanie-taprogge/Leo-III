@@ -244,6 +244,13 @@ object Encodings {
   def term2LP(t: Term, bVars: Map[Int,String], sig:Signature): (lpOlTerm,Set[lpStatement]) = {
     term2LP(t,bVars,sig,Set.empty)
   }
+  def var2Lp(boundVars: Seq[(Int, Type)], bVars: Map[Int, String], sig: Signature): Seq[lpOlTypedVar] = {
+    boundVars.map(v => var2Lp(v._1, v._2, bVars,sig))
+  }
+  def var2Lp(scope: Int, typ: Type, bVars: Map[Int, String], sig: Signature): lpOlTypedVar = {
+    val encType = type2LP(typ, sig)
+    (lpOlTypedVar(lpOlConstantTerm(bVars(scope)), encType))
+  }
   def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpStatement], supressReduction:Boolean = false): (lpOlTerm,Set[lpStatement]) = {
     //todo: dont i need the offset? was it an oversight not to use it in term2lp?
 
@@ -262,8 +269,7 @@ object Encodings {
       case Real(w, d, e) => throw new Error(s"reals are not encoded yet ${t.pretty}") //if (e == 0) s"$w.$d" else s"$w.${d}E$e"
       // Give Bound variables names
       case Bound(_, scope) =>
-        val encType = type2LP(t.ty, sig)
-        (lpOlTypedVar(lpOlConstantTerm(bVars(scope)),encType),usedSymbols) //throw new Error(s"bound vars are not encoded yet ${t.pretty}") //bVars(scope)
+        (var2Lp(scope,t.ty,bVars,sig),usedSymbols)
 
       // Unary connectives
       case Not(t2) =>
@@ -480,6 +486,14 @@ object Encodings {
     def apply(cl: Clause, sig: Signature): lpClauseInst ={
       val encClause = clause2LP_unquantified(cl,Set.empty,sig)
       lpClauseInst(encClause._2,encClause._2.args,encClause._1)
+    }
+
+    def apply_to_set(cls: Seq[Clause], sig: Signature): ( Map[Int, String],Seq[lpClauseInst]) = {
+      val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct
+      val fullBvarsMap = clauseVars2LP(allImpBoundVars, sig, Set.empty)._2
+      val encCls = cls.map(cl => clause2LP0(cl,fullBvarsMap,sig,Set.empty)._1)
+      val encVars: Seq[Seq[Either[lpOlTypedVar, lpOlTyVar]]] = cls.map(cl => var2Lp(cl.implicitlyBound,fullBvarsMap,sig).map(Left(_)))
+      (fullBvarsMap, encCls.zip(encVars).map(ecnCl => lpClauseInst(ecnCl._1, ecnCl._1.args, ecnCl._2)))
     }
   }
 }

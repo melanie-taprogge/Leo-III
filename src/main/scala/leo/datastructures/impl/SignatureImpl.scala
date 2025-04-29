@@ -1,7 +1,7 @@
 package leo.datastructures.impl
 
 import scala.collection.immutable.{BitSet, HashMap, IntMap}
-import leo.datastructures.{Kind, Signature, Term, Type}
+import leo.datastructures.{Kind, Signature, Term, Type, mkPolyUnivQuant}
 import leo.modules.HOLSignature
 import leo.modules.output.logger.Out
 
@@ -205,7 +205,10 @@ class SignatureImpl extends Signature with Function1[Int, Signature.Meta] {
     if (term.isDefined) {
       Out.lp_debug_info(s"creating skolem term with definition")
       val dfn = leo.modules.HOLSignature.Choice(term.get)
-      addDefined(skolemVarPrefix + skolemVarCounter.toString, dfn, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+      val fV = term.get.freeVars
+      Out.lp_debug_info(s"free Vars: $fV")
+      val maybeQuantDef = mkPolyUnivQuant(fV.toSeq.map(_.ty),dfn)
+      addDefined(skolemVarPrefix + skolemVarCounter.toString, maybeQuantDef, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
     }
     else addUninterpreted(skolemVarPrefix + skolemVarCounter.toString, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
   }
