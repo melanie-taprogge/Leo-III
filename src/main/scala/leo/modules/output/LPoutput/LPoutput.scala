@@ -24,11 +24,11 @@ object LPoutput {
 
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
-  val leoSimpTacticFile = "SimpTactic"
+  val leoSimpTacticFile = "UserTactic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
 
-  val nameCnfFile = "cnfLib"
+  //val nameCnfFile = "cnfLib"
 
   val applyAllDefsTacName = "applyAllDefinitions"
 
@@ -98,17 +98,21 @@ object LPoutput {
 
           case leo.modules.calculus.RenameCNF =>
             // first, we check weather the
+            // if the conjunction contains only one clause, there is no need for two seperate steps
+            val encode2steps = cl.furtherInfo.cnfInfo.derivedClauses.length > 1
             val (con_ref,stepsConj,updateMap,addSymbols) : (lpConstantTerm,Seq[lpProofScriptStep], Map[lpConstantTerm, lpConstantTerm], Set[Signature.Key]) =
               if (!stepInfo.clausifiedSteps.keySet.contains(parentInLpEncID.head)){
-                val cnf_stepName = s"${parentInLpEncID.head.name}_cnf"
+                val cnf_stepName = if (encode2steps) s"${parentInLpEncID.head.name}_cnf" else stepName
                 val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
                 val stepsCNF = toProofStep(cnf_stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
                 (lpConstantTerm(cnf_stepName),stepsCNF,Map(parentInLpEncID.head -> lpConstantTerm(cnf_stepName)),encodingCNF._4)
               }else (stepInfo.clausifiedSteps(parentInLpEncID.head),Seq(),Map.empty,Set.empty)
                 val outputInfo = new lpProofStepInfo(updateMap,newIdenticalSteps,newTptpDefinedSymbols,addSymbols)
                 // the encoding of the step where we pick one of the clauses in the conjunction
-                val encPickStep = encRenameCnf_cl(cl,con_ref,cl.furtherInfo.cnfInfo,sig)
-                val stepsPickupStep = toProofStep(stepName,encStep,"RenameCNF_select",encPickStep,None)
+                val stepsPickupStep : Seq[lpProofScriptStep] = if (encode2steps) {
+                  val encPickStep = encRenameCnf_cl(cl,con_ref,cl.furtherInfo.cnfInfo,sig)
+                  toProofStep(stepName,encStep,"RenameCNF_select",encPickStep,None)
+                } else Seq()
                 (stepsConj ++ stepsPickupStep,outputInfo)
 
           case _ =>
@@ -429,7 +433,7 @@ object LPoutput {
       val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
       val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
       val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
-      val cnfLibStr: String = f"${nameLpOutputFolder}.${nameCnfFile}"
+      val cnfLibStr: String = ""//f"${nameLpOutputFolder}.${nameCnfFile}"
 
       proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $cnfLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
 
@@ -448,10 +452,8 @@ object LPoutput {
       val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
-      nameCnfFile
-
-      val cnfFilePath = lpOutputPath.resolve(s"$nameCnfFile.lp")
-      Files.write(cnfFilePath, cnfLib.getBytes(StandardCharsets.UTF_8))
+      //val cnfFilePath = lpOutputPath.resolve(s"$nameCnfFile.lp")
+      //Files.write(cnfFilePath, cnfLib.getBytes(StandardCharsets.UTF_8))
 
       // create the Makefile and the pkg file
       val pkgFileName = "lambdapi.pkg"
