@@ -269,7 +269,7 @@ object ModularProofEncoding {
       Seq.empty
     } else {
       // In this case, only boolean identities were applied in clausification
-      assert(encParent.vars.length < allMetaVars.length, "LP encoding: Clausification unexpectedly increased number of free vars")
+      assert(encParent.vars.length <= allMetaVars.length, "LP encoding: Clausification unexpectedly increased number of free vars")
 
       // We verify the application via a have-step proving equality via a dedicated lambdapi tactic
       val clauseStepName = "Clausification"
