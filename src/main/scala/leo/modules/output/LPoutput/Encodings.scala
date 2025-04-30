@@ -340,9 +340,15 @@ object Encodings {
         val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction)
         val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction)
         (lpOlUntypedBinaryConnectiveTerm(lpImp, encodedTl, encodedTr), updatedUsedSymbolsR)
-      case t1 <=> t2 => throw new Error(s"encountered un-encoded connective <=> ${t.pretty}")
-      case t1 ~& t2 => throw new Error(s"encountered un-encoded connective ~& ${t.pretty}")
-      case t1 ~||| t2 => throw new Error(s"encountered un-encoded connective ~||| ${t.pretty}")
+      case _ <=> _ => throw new Error(s"encountered un-encoded connective <=> ${t.pretty}")
+      case tl ~& tr =>
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols, supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL, supressReduction)
+        (lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlUnaryConnectiveTerm(lpNot,encodedTl),lpOlUnaryConnectiveTerm(lpNot,encodedTr)),updatedUsedSymbolsR)
+      case tl ~||| tr =>
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols, supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL, supressReduction)
+        (lpOlUnaryConnectiveTerm(lpNot,lpOlUntypedBinaryConnectiveTerm(lpOr,encodedTl,encodedTr)),updatedUsedSymbolsR)
       case t1 <~> t2 => throw new Error(s"encountered un-encoded connective <~> ${t.pretty}")
 
       // term abstraction in terms

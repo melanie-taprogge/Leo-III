@@ -141,7 +141,7 @@ object ModularProofEncoding {
 
     // todo: test if we also need to handle <=> and <~> specifically
 
-    if(!additionalInfoSimp && !parent.cl.lits.flatMap(symbols(_)).contains(sig("<=").key)){
+    if(!additionalInfoSimp){
 
       val (encParent,encChild, _, _) =  initialEncUnclausified(parent.cl, child.cl, sig)
       Out.lp_debug_info(s"Encoding defExSimp of ${encParent.pretty} to ${encChild.pretty}")
@@ -177,8 +177,8 @@ object ModularProofEncoding {
       ((defExpStep ++ maybeSimpStep) :+ refineStep, None)
 
     }else{
-      Out.lp_debug_info("Rweriting under binder required in order to encode Simplification step or `<=` in parent")
-      (Seq(), Some("Rweriting under binder required in order to encode Simplification step or `<=` in parent"))
+      Out.lp_debug_info("Rweriting under binder required in order to encode Simplification step")
+      (Seq(), Some("Rweriting under binder required in order to encode Simplification step"))
     }
   }
 
