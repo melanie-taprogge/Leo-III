@@ -6,7 +6,7 @@ import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{cnfLib, lpDne}
+import leo.modules.output.LPoutput.LPSignature.{tempLib, lpDne}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
@@ -24,11 +24,11 @@ object LPoutput {
 
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
-  val leoSimpTacticFile = "UserTactic"
+  //val leoSimpTacticFile = "UserTactic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
 
-  //val nameCnfFile = "cnfLib"
+  val nameTempFile = "tempLib"
 
   val applyAllDefsTacName = "applyAllDefinitions"
 
@@ -431,11 +431,11 @@ object LPoutput {
       proofFileSB.append(completeProof.pretty)
 
       val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
-      val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
+      val simpTacLibStr = ""//f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
       val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
-      val cnfLibStr: String = ""//f"${nameLpOutputFolder}.${nameCnfFile}"
+      val tempLibStr: String = s"${nameLpOutputFolder}.${nameTempFile}"
 
-      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $cnfLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tempLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
 
       // create a folder for the lambdapi package
       // Create the output directory if it doesn't exist
@@ -452,8 +452,8 @@ object LPoutput {
       val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
-      //val cnfFilePath = lpOutputPath.resolve(s"$nameCnfFile.lp")
-      //Files.write(cnfFilePath, cnfLib.getBytes(StandardCharsets.UTF_8))
+      val tempFilePath = lpOutputPath.resolve(s"$nameTempFile.lp")
+      Files.write(tempFilePath, tempLib.getBytes(StandardCharsets.UTF_8))
 
       // create the Makefile and the pkg file
       val pkgFileName = "lambdapi.pkg"

@@ -866,7 +866,10 @@ object lpDatastructures {
     lazy val olTermApp = {
       assert(!rewritePattern0.isDefined && rwRhs == false, s"LP-Encoding: Trying to use $asOlTerm with rewrite pattern or keyword left")
       rewriteTerm match {
-        case t:lpOlTerm => lpOlFunctionApp(lpOlConstantTerm(asOlTerm),Seq(Left(t)))
+        case t:lpOlTerm =>
+          val patternStr = if (rewritePattern0.isDefined) s"\"${rewritePattern0.get}\"" else s"\"\""
+          val sideStr = if (rwRhs) s"\"left\"" else s"\"\""
+          lpOlFunctionApp(lpOlConstantTerm(asOlTerm),Seq(Left(lpOlConstantTerm(sideStr)), Left(lpOlConstantTerm(patternStr)),Left(t)))
         case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${rewriteTerm.pretty} to $asOlTerm")
       }
     }
