@@ -153,7 +153,7 @@ package object calculus {
     }
   }
 
-  final def skTerm(goalTy: Type, fvs: Seq[(Int, Type)], tyFvs: Seq[Int])(implicit sig: Signature): Term = {
+  final def skTerm(goalTy: Type, fvs: Seq[(Int, Type)], tyFvs: Seq[Int], term: Option[Term] = None)(implicit sig: Signature): Term = {
     val funTy = normalizeType(Type.mkFunType(fvs.map(_._2), goalTy), tyFvs)
     val ty = mkPolyTyAbstractionType(tyFvs.size,funTy)
     assert(ty.typeVars.isEmpty,
@@ -164,7 +164,7 @@ package object calculus {
         s"fvs: ${fvs.map(fv => s"(${fv._1},${fv._2.pretty(sig)})").mkString(",")},\n" +
         s"tyFvs: ${tyFvs.toString()},\n" +
         s"normalized funTy: ${funTy.pretty(sig)}")
-    val skFunc = Term.mkAtom(sig.freshSkolemConst(ty))
+    val skFunc = Term.mkAtom(sig.freshSkolemConst(ty,Signature.PropNoProp, term))
     val intermediate = Term.mkTypeApp(skFunc, tyFvs.map(Type.mkVarType))
     val result = Term.mkTermApp(intermediate, fvs.map {case (i,t) => Term.mkBound(t,i)})
     assert(Term.wellTyped(result), s"skTerm Result not well-typed: ${result.pretty(sig)}\n" +

@@ -533,7 +533,7 @@ object ToTPTP {
   }
 
   /** Gather consecutive all-quantifications (nameless). */
-  final private def collectChoice(t: Term): (Seq[Type], Term) = {
+  final def collectChoice(t: Term): (Seq[Type], Term) = {
     collectChoice0(Seq.empty, t)
   }
   @tailrec

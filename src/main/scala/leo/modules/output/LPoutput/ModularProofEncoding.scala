@@ -1,15 +1,17 @@
 package leo.modules.output.LPoutput
 import leo.Out
-import leo.datastructures.Literal.asTerm
+import leo.datastructures.Literal.{asTerm, symbols}
 import leo.modules.output.LPoutput.Encodings._
-import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term, Type}
+import leo.datastructures.{AddInfoCnf, Clause, ClauseProxy, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature._
 import leo.modules.calculus.PolaritySwitch
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.lpDatastructures.{lpOlTerm, _}
 import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.calculus.Simp.normalize
+import leo.modules.output.LPoutput.CNFEncoding.allBoolRuleApplicationStep
+import leo.modules.output.LPoutput.LPSignature.lpTheorems
 
 import scala.collection.mutable
 
@@ -111,48 +113,220 @@ object ModularProofEncoding {
     (lpProofScript(allSteps), usedSymbols)
     }
 
-  def encDefExSimp(child: ClauseProxy, parent: ClauseProxy, additionalInfoSimp: Seq[(Seq[Int], Int)], additionalInfoDefExp: Seq[Signature.Key], parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Set[lpStatement], Set[Signature.Key], Option[String]) = {
+  def initialEncUnclausified(parent: Clause, child: Clause, sig: Signature)={
+    val bVars = clauseVars2LP(child.implicitlyBound ++ parent.implicitlyBound, sig, Set.empty)._2
+    val encParent = term2LP(Clause.asTerm(parent),Map.empty,sig)._1
+    val encChild = term2LP(Clause.asTerm(child),bVars,sig)._1
+    val (childUnquantified, childOuterQuantified) = findBeginningVariables(encChild)
+    (encParent, encChild, childUnquantified, childOuterQuantified)
+  }
 
-    // outdated
-    // todo: update this function to proof scripts
+  def findBeginningVariables(t: lpOlTerm, accVars: Seq[lpOlTypedVar] = Seq.empty):(lpOlTerm,Seq[lpOlTypedVar])={
+    t match {
+      case lpOlMonoQuantifiedTerm(`lpOlForAll`,v0,t0,_) =>
+        findBeginningVariables(t0, accVars :+ v0)
+      case lpOlBoundTerm(`lpOlForAll`,v0,t0) =>
+        findBeginningVariables(t0, accVars ++ v0)
+      case _ => (t, accVars)
+    }
+  }
+
+  def EncDefExSimp(child: ClauseProxy, parent: ClauseProxy, defRuleDefined: Boolean, additionalInfoSimp: Boolean, reducedTerm0: Option[Literal], applyAllDefsTacName: String, parentNameLpEnc: lpConstantTerm, sig: Signature):(Seq[lpProofScriptStep],Option[String]) = {//: (lpProofScript, Set[lpStatement], Set[Signature.Key], Option[String]) = {
+
+    // Encoding of the application of the EP rule defexp_and_simp_and_etaexpand (Definition expansion)
+    // The modular proof script can consist of the following steps:
+    // 1. If definitions are defined, exhausitively apply them using rewrite
+    // 2. If simplifications were applies, verify them using the encoding of (SIMP)
+    // 3. Refine with the last step
+
+    // todo: test if we also need to handle <=> and <~> specifically
+
+    if(!additionalInfoSimp){
+
+      val (encParent,encChild, _, _) =  initialEncUnclausified(parent.cl, child.cl, sig)
+      Out.lp_debug_info(s"Encoding defExSimp of ${encParent.pretty} to ${encChild.pretty}")
+      val reducedTerm = if (reducedTerm0.isDefined) reducedTerm0.get else throw new Exception(s"LP-Encoding: Trying to encode DefExSimp but reduced Term derived by Leo-III is not defined")
+      val encExpTerm = term2LP(asTerm(reducedTerm),Map.empty,sig,Set(),false)._1
+      Out.lp_debug_info(s"parent: ${Clause.asTerm(parent.cl)}")
+      Out.lp_debug_info(s"expanded term: ${asTerm(reducedTerm)}")
+      Out.lp_debug_info(s"child: ${child.cl}")
+
+      //Out.lp_debug_info(s"Contains <= ? ${parent.cl.lits.flatMap(symbols(_)).contains(sig("<=").key)}")
+
+      val (defExpStep, appliedParent) : (Seq[lpProofScriptStep],lpTerm) =
+        if (defRuleDefined){
+          val haveStepName = "defExpStep"
+          val assumptionName = lpConstantTerm("h")
+          val applyParentToStep = lpFunctionApp(lpConstantTerm(haveStepName),Seq(parentNameLpEnc))
+          val applyDefExp = Seq(lpEval(lpOlConstantTerm(applyAllDefsTacName)))
+          val (assumeStep, refineStepHave): (lpAssume, lpRefine) = {
+            (lpAssume(Seq(assumptionName)), lpRefine(assumptionName))
+          }
+          (Seq(lpImpHaveStepConstructor(haveStepName, Seq(), encParent, encExpTerm,(applyDefExp ++ Seq(assumeStep,refineStepHave)))),applyParentToStep)
+        }else (Seq(),parentNameLpEnc)
+
+      val (maybeSimpStep, refineName) : (Seq[lpHave],lpTerm) = if (encExpTerm != encChild){
+        // Use the encoding of formula simplification to generate the proofs
+        // We only need the exhaustive simplification step, as the implicit transformations will only occur when operating on literals
+        val (simpStep, simpStepName) = encSimpProofSubstep(Seq.empty, encExpTerm, encChild)
+        (Seq(simpStep), lpFunctionApp(lpConstantTerm(simpStepName),Seq(appliedParent)))
+      }else (Seq(), appliedParent)
+
+      val refineStep = lpRefine(refineName)
+
+      ((defExpStep ++ maybeSimpStep) :+ refineStep, None)
+
+    }else{
+      Out.lp_debug_info("Rweriting under binder required in order to encode Simplification step")
+      (Seq(), Some("Rweriting under binder required in order to encode Simplification step"))
+    }
+  }
+
+  def doubleIndexList[A](xs: Seq[A]): Seq[Int] = {
+    // generate an index list where identical elements have identical indices
+    val (_, _, rev) = xs.foldLeft((Map.empty[A, Int], 0, List.empty[Int])) {
+      case ((m, next, acc), x) =>
+        m.get(x) match {
+          case Some(id) =>
+            (m, next, id :: acc)
+          case None =>
+            (m + (x -> next), next + 1, next :: acc)
+        }
+    }
+    rev.reverse
+  }
 
 
+  def encRenameCnf_conj(parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, cnfInfo: AddInfoCnf, sig: Signature) = {
 
-    val wasSimplified: Boolean = additionalInfoSimp.nonEmpty
-    Out.lp_debug_info(s"WAS SIMPLIFIED: $wasSimplified")
-    val wasEtaExp: Boolean = false
+    // Encode the set of all derived clauses when applying RenameCNF to a given formula
 
-    val bVars = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
+    val encParent = lpClauseInst(parent.cl, sig)
 
-    var usedSymbols: Set[lpStatement] = Set.empty
-    var allProofStep: Seq[lpProofScriptStep] = Seq.empty
+    Out.lp_debug_info(s"Verifying clausification of ${parentNameLpEnc.name}")
 
-    // todo: since we might have eta expanision this might have to be changed
+    // initial setup
+    var cantEncode: Option[String] = if (cnfInfo.renameHappend) Some("Renaming not encoded yet") else None
+    val (_, encChildClauses) = lpClauseInst.apply_to_set(cnfInfo.derivedClauses, sig)
+    val allMetaVars = encChildClauses.flatMap(_.metaVars).distinct
 
-    val encSimpChild = term2LP(Clause.asTerm(child.cl), bVars, sig)._1
+    /*
+    // check for "holes" in the variable-numbers
+    val allVars = cnfInfo.derivedClauses.flatMap(cl => cl.lits.flatMap(l => l.fv)).distinct
+    val fvs = allVars.map(_._1).distinct.sortWith { case (a, b) => a > b }
 
-    //// 1. Abstraction step
-    val quantifiedVars = clauseRuleQuantification(parent.cl, bVars, sig)._2
-    if (quantifiedVars.length > 0) {
-      //throw new Exception(s"the encoding of simplifications with implicitly quantified vars is not tested yet, comment this and check carefully")
-      val assumeStep = lpAssume(quantifiedVars)
-      allProofStep = allProofStep :+ assumeStep
+    //val prefvs = newLits.flatMap(_.fv).distinct
+    //val fvs = prefvs.map(_._1).distinct.sortWith { case (a, b) => a > b }
+    //val tyFVs = lits.flatMap(_.tyFV).distinct.sortWith { case (a, b) => a > b }
+    Out.lp_debug_info(s"fvs: $fvs")
+    val derivedClauses :  Seq[Clause] = if (fvs.nonEmpty && fvs.size != fvs.head) {
+      Out.lp_debug_info(s"FV Optimization : \t${fvs.mkString(",")}")
+      // gaps in fvs
+      val newFvs = Seq.range(fvs.size, 0, -1)
+      val subst = Subst.fromShiftingSeq(fvs.zip(newFvs))
+      Out.finest(s"New: \t${newFvs.mkString("-")} ... subst: ${subst.pretty}")
+      cnfInfo.derivedClauses.map(cl => Clause(cl.lits.map(l => l.applyRenamingSubstitution(subst))))
+    } else cnfInfo.derivedClauses
+     */
+
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //// 1. Assume any free variables
+    val assumeStep: Seq[lpProofScriptStep] = if (allMetaVars.nonEmpty) Seq(lpAssume(allMetaVars)) else Seq()
+
+    ///////////////////////////////////////////////////////////////////////////////////////
+    //// 2. Proof the conjunction in a sub-step using a Lambdapi tactic and
+    //// 3. Refine with the (instanciated) parent
+
+    // Construct the conjunction of all derived clauses
+    val conj = lpOlUntypedBinaryConnectiveTerm_multi(lpAnd, encChildClauses.map(_.term))
+
+    val allSteps_clausification: Seq[lpProofScriptStep] = if (cnfInfo.rewriteUnderBinder) {
+      // todo
+      Out.lp_debug_info("Can not encode CNF since it requires rewriting under binder")
+      cantEncode = Some("Clausification involving Binders not encoded")
+
+      /*
+      // encode skolem terms
+      cnfInfo.skolemTerms foreach { sk =>
+        Out.lp_debug_info(s" ")
+        val (sk0, defn, fVs) = sk
+        val bVarsMap = clauseVars2LP(fVs, sig, Set.empty)._2
+        Out.lp_debug_info(s"bVars map fVs: $bVarsMap")
+        val encSko = term2LP(sk0, bVarsMap, sig)._1
+        val skTy = type2LP(sk0.ty, sig)
+        Out.lp_debug_info(s"handling ${encSko.pretty}, type ${skTy.pretty}")
+        val freeVarsDfn = defn.fv.toSeq
+        val bVarsMap_dnf = clauseVars2LP(freeVarsDfn, sig, Set.empty)._2
+        Out.lp_debug_info(s"bVars ma free vars: $bVarsMap_dnf")
+        Out.lp_debug_info(s"diff in free vars: ${clauseVars2LP(freeVarsDfn.diff(fVs), sig, Set.empty)._2}")
+        // the last varible is the one we use choice on, all others are unbound in the term and an abstraction/ universal quantification has to be constructed (with regard to the variables that are included in the application to sko)
+        val encDfn = term2LP(defn, bVarsMap_dnf, sig)._1
+        // I need to construct a quantified term for the definition
+        //val maybeQuantDfn = mk
+        Out.lp_debug_info(s"enc defn and encoded skolem term:\n${encSko.pretty} = ${encDfn.pretty}")
+      }
+       */
+      Seq.empty
+    } else {
+      // In this case, only boolean identities were applied in clausification
+      assert(encParent.vars.length <= allMetaVars.length, "LP encoding: Clausification unexpectedly increased number of free vars")
+
+      // We verify the application via a have-step proving equality via a dedicated lambdapi tactic
+      val clauseStepName = "Clausification"
+      val clausStep = lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, Seq(allBoolRuleApplicationStep))
+
+      // we can then refine with the implication derived from this equality and the parent-step
+      val refineStep = lpRefine(lpFunctionApp(lpFunctionApp(lpTheorems.eqImp, Seq(lpFunctionApp(lpConstantTerm(clauseStepName), allMetaVars))), Seq(lpFunctionApp(parentNameLpEnc, allMetaVars))))
+      (Seq(clausStep) ++ assumeStep) :+ refineStep
     }
 
-    //// 2. Proof defExpansion and / or simplification
-    if (wasSimplified) {
-      val (simpProof, usedSymbolsSimplification) = simplificationProofScript(child.cl, parent.cl, additionalInfoSimp, additionalInfoDefExp.toSet, parentNameLpEnc, quantifiedVars, bVars, sig)
-      usedSymbols = usedSymbols ++ usedSymbolsSimplification
-      if (parent.cl.lits.length != child.cl.lits.length) throw new Exception(s"when simplifying to ${encSimpChild.pretty} a literal was deleted, this is not yet encoded")
+    // Some additional information necessary to construct the proof-step and insert all necessary declarations of Skolem-Terms
+    val maybeQuanrifiedConj: lpMlType = if (allMetaVars.isEmpty) conj.prf else lpMlDependType(allMetaVars, conj.prf)
+    val allSymbols = cnfInfo.derivedClauses.flatMap(Clause.symbols(_)).toSet
 
-      allProofStep = allProofStep :+ simpProof
+    (lpProofScript(allSteps_clausification), cantEncode, maybeQuanrifiedConj, allSymbols)
+  }
+
+  def encRenameCnf_cl(child: ClauseProxy, conj: lpConstantTerm, cnfInfo: AddInfoCnf, sig: Signature)={
+
+    // Given a conjunction of clauses, derive just one individual clause
+
+    // encode the derived clauses
+    val (_, encChildClauses) = lpClauseInst.apply_to_set(cnfInfo.derivedClauses, sig)
+
+    // if we have only one clause, we can directly return it.
+    if (encChildClauses.length <= 1) {
+      lpProofScript(Seq(lpRefine(conj)))
+    } else {
+
+      // preliminaries
+      val allMetaVars = encChildClauses.flatMap(_.metaVars).distinct
+
+      // if double clauses were deleted, we need to adjust the index:
+      val indxInConj = cnfInfo.numberInClause
+      val doubleIdx = doubleIndexList(cnfInfo.derivedClauses)
+      val shiftedIndx = if (doubleIdx.distinct.length != doubleIdx.length) {
+        Out.lp_debug_info(s"Occurence of double clauses: $doubleIdx")
+        doubleIdx.indexOf(indxInConj)
+      } else indxInConj
+      if (shiftedIndx != indxInConj) Out.lp_debug_info(s"Shifted Index from $indxInConj to $shiftedIndx")
+
+      ///////////////////////////////////////////////////////////////////////////////////////
+      //// 1. Assume any free variables
+      val varsToAssume = encChildClauses(shiftedIndx).metaVars
+      val assumeStep = if (varsToAssume.nonEmpty) Seq(lpAssume(varsToAssume)) else Seq()
+
+      ///////////////////////////////////////////////////////////////////////////////////////
+      //// 2. Instanciate the meta-theorem "select" to derive one clause from a conjunction
+      // We need to instanciate those variables in the assume step that are not also free in the deried clause with witness terms
+      val applyToSelectSteps = allMetaVars.map(metVar => if (varsToAssume.contains(metVar)) metVar else lpWitness.fromAnyType(metVar.ty))
+      val seqWithWildcards = Seq.fill(encChildClauses.length)(lpOlWildcard).updated(shiftedIndx, encChildClauses(shiftedIndx).term)
+
+      // Instanciate the meta theorem
+      val selectStep = metaSelect.instanciate(seqWithWildcards, shiftedIndx, lpFunctionApp(conj, applyToSelectSteps))
+
+      (lpProofScript(assumeStep :+ (lpRefine(selectStep))))
     }
-
-    // combine all steps into one proof script
-    val proofScript = lpProofScript(allProofStep)
-
-    // (lpProofScript(Seq.empty),Set.empty,Set.empty,Option("encDefExSimp encoding outdated"))
-    (proofScript, usedSymbols, additionalInfoDefExp.toSet, Option("encDefExSimp encoding outdated"))
   }
 
 
@@ -1097,7 +1271,7 @@ object ModularProofEncoding {
     (proofScript, usedSymbols)
   }
 
-  def inferImplicitTransformationsSimp(parentLits: Seq[Literal], childLen: Int, bVarMap: Map[Int, String], sig: Signature): (Seq[Literal], Seq[Int], Seq[lpProofScriptStep], Seq[lpStatement]) = {
+  def inferImplicitTransformationsSimp(parentLits: Seq[Literal], ChildLits: Seq[Literal], childLen: Int, bVarMap: Map[Int, String], sig: Signature): (Seq[Literal], Seq[Int], Seq[lpProofScriptStep], Seq[lpStatement]) = {
 
     // Applies simplification to the given literals and then applies the operations carried out by Leo-III that can potentialy lead to the literal
     // being flipped or transformed in any other way. Then forms a new sequence omitting any literals that reduce to F or have already been
@@ -1118,7 +1292,7 @@ object ModularProofEncoding {
     }
 
     // Process each literal from the parent.
-    parentLits.foreach { parentLit =>
+    parentLits.foreach {parentLit =>
       if (!parentLit.equational) {
         val lit = PolaritySwitch(Literal(normalize(parentLit.left), parentLit.polarity))
         addLiteral(lit)
@@ -1159,8 +1333,9 @@ object ModularProofEncoding {
 
     assert(simpLits.length == childLen, s"LP-Encoding: Lengths of derived and given simplifications differ. Derived clause: ${simpLits.length} literals, given Clause: ${childLen} literals.")
     // If no literals were added, default to false.
-    if (simpLits.isEmpty)
-      simpLits = Seq(Literal(LitFalse(), true))
+    if (simpLits.isEmpty) {
+      simpLits = if (ChildLits.isEmpty) Seq(Literal(LitFalse(), true)) else ChildLits
+    }
     if (doubleLiterals.isEmpty)
       doubleLiterals = Seq(0)
 
@@ -1190,6 +1365,76 @@ object ModularProofEncoding {
     haveSimpAppStep
   }
 
+  def lpEqHaveStepConstructor(stepName: String, quantifiedVars: Seq[lpTypedVar], termLhs: lpOlTerm, termRhs: lpOlTerm, ty: lpOlType, proofScriptSteps: Seq[lpProofScriptStep]): lpHave = {
+    // Function constructing subproofs for one clause implying another using the have-tactic with potential...
+    // - Abstraction over variables
+
+    val eqToProve = lpOlTypedBinaryConnectiveTerm(lpEq, ty, termLhs, termRhs)
+    // Quantify over variables if necessary
+    val (maybeQuanrifiedImpToProve, fullProofScript) =
+      if (quantifiedVars.isEmpty) (eqToProve.prf, lpProofScript(proofScriptSteps))
+      else (lpMlDependType(quantifiedVars, eqToProve.prf), lpProofScript(Seq(lpAssume(quantifiedVars)) ++ proofScriptSteps))
+    // Complete substep using have-tactic
+    val haveSimpAppStep = lpHave(stepName, maybeQuanrifiedImpToProve, fullProofScript)
+    haveSimpAppStep
+  }
+
+  def encSimpProofSubstep(disappearingVars: Seq[lpTypedVar], termBefore: lpOlTerm, termAfter: lpOlTerm)={
+    // Step applying all of the RW-rules encoding the simplifications
+    val simpAppStepName = "SimpApp"
+    val haveSimpAppStep = lpImpHaveStepConstructor(simpAppStepName, disappearingVars, termBefore, termAfter, Seq(allSimpRuleApplicationStep))
+    Out.lp_debug_info("Substep applying the boolean identities generated")
+
+    (haveSimpAppStep, simpAppStepName)
+  }
+
+  /** Carry out the construction of a proof script for applications of (SIMP)*/
+  def encSimpProofScript(pLits: Seq[Literal], cLits: Seq[Literal], encParent: lpClauseInst, encChild: lpClauseInst, childLen: Int, bVarMap: Map[Int, String], parentNameLpEnc: lpTerm, sig:Signature)= {
+
+
+    // Identify any implicit transformations that may need to be encoded
+    val (simpLits, doubleLiterals, implicitRwTransf, usedSymbolsTransf) = inferImplicitTransformationsSimp(pLits, cLits, childLen, bVarMap, sig)
+    val encSimpLits = simpLits.map(simpLit => lpLiteral(simpLit, bVarMap, sig).term)
+    Out.lp_debug_info(s"simplified literals: ${encSimpLits.map(_.pretty)}")
+
+
+    /////////////////////////////////////////////////////
+    //// 2. Instaniate a subproof (SimpApp) using have to proof that the parent implies the child
+    ////    by applying all of the simplification rules to the parent
+
+    // If we need to account for the deletion of double literals, we include the duplicates in the implication we construct
+    //    and remove them in an additional step
+    val clauseToProve = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, doubleLiterals.map(indx => encSimpLits(indx)))
+    // Identify any variables that were implicitly quantified in the parent but not in the child
+    val disappearingVars = encParent.metaVars.diff(encChild.metaVars)
+    val (haveSimpAppStep, simpAppStepName) = encSimpProofSubstep(disappearingVars, encParent.term, clauseToProve)
+
+
+
+    /////////////////////////////////////////////////////
+    //// 3. Apply Implicit transformations: Deletion of double literals, eqSym and permutation
+
+    val witnessTermsToApply = disappearingVars.map(var0 => lpWitness.fromAnyType(var0.ty))
+    val allTermsToApplyToParent = encParent.metaVars.map(var0 => if (disappearingVars.contains(var0)) lpWitness.fromAnyType(var0.ty) else var0)
+    val appliedSimpAppStepName = lpFunctionApp.toDefName(simpAppStepName, witnessTermsToApply)
+    val simpStepName = lpFunctionApp(appliedSimpAppStepName, Seq(lpFunctionApp(parentNameLpEnc, allTermsToApplyToParent)))
+    val (maybePerm, maybePermStepName): (Set[lpStatement], lpFunctionApp) = if (doubleLiterals != doubleLiterals.indices) {
+      // Application of delete literal is necessary
+      // todo: exclude cases where the rewrite rule applied by LP would also handle it. (should only happen if the relevant literals are at the two most left ones right?)
+      Out.lp_debug_info(s"need to prove ${doubleLiterals.map(indx => encChild.lits(indx).pretty)}")
+      val instMetaDelTheorem = metaDeletion.instanciate(encChild.lits, doubleLiterals, simpStepName)
+      (Set(metaPermutation), instMetaDelTheorem)
+    } else (Set(), simpStepName)
+
+
+    /////////////////////////////////////////////////////
+    //// 4. Refine with the parent applied to SimpApp
+
+    val refineStep = lpRefine(maybePermStepName)
+    val allSteps: Seq[lpProofScriptStep] = (Seq(haveSimpAppStep) ++ implicitRwTransf) :+ refineStep
+
+    (allSteps, maybePerm ++ usedSymbolsTransf)}
+
   def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpConstantTerm, sig: Signature):(Seq[lpProofScriptStep],Set[lpStatement])={
 
     // Encoding of the simplification via exhaustive application of the encoded boolean equalities via the rewrite tactic
@@ -1214,48 +1459,13 @@ object ModularProofEncoding {
     val encParent = encParent0.head
     Out.lp_debug_info(s"Encoding simplification of ${encParent.term.pretty} to ${encChild.term.pretty}")
 
-    // Identify any implicit transformations that may need to be encoded
-    val (simpLits, doubleLiterals, implicitRwTransf, usedSymbolsTransf) = inferImplicitTransformationsSimp(parent.lits,child.lits.length,bVarMap,sig)
-    val encSimpLits = simpLits.map(simpLit => lpLiteral(simpLit,bVarMap,sig).term)
-
-
     /////////////////////////////////////////////////////
-    //// 2. Instaniate a subproof (SimpApp) using have to proof that the parent implies the child
-    ////    by applying all of the simplification rules to the parent
+    //// 2 - 4
+    val (allSteps0, usedSymbols) = encSimpProofScript(parent.lits, child.lits, encParent, encChild, child.lits.length, bVarMap, parentNameLpEnc, sig)
 
-    // If we need to account for the deletion of double literals, we include the duplicates in the implication we construct
-    //    and remove them in an additional step
-    val clauseToProve = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,doubleLiterals.map(indx => encSimpLits(indx)))
-    // Identify any variables that were implicitly quantified in the parent but not in the child
-    val disappearingVars = encParent.metaVars.diff(encChild.metaVars)
-    // Step applying all of the RW-rules encoding the simplifications
-    val simpAppStepName = "SimpApp"
-    val haveSimpAppStep = lpImpHaveStepConstructor(simpAppStepName,disappearingVars,encParent.term,clauseToProve,Seq(allSimpRuleApplicationStep))
+    val allSteps = initialStep ++ allSteps0
 
-
-    /////////////////////////////////////////////////////
-    //// 3. Apply Implicit transformations: Deletion of double literals and eqSym
-
-    val witnessTermsToApply = disappearingVars.map(var0 => lpWitness.fromAnyType(var0.ty))
-    val allTermsToApplyToParent = encParent.metaVars.map(var0 => if (disappearingVars.contains(var0)) lpWitness.fromAnyType(var0.ty) else var0)
-    val appliedSimpAppStepName = lpFunctionApp.toDefName(simpAppStepName,witnessTermsToApply)
-    val simpStepName = lpFunctionApp(appliedSimpAppStepName,Seq(lpFunctionApp(parentNameLpEnc, allTermsToApplyToParent)))
-    val (maybePerm, maybePermStepName): (Set[lpStatement], lpFunctionApp) = if (doubleLiterals != doubleLiterals.indices) {
-      // Application of delete literal is necessary
-      // todo: exclude cases where the rewrite rule applied by LP would also handle it. (should only happen if the relevant literals are at the two most left ones right?)
-      Out.lp_debug_info(s"need to prove ${doubleLiterals.map(indx => encChild.lits(indx).pretty)}")
-      val instMetaDelTheorem = metaDeletion.instanciate(encChild.lits,doubleLiterals,simpStepName)
-      (Set(metaPermutation),instMetaDelTheorem)
-    } else (Set(), simpStepName)
-
-
-    /////////////////////////////////////////////////////
-    //// 4. Refine with the parent applied to SimpApp
-
-    val refineStep = lpRefine(maybePermStepName)
-    val allSteps : Seq[lpProofScriptStep] = ((initialStep :+ haveSimpAppStep) ++ implicitRwTransf) :+ refineStep
-
-    (allSteps,maybePerm ++ usedSymbolsTransf)
+    (allSteps, usedSymbols)
   }
 
   def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Set[lpStatement],Option[String]) = { //: (lpProofScript, Set[lpStatement]) = {
@@ -1621,7 +1831,7 @@ object ModularProofEncoding {
             }
           } else t
         case lpOlLambdaTerm(vars, body) => lpOlLambdaTerm(vars.map(var0 => substituteTypedVarsTerm(var0, subsMap)), substituteVarTerm(body, subsMap))
-        case lpOlFunctionApp(f, args) =>
+        case lpOlFunctionApp(f, args, _) =>
           var encArgs: Seq[Either[lpOlTerm, lpOlType]] = Seq.empty
           args foreach { arg =>
             arg match {
@@ -1633,7 +1843,7 @@ object ModularProofEncoding {
             }
           }
           lpOlFunctionApp(substituteVarTerm(f, subsMap), encArgs)
-        case lpOlQuantifiedTerm(quantifier, variables, body) => lpOlQuantifiedTerm(quantifier, variables.map(var0 => isTermVar(substituteTypedVarsTerm(Left(var0), subsMap))), substituteVarTerm(body, subsMap))
+        case lpOlBoundTerm(quantifier, variables, body) => lpOlBoundTerm(quantifier, variables.map(var0 => isTermVar(substituteTypedVarsTerm(Left(var0), subsMap))), substituteVarTerm(body, subsMap))
         case lpOlUnaryConnectiveTerm(connective, body) => lpOlUnaryConnectiveTerm(connective, substituteVarTerm(body, subsMap))
         case lpOlUntypedBinaryConnectiveTerm(connective, lhs, rhs) => lpOlUntypedBinaryConnectiveTerm(connective, substituteVarTerm(lhs, subsMap), substituteVarTerm(rhs, subsMap))
         case lpOlTypedBinaryConnectiveTerm(connective, ty, lhs, rhs) => lpOlTypedBinaryConnectiveTerm(connective, ty, substituteVarTerm(lhs, subsMap), substituteVarTerm(rhs, subsMap))

@@ -164,16 +164,20 @@ package inferenceControl {
 
     private final def cnf2(cl: AnnotatedClause, s: GeneralState[AnnotatedClause]): Set[AnnotatedClause] = {
       Out.trace(s"Rename CNF of ${cl.pretty(s.signature)}")
-      val cnfresult = RenameCNF(leo.modules.calculus.freshVarGen(cl.cl), s.renamingCash, cl.cl)(s.signature).toSet
+      val (cnfresult0, unencodableCNF0, renameHappend, sks) = RenameCNF.apply_rwUnderBinder(leo.modules.calculus.freshVarGen(cl.cl), s.renamingCash, cl.cl)(s.signature)
+      val cnfresult = cnfresult0.distinct
       if (cnfresult.size == 1 && cnfresult.head == cl.cl) {
         // no CNF step at all
         Out.trace(s"CNF result:\n\t${cl.pretty(s.signature)}")
         Set(cl)
       } else {
         val cnfsimp = cnfresult //.map(Simp.shallowSimp)
-        val result = cnfsimp.map {c => AnnotatedClause(c, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties))} // TODO Definitions other way into the CNF.
+        //todo: you need to trace weather any of the clauses are deleted and then verify with a new meta theorem
+        val result = cnfsimp.zipWithIndex.map {case (c, idx) =>
+          val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(unencodableCNF0,renameHappend,sks,cnfresult0,idx))
+          AnnotatedClause(c, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties),furtherInfo)}
         Out.trace(s"CNF result:\n\t${result.map(_.pretty(s.signature)).mkString("\n\t")}")
-        result
+        result.toSet
       }
     }
 
@@ -1831,11 +1835,10 @@ package inferenceControl {
         assert(Clause.unit(cl.cl))
         val lit = cl.cl.lits.head
         assert(!lit.equational)
-        val (newleft, addInfoSimp, addInforDefExp) = DefExpSimp.apply_andTrack(lit.left)(sig)
-        val information: FurtherInfo = cl.furtherInfo
-        information.addInfoSimp = information.addInfoSimp ++ addInfoSimp
-        information.addInfoDefExp = information.addInfoDefExp ++ addInforDefExp
-        val result = AnnotatedClause(Clause(Literal(newleft, lit.polarity)), Role_Plain, InferredFrom(DefExpSimp, cl), cl.properties, information)
+        val (newleft, rwUnderBinder0, addInforDefExp) = DefExpSimp.apply_andTrack(lit.left)(sig)
+        val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rwUnderBinder0)
+        furtherInfo.addInfoDefExp = Some(Literal(addInforDefExp, lit.polarity))
+        val result = AnnotatedClause(Clause(Literal(newleft, lit.polarity)), Role_Plain, InferredFrom(DefExpSimp, cl), cl.properties, furtherInfo)
         Out.trace(s"Def expansion: ${result.pretty(sig)}")
         result
       }

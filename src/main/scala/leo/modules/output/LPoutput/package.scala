@@ -5,7 +5,7 @@ import leo.datastructures.Term.∙
 import leo.datastructures.{Clause, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature.{===, HOLBinaryConnective, Not, |||}
 import leo.modules.output.LPoutput.Encodings.type2LP
-import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpLambdaTerm, lpNot, lpOlBot, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlQuantifiedTerm, lpOlTerm, lpOlTop, lpOlType, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlTyVar, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
+import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpInEq, lpLambdaTerm, lpNot, lpOlBinder, lpOlBot, lpOlBoundTerm, lpOlConnective, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlTerm, lpOlTop, lpOlTyVar, lpOlType, lpOlTypedBinaryConnective, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnappliedConnective, lpOlUnaryConnective, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnective, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
 
@@ -59,20 +59,67 @@ package object LPoutput {
     else findSafeName(newName, sig)
   }
 
-  private final val partiallyAlliedTPTPmap : Map[String, (String,lpOlConstantTerm, lpOlConstantTerm) => lpOlLambdaTerm] = //Vector("=", "!=", "&", "|", "~", "!", "?")
+  private final val partiallyAlliedTPTPmap: Map[String, lpOlUnappliedConnective] = //Vector("=", "!=", "&", "|", "~", "!", "?")
   // symbol =_part (a : Set) ≔ λ (x y : τ a), x = y;
-    Map.apply("~" -> ((_, x, _) => lpOlLambdaTerm(Seq(Left(lpOlTypedVar(x,lpOtype))),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedVar(x,lpOtype)))),
-      "=" -> ((a, x, y) => lpOlLambdaTerm(Seq(Right(lpOlTyVar(a)),Left(lpOlTypedVar(x,lpOlUserDefinedType(a))),Left(lpOlTypedVar(y,lpOlUserDefinedType(a)))),lpOlTypedBinaryConnectiveTerm(lpEq,lpOlUserDefinedType(a),lpOlTypedVar(x,lpOlUserDefinedType(a)),lpOlTypedVar(y,lpOlUserDefinedType(a))))),
-      "!=" -> ((a, x, y) => lpOlLambdaTerm(Seq(Right(lpOlTyVar(a)),Left(lpOlTypedVar(x,lpOlUserDefinedType(a))),Left(lpOlTypedVar(y,lpOlUserDefinedType(a)))),lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,lpOlUserDefinedType(a),lpOlTypedVar(x,lpOlUserDefinedType(a)),lpOlTypedVar(y,lpOlUserDefinedType(a)))))),
-      "&" -> ((_, x, y) => lpOlLambdaTerm(Seq(Left(lpOlTypedVar(x,lpOtype)),Left(lpOlTypedVar(y,lpOtype))),lpOlUntypedBinaryConnectiveTerm(lpAnd,lpOlTypedVar(x,lpOtype),lpOlTypedVar(y,lpOtype)))),
-      "|" -> ((_, x, y) => lpOlLambdaTerm(Seq(Left(lpOlTypedVar(x,lpOtype)),Left(lpOlTypedVar(y,lpOtype))),lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlTypedVar(x,lpOtype),lpOlTypedVar(y,lpOtype)))),
-      "!" -> ((a, x, _) => lpOlLambdaTerm(Seq(Right(lpOlTyVar(a)),Left(lpOlTypedVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))))),lpOlMonoQuantifiedTerm(lpOlForAll,lpOlTypedVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))),x,true))),
-      "?" -> ((a, x, _) => lpOlLambdaTerm(Seq(Right(lpOlTyVar(a)),Left(lpOlTypedVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))))),lpOlMonoQuantifiedTerm(lpOlExists,lpOlTypedVar(x,lpOlFunctionType(Seq(lpOlUserDefinedType(a),lpOtype))),x,true))))
-      // todo: the other connectives
+    Map.apply("~" -> lpNot.unapplied,
+      "=" -> lpEq.unapplied,
+      "!=" -> lpInEq.unapplied,
+      "&" -> lpAnd.unapplied,
+      "|" -> lpOr.unapplied,
+      "!" -> lpOlForAll.unapplied,
+      "?" -> lpOlExists.unapplied)
+  // todo: the other connectives
+
+  def applyPartiallyAppliedConnective(con: lpOlUnappliedConnective, args: Seq[Either[lpOlTerm,lpOlType]], impArgs: Seq[Either[lpOlTerm,lpOlType]]): lpOlTerm ={
+    Out.lp_debug_info(s"encoding partially applied connective: ${con.pretty} with args ${args}")
+    con.base match {
+      case con0: lpOlUnaryConnective =>
+        // if there is at leas one arguemnt, we can apply it
+        assert(impArgs.isEmpty, "LP-Encoding: Encountered unexpected implicit arguments")
+        args match {
+          case Seq(Left(arg0)) => (lpOlUnaryConnectiveTerm(con0, arg0))
+          case _ =>
+            if (args.length > 0) lpOlFunctionApp(con,args)
+            else con
+        }
+      case con0: lpOlUntypedBinaryConnective =>
+        assert(impArgs.isEmpty, "LP-Encoding: Encountered unexpected implicit arguments")
+        args match {
+          case Seq(Left(arg0),Left(arg1)) => (lpOlUntypedBinaryConnectiveTerm(con0, arg0, arg1))
+          case _ =>
+            if (args.length > 0) lpOlFunctionApp(con, args)
+            else con
+        }
+      case con0: lpOlTypedBinaryConnective =>
+        impArgs ++ args match {
+          case Seq(Right(arg0), Left(arg1), Left(arg2)) => (lpOlTypedBinaryConnectiveTerm(con0, arg0, arg1, arg2))
+          case _ =>
+            if (args.length > 0) lpOlFunctionApp(con, (impArgs ++ args).tail, Seq((impArgs ++ args).head))
+            else con
+        }
+      case con0: lpOlBinder =>
+        impArgs ++ args match {
+          case Seq(Right(arg0), Left(arg1)) =>
+            arg1 match {
+              case lpOlLambdaTerm(vars,body0) =>
+                assert(vars.length > 0)
+                vars.head match {
+                  case Left(typedVar) =>
+                    val body = if (vars.length == 1) body0 else lpOlLambdaTerm(vars.tail,body0)
+                    lpOlMonoQuantifiedTerm(con0, typedVar, body)
+                }
+              case _ => lpOlFunctionApp(con, Seq(Left(arg1)), Seq(Right(arg0)))
+            }
+          case _ =>
+            if (args.length > 0) lpOlFunctionApp(con, (impArgs ++ args).tail, Seq((impArgs ++ args).head))
+            else con
+        }
+    }
+  }
 
   final def lpEscapeName(str: String, sig: Signature): String = {
     if (partiallyAlliedTPTPmap.keySet.contains(str)) {
-      throw new Exception(s"trying to escape name for parially applied connective, this should not happen")
+      throw new Exception(s"trying to escape name for parially applied connective $str, this should not happen")
     } //throw new Exception(s"found illegal $str")
     else if (lpKeywords.contains(str)) {
       val newName = findSafeName(str, sig)
@@ -90,12 +137,17 @@ package object LPoutput {
   final def lpEscapeTerm(str: String,sig: Signature): lpOlTerm = {
     if (partiallyAlliedTPTPmap.keySet.contains(str)) {
       // todo: eventhough lambdapi can handle reusing of variable names, we should make sure to generate some fresh variable names for our new anonomus functions
-      return partiallyAlliedTPTPmap(str)("a",lpOlConstantTerm("x"),lpOlConstantTerm("y"))
+      return partiallyAlliedTPTPmap(str)
     }
     else {
       val safeName = lpEscapeName(str, sig)
       lpOlConstantTerm(safeName)
     }
+  }
+
+  def applyAnyStep(listOfTacitcs: lpOlTerm) = {
+    // todo: figure out where this sould actually be
+    lpOlFunctionApp(lpOlConstantTerm("applyAny"), Seq(Left(listOfTacitcs)))
   }
 
   def liftVarsToMeta(vars:  Seq[Either[lpOlTypedVar, lpOlTyVar]]): Seq[lpTypedVar]={
@@ -258,6 +310,7 @@ package object LPoutput {
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case `lpOlBot` =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
+      case _: lpOlUnappliedConnective => (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlConstantTerm(_) =>
         (lpOlWildcard, searchIn, 0, rwUnderBinder)
       case lpOlTypedVar(_,_) =>
@@ -271,10 +324,10 @@ package object LPoutput {
         val pattern = if (counter == 0) lpOlWildcard else lpOlLambdaTerm(vars, patternbody)
         val rewrittenTerm = lpOlLambdaTerm(vars, rewrittenbody0)
         (pattern, rewrittenTerm, counter, true)
-      case lpOlQuantifiedTerm(quantifier, vars, body) =>
+      case lpOlBoundTerm(quantifier, vars, body) =>
         val (patternbody, rewrittenbody0, counter, _) = findRWTerm0(termRwMap, body, rwUnderBinder, patternVar, 0)
-        val pattern = if (counter == 0) lpOlWildcard else lpOlQuantifiedTerm(quantifier, vars, patternbody)
-        val rewrittenTerm = lpOlQuantifiedTerm(quantifier, vars, rewrittenbody0)
+        val pattern = if (counter == 0) lpOlWildcard else lpOlBoundTerm(quantifier, vars, patternbody)
+        val rewrittenTerm = lpOlBoundTerm(quantifier, vars, rewrittenbody0)
         (pattern, rewrittenTerm, counter, true)
       case lpOlUnaryConnectiveTerm(con, term) =>
           val (patternTerm, rewrittenTerm0, counter, rwUnderBinder0) = findRWTerm0(termRwMap, term, rwUnderBinder, patternVar, 0)
@@ -306,7 +359,7 @@ package object LPoutput {
         val pattern = if (newCounter == 0) lpOlWildcard else lpOlTypedBinaryConnectiveTerm(con, ty, patternLhs, patternRhs)
         val rewrittenTerm = lpOlTypedBinaryConnectiveTerm(con, ty, rewrittenLhs, rewrittenRhs)
         (pattern, rewrittenTerm, newCounter, rwUnderBinderLhs || rwUnderBinderRhs)
-      case lpOlFunctionApp(head,args) =>
+      case lpOlFunctionApp(head,args,_) =>
         val (patternHead, termHead, counterHead, rwUnderBinderHead) = findRWTerm0(termRwMap, head, rwUnderBinder, patternVar, 0)
         var patternsArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
         var termsArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
@@ -340,7 +393,7 @@ package object LPoutput {
   def betaReduceLpApplication(term0:lpOlTerm):lpOlTerm ={
     term0 match {
       // only in this case can we reduce
-      case lpOlFunctionApp(lpOlLambdaTerm(vars,body), args) =>
+      case lpOlFunctionApp(lpOlLambdaTerm(vars,body), args, _) =>
         assert(vars.length >= args.length)
         Out.lp_debug_info(s"Beta-reduction occurring for ${term0.pretty}")
 
@@ -360,16 +413,6 @@ package object LPoutput {
         Out.lp_debug_info(s"terms to rewrite: $termSubstDict")
         if (tySubstDict.nonEmpty) Out.lp_debug_info(s"Can not currently substitute types but found type subst: $tySubstDict")
 
-        /*
-        val args0: Seq[lpOlTerm] = args.map(arg => arg match {
-          case Left(term) => term
-          case Right(ty) => throw new Exception(s"can not currently encode subst of type variables")
-        })
-        val substDict : Map[lpOlTerm,lpOlTerm] = vars.zip(args0).toMap
-        Out.lp_debug_info(s"rewriting with dictionary $substDict")
-        Out.lp_debug_info(s"searching in $body")
-         */
-
         val reducedBody = findRWTerm0(termSubstDict,body)._2
         // todo: actually, I should probably search the body for reducable terms again?
         val remainingVars = vars.drop(args.length)
@@ -377,13 +420,11 @@ package object LPoutput {
         Out.lp_debug_info(s"reduced to ${reduced.pretty}")
         reduced
 
-
-
       // in all other cases we need to search substructures for reducable terms
       case lpOlLambdaTerm(vars,body) =>
         lpOlLambdaTerm(vars,betaReduceLpApplication(body))
-      case lpOlQuantifiedTerm(quantifier, vars, body) =>
-        lpOlQuantifiedTerm(quantifier, vars, betaReduceLpApplication(body))
+      case lpOlBoundTerm(quantifier, vars, body) =>
+        lpOlBoundTerm(quantifier, vars, betaReduceLpApplication(body))
       case lpOlUnaryConnectiveTerm(con, term) =>
         lpOlUnaryConnectiveTerm(con, betaReduceLpApplication(term))
       case lpOlUntypedBinaryConnectiveTerm(con,lhs,rhs) =>
@@ -393,12 +434,24 @@ package object LPoutput {
         lpOlUntypedBinaryConnectiveTerm_multi(con, reducedArgs)
       case lpOlTypedBinaryConnectiveTerm(con, ty, lhs, rhs) =>
         lpOlTypedBinaryConnectiveTerm(con, ty, betaReduceLpApplication(lhs), betaReduceLpApplication(rhs))
-      case lpOlFunctionApp(head,args) =>
+      case lpOlFunctionApp(head,args,innerArgs) =>
         val reducedArgs = args.map {
           case Left(term) => Left(betaReduceLpApplication(term))
           case other => other
         }
-        lpOlFunctionApp(head,args)
+        val reducedInnerArgs = innerArgs.map {
+          case Left(term) =>
+            Out.lp_debug_info(s"l: ${term.pretty}")
+            Left(betaReduceLpApplication(term))
+          case other =>
+            other
+        }
+        head match {
+          case con: lpOlUnappliedConnective =>
+            applyPartiallyAppliedConnective(con,reducedArgs, reducedInnerArgs)
+          case _ =>
+            lpOlFunctionApp(head,reducedArgs,reducedInnerArgs)
+        }
       // all other possible terms should be constants
       case _ => term0
     }
@@ -438,7 +491,7 @@ package object LPoutput {
         }
         alphaEquivalent(lam1.body, lam2.body, newEnv)
       }
-    case (q1: lpOlQuantifiedTerm, q2: lpOlQuantifiedTerm) =>
+    case (q1: lpOlBoundTerm, q2: lpOlBoundTerm) =>
       if (q1.quantifier != q2.quantifier) false
       else {
         (q1.variables, q2.variables) match {

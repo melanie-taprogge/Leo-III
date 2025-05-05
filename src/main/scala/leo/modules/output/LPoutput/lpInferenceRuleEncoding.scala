@@ -313,5 +313,22 @@ object lpInferenceRuleEncoding {
     }
   }
 
+  case object metaSelect extends inferenceRules {
+
+    override def name: lpConstantTerm = lpConstantTerm(s"select")
+
+    override def ty: lpMlType = throw new Exception(s"trying to access type of Lambdapi-Meta theorem transform")
+
+    override def proof: lpProofScript = throw new Exception(s"trying to access proof of Lambdapi-Meta theorem transform")
+
+    override def dec: lpDeclaration = throw new Exception(s"trying to access declaration of Lambdapi-Meta theorem transform")
+
+    override def pretty: String = throw new Exception(s"trying to access pretty of Lambdapi-Meta theorem transform")
+
+    def instanciate(c: Seq[lpOlTerm], n: Int, before: lpTerm): lpFunctionApp = {
+      lpFunctionApp(name, Seq(lpNum(n), lpList(c), lpOlTop_i, before))
+    }
+  }
+
 
 }

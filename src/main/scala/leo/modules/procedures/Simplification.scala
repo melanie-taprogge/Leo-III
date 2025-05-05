@@ -3,6 +3,7 @@ package leo.modules.procedures
 import leo.Out
 import leo.datastructures.{Literal, Rat, Real, Term, Type}
 import leo.datastructures.Term.local._
+import leo.modules.calculus.RewriteState
 
 import scala.annotation.{switch, tailrec}
 
@@ -53,9 +54,7 @@ object Simplification extends Function1[Term, Term] {
     *
     * @return The term that is created by exhaustively applying all the rewriting rules given in [[Simplification]].
     */
-  final class RewriteState {
-    var rewriteUnderBinderHappened: Boolean = false
-  }
+
   final def apply_rwUnderBinder(term: Term, extensional: Boolean): (Term, Boolean) = {
     val st = new RewriteState
     val term0 = term.betaNormalize

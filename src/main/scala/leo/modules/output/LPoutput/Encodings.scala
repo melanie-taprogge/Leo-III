@@ -8,7 +8,7 @@ import leo.modules.HOLSignature
 import leo.modules.HOLSignature._
 import leo.modules.output._
 import leo.modules.output.LPoutput.lpDatastructures._
-import leo.modules.output.ToTPTP.collectForallTys
+import leo.modules.output.ToTPTP.{collectChoice, collectForallTys}
 import leo.modules.output.logger.Out
 
 import scala.collection.mutable
@@ -244,8 +244,17 @@ object Encodings {
   def term2LP(t: Term, bVars: Map[Int,String], sig:Signature): (lpOlTerm,Set[lpStatement]) = {
     term2LP(t,bVars,sig,Set.empty)
   }
-  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpStatement]): (lpOlTerm,Set[lpStatement]) = {
+  def var2Lp(boundVars: Seq[(Int, Type)], bVars: Map[Int, String], sig: Signature): Seq[lpOlTypedVar] = {
+    boundVars.map(v => var2Lp(v._1, v._2, bVars,sig))
+  }
+  def var2Lp(scope: Int, typ: Type, bVars: Map[Int, String], sig: Signature): lpOlTypedVar = {
+    val encType = type2LP(typ, sig)
+    (lpOlTypedVar(lpOlConstantTerm(bVars(scope)), encType))
+  }
+  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpStatement], supressReduction:Boolean = false): (lpOlTerm,Set[lpStatement]) = {
     //todo: dont i need the offset? was it an oversight not to use it in term2lp?
+
+    // todo: combine cases for encoding binders
 
     t match {
       // Constant symbols
@@ -260,82 +269,96 @@ object Encodings {
       case Real(w, d, e) => throw new Error(s"reals are not encoded yet ${t.pretty}") //if (e == 0) s"$w.$d" else s"$w.${d}E$e"
       // Give Bound variables names
       case Bound(_, scope) =>
-        val encType = type2LP(t.ty, sig)
-        (lpOlTypedVar(lpOlConstantTerm(bVars(scope)),encType),usedSymbols) //throw new Error(s"bound vars are not encoded yet ${t.pretty}") //bVars(scope)
+        (var2Lp(scope,t.ty,bVars,sig),usedSymbols)
 
       // Unary connectives
       case Not(t2) =>
-        val (encBody, usedSymbolsUpdated) = term2LP(t2, bVars, sig, usedSymbols)
+        val (encBody, usedSymbolsUpdated) = term2LP(t2, bVars, sig, usedSymbols,supressReduction)
         (lpOlUnaryConnectiveTerm(lpNot,encBody), usedSymbolsUpdated)
       case Forall(_) =>
         val (bVarTys, body) = collectForall(t)
         val newBVars = makeBVarList(bVarTys, bVars.size)
-        val (encBody, usedSymbolsUpdated) = term2LP(body, fusebVarListwithMap(newBVars, bVars), sig, usedSymbols)
-        var usedSymbolsQuant = usedSymbolsUpdated
+        val (encBody, usedSymbolsUpdated) = term2LP(body, fusebVarListwithMap(newBVars, bVars), sig, usedSymbols,supressReduction)
+        val usedSymbolsQuant = usedSymbolsUpdated
         var quantifiedVars: Seq[lpOlTypedVar]= Seq.empty
         newBVars foreach { s_ty =>
           val encType = type2LP(s_ty._2, sig)
           quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType)
         }
-        (lpOlQuantifiedTerm(lpOlForAll,quantifiedVars,encBody), usedSymbolsQuant)
+        (lpOlBoundTerm(lpOlForAll,quantifiedVars,encBody), usedSymbolsQuant)
       case Exists(_) =>
         // todo: Add explicit types for quantifiers?
         val (bVarTys, body) = collectExists(t)
         val newBVars = makeBVarList(bVarTys, bVars.size)
-        val (encBody, usedSymbolsUpdated) = term2LP(body, fusebVarListwithMap(newBVars, bVars), sig, usedSymbols)
-        var usedSymbolsQuant = usedSymbolsUpdated
+        val (encBody, usedSymbolsUpdated) = term2LP(body, fusebVarListwithMap(newBVars, bVars), sig, usedSymbols,supressReduction)
+        val usedSymbolsQuant = usedSymbolsUpdated
         var quantifiedVars: Seq[lpOlTypedVar] = Seq.empty
         newBVars foreach { s_ty =>
           val encType = type2LP(s_ty._2, sig)
           quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1), encType)
         }
-        (lpOlQuantifiedTerm(lpOlExists, quantifiedVars, encBody), usedSymbolsQuant)
+        (lpOlBoundTerm(lpOlExists, quantifiedVars, encBody), usedSymbolsQuant)
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet ${t.pretty}")
-      case leo.modules.HOLSignature.Choice(_) => throw new Error(s"choice not encoded yet ${t.pretty}")
+      case Choice(_) =>
+        val (bVarTys, body) = collectChoice(t)
+        val newBVars = makeBVarList(bVarTys, bVars.size)
+        val (encBody, usedSymbolsUpdated) = term2LP(body, fusebVarListwithMap(newBVars, bVars), sig, usedSymbols, supressReduction)
+        var boundVars: Seq[lpOlTypedVar] = Seq.empty
+        newBVars foreach { s_ty =>
+          val encType = type2LP(s_ty._2, sig)
+          boundVars = boundVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1), encType)
+        }
+        (lpOlBoundTerm(lpChoice, boundVars, encBody), usedSymbolsUpdated)
 
       // Binary connectives
       case tl ||| tr =>
-        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
-        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction)
         (lpOlUntypedBinaryConnectiveTerm(lpOr,encodedTl,encodedTr), updatedUsedSymbolsR)
       case tl & tr =>
-        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
-        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction)
         (lpOlUntypedBinaryConnectiveTerm(lpAnd,encodedTl,encodedTr), updatedUsedSymbolsR)
       case tl === tr =>
-        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
-        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction)
         val encTyTl = type2LP(tl.ty,sig)
         // todo: here i need to make changes for polymorphic types of LP TYPE Scheme
         (lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl,encodedTl,encodedTr), updatedUsedSymbolsR)
       case tl !=== tr =>
-        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
-        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction)
         val encTyTl = type2LP(tl.ty,sig)
         // like equ: todo: here i need to make changes for polymorphic types of LP TYPE Scheme
         (lpOlTypedBinaryConnectiveTerm(lpInEq,encTyTl.lift2Poly,encodedTl,encodedTr), updatedUsedSymbolsR)
       case tl Impl tr =>
-        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
-        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction)
         (lpOlUntypedBinaryConnectiveTerm(lpImp,encodedTl,encodedTr), updatedUsedSymbolsR)
       case tr <= tl =>
         //throw new Error(s"encountered un-encoded connective <= ${t.pretty}")
-        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols)
-        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL)
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction)
         (lpOlUntypedBinaryConnectiveTerm(lpImp, encodedTl, encodedTr), updatedUsedSymbolsR)
-      case t1 <=> t2 => throw new Error(s"encountered un-encoded connective <=> ${t.pretty}")
-      case t1 ~& t2 => throw new Error(s"encountered un-encoded connective ~& ${t.pretty}")
-      case t1 ~||| t2 => throw new Error(s"encountered un-encoded connective ~||| ${t.pretty}")
+      case _ <=> _ => throw new Error(s"encountered un-encoded connective <=> ${t.pretty}")
+      case tl ~& tr =>
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols, supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL, supressReduction)
+        (lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlUnaryConnectiveTerm(lpNot,encodedTl),lpOlUnaryConnectiveTerm(lpNot,encodedTr)),updatedUsedSymbolsR)
+      case tl ~||| tr =>
+        val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols, supressReduction)
+        val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL, supressReduction)
+        (lpOlUnaryConnectiveTerm(lpNot,lpOlUntypedBinaryConnectiveTerm(lpOr,encodedTl,encodedTr)),updatedUsedSymbolsR)
       case t1 <~> t2 => throw new Error(s"encountered un-encoded connective <~> ${t.pretty}")
 
       // term abstraction in terms
       case _ :::> _ =>
-        val t0 = t.etaContract
-        if (t != t0) term2LP(t0, bVars, sig, usedSymbols)
+        val t0 = if (supressReduction) t else t.etaContract
+        if (t != t0) term2LP(t0, bVars, sig, usedSymbols ,supressReduction)
         else {
           val (bVarTys, body) = collectLambdasLP(t)
           val newBVars = makeBVarList(bVarTys, bVars.size)
-          val (encBody, updatedUsedSymbols0) = term2LP(body,fusebVarListwithMap(newBVars, bVars),sig,usedSymbols)
+          val (encBody, updatedUsedSymbols0) = term2LP(body,fusebVarListwithMap(newBVars, bVars),sig,usedSymbols ,supressReduction)
           var updatedUsedSymbols = updatedUsedSymbols0
           var abstractions: Seq[Either[lpOlTypedVar,lpOlTyVar]] = Seq.empty
           newBVars foreach { s_ty =>
@@ -348,8 +371,11 @@ object Encodings {
 
       case TypeLambda(_) =>
         val (tyAbsCount, body) = collectTyLambdas(0, t)
+        val tyVars = (1 to tyAbsCount).map(n => Right(lpOlTyVar(s"T${intToName(n -1)}")))
+        val (encBody, updatedUsedSymbols) = term2LP(body,bVars,sig,usedSymbols ,supressReduction)
         // todo: not really sure how this should be encoded, check with examples
-        throw new Error(s"encountered typeLambda, this is not encoded yet ${t.pretty}")
+        //throw new Error(s"encountered typeLambda, this is not encoded yet ${t.pretty}")
+        (lpOlLambdaTerm(tyVars,encBody),updatedUsedSymbols)
 
       // match pattern of application
       case _@Symbol(id) ∙ args if leo.modules.input.InputProcessing.adHocPolymorphicArithmeticConstants.contains(id) =>
@@ -362,7 +388,7 @@ object Encodings {
         args foreach { arg =>
           arg match {
             case Left(termArg) =>
-              val (encArg, updatedUsedSymbols0) = term2LP(termArg, bVars, sig, updatedUsedSymbols)
+              val (encArg, updatedUsedSymbols0) = term2LP(termArg, bVars, sig, updatedUsedSymbols ,supressReduction)
               updatedUsedSymbols = updatedUsedSymbols0
               arguments = arguments :+ Left(encArg)
             case Right(tyArg) =>
@@ -373,13 +399,13 @@ object Encodings {
         (lpOlFunctionApp(arithmeticOperator,arguments), updatedUsedSymbols)
 
       case f ∙ args =>
-        val (translatedF, updatedUsedSymbols0) = term2LP(f, bVars, sig, usedSymbols)
+        val (translatedF, updatedUsedSymbols0) = term2LP(f, bVars, sig, usedSymbols ,supressReduction)
         var updatedUsedSymbols = updatedUsedSymbols0
         var arguments:Seq[Either[lpOlTerm,lpOlType]] = Seq.empty
         args foreach { arg =>
           arg match {
             case Left(termArg) =>
-              val (encArg, updatedUsedSymbols0) = term2LP(termArg, bVars, sig, updatedUsedSymbols)
+              val (encArg, updatedUsedSymbols0) = term2LP(termArg, bVars, sig, updatedUsedSymbols ,supressReduction)
               updatedUsedSymbols = updatedUsedSymbols0
               arguments = arguments :+ Left(encArg)
             case Right(tyArg) =>
@@ -387,7 +413,13 @@ object Encodings {
               arguments = arguments :+ Right(encArg)
           }
         }
-        (lpOlFunctionApp(translatedF,arguments),updatedUsedSymbols)
+        // special case: unapplied connectives as head symbols
+        translatedF match {
+          case con:lpOlUnappliedConnective =>
+            (applyPartiallyAppliedConnective(con,arguments,Seq.empty),updatedUsedSymbols)
+
+          case _ => (lpOlFunctionApp(translatedF,arguments),updatedUsedSymbols)
+        }
 
       // Others should be invalid
       case _ => throw new IllegalArgumentException("Unexpected term format during conversion to LP")
@@ -460,6 +492,14 @@ object Encodings {
     def apply(cl: Clause, sig: Signature): lpClauseInst ={
       val encClause = clause2LP_unquantified(cl,Set.empty,sig)
       lpClauseInst(encClause._2,encClause._2.args,encClause._1)
+    }
+
+    def apply_to_set(cls: Seq[Clause], sig: Signature): ( Map[Int, String],Seq[lpClauseInst]) = {
+      val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct
+      val fullBvarsMap = clauseVars2LP(allImpBoundVars, sig, Set.empty)._2
+      val encCls = cls.map(cl => clause2LP0(cl,fullBvarsMap,sig,Set.empty)._1)
+      val encVars: Seq[Seq[Either[lpOlTypedVar, lpOlTyVar]]] = cls.map(cl => var2Lp(cl.implicitlyBound,fullBvarsMap,sig).map(Left(_)))
+      (fullBvarsMap, encCls.zip(encVars).map(ecnCl => lpClauseInst(ecnCl._1, ecnCl._1.args, ecnCl._2)))
     }
   }
 }

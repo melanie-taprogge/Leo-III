@@ -2,6 +2,7 @@ package leo.datastructures
 
 import leo.datastructures.TPTP.AnnotatedFormula.FormulaType.FormulaType
 import leo.modules.HOLSignature.{LitFalse, LitTrue}
+import leo.modules.calculus.FullCNF.FVs
 import leo.modules.calculus.Unification
 import leo.modules.output.Output
 
@@ -170,15 +171,22 @@ abstract sealed class ClauseAnnotation extends Pretty {
   def fromRule: leo.modules.calculus.CalculusRule
   def parents: Seq[_ <: ClauseProxy]
 }
+case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
+                      renameHappend: Boolean = false,
+                      skolemTerms: Seq[(Term,Term,FVs)]    = Seq.empty,
+                      derivedClauses: Seq[Clause]  = Seq.empty,
+                      numberInClause: Int = 0)
 
 case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
-                        val rwUnderBinder: Boolean = false){
+                        val rwUnderBinder: Boolean = false,
+                        unencodableCNF: Boolean = false,
+                        cnfInfo: AddInfoCnf = AddInfoCnf()){
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
   var addInfoBoolExt: Set[(Literal,Seq[Literal])] = Set.empty
   var addInfoSimp: Seq[(Seq[Int],Int)] = Seq.empty
   // unification of types and simplification are represented as booleans for now, eventually I can replace this with information necessary to also encode these steps
   var addInfoEqFac: (Literal,Literal,Literal,Literal,Boolean,Boolean) = (Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),Literal.mkLit(LitTrue(),false),false,false)
-  var addInfoDefExp: Seq[Signature.Key] = Seq.empty
+  var addInfoDefExp:Option[Literal] = None
   var addInfoUniRule: (String,(Literal,Literal)) = ("",(Literal(LitFalse(),false),Literal(LitFalse(),false))) // todo for now I am doing it this way but maybe if i do not need this for other rules as well it would be better to use tuples
   var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
   var addInfoRewriting: Option[Clause] = None

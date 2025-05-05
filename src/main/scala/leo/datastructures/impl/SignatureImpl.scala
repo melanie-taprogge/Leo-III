@@ -1,9 +1,9 @@
 package leo.datastructures.impl
 
 import scala.collection.immutable.{BitSet, HashMap, IntMap}
-
-import leo.datastructures.{Signature, Kind, Type, Term}
+import leo.datastructures.{Kind, Signature, Term, Type, mkPolyUnivQuant}
 import leo.modules.HOLSignature
+import leo.modules.output.logger.Out
 
 /**
  * Implementation of the Leo III signature table. When created with `Signature.createWithHOL`
@@ -196,14 +196,23 @@ class SignatureImpl extends Signature with Function1[Int, Signature.Meta] {
   val skolemVarPrefix = "sk"
   /** Returns a fresh uninterpreted symbol of type `ty`. That symbol will be
     * named `SKi` where i is some positive number. */
-  def freshSkolemConst(ty: Type, prop: Signature.SymbProp = Signature.PropNoProp): Key = synchronized {
+  def freshSkolemConst(ty: Type, prop: Signature.SymbProp = Signature.PropNoProp, term: Option[Term] = None): Key = synchronized {
     assert(ty.typeVars.isEmpty)
     while(exists(skolemVarPrefix + (skolemVarCounter +1).toString)) {
       skolemVarCounter += 1
     }
     skolemVarCounter += 1
-    addUninterpreted(skolemVarPrefix + skolemVarCounter.toString, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+    if (term.isDefined) {
+      Out.lp_debug_info(s"creating skolem term with definition")
+      val dfn = leo.modules.HOLSignature.Choice(term.get)
+      val fV = term.get.freeVars
+      Out.lp_debug_info(s"free Vars: $fV")
+      val maybeQuantDef = mkPolyUnivQuant(fV.toSeq.map(_.ty),dfn)
+      addDefined(skolemVarPrefix + skolemVarCounter.toString, maybeQuantDef, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+    }
+    else addUninterpreted(skolemVarPrefix + skolemVarCounter.toString, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
   }
+
   // Skolem variables start with 'tv'
   var typeVarCounter = 0
   val typeVarPrefix = "skt"

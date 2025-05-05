@@ -86,6 +86,9 @@ trait Term extends Pretty with Prettier {
   final def ground: Boolean = fv.isEmpty
   /** Returns the free occurrences of type variables. */
   def tyFV: Set[Int]
+
+  /** true iff this term anywhere contains a binder (λ, ∀, ∃ or a bound‐variable) */
+  def hasBinder: Boolean
   def feasibleOccurrences: Map[Term, Set[Position]]
   def headSymbol: Term
   def headSymbolDepth: Int
