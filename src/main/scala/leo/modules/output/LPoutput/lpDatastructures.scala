@@ -864,9 +864,11 @@ object lpDatastructures {
     val asOlTerm = "#rewrite"
 
     lazy val olTermApp = {
-      assert(!rewritePattern0.isDefined && rwRhs == false, s"LP-Encoding: Trying to use $asOlTerm with rewrite pattern or keyword left")
       rewriteTerm match {
-        case t:lpOlTerm => lpOlFunctionApp(lpOlConstantTerm(asOlTerm),Seq(Left(t)))
+        case t:lpOlTerm =>
+          val patternStr = if (rewritePattern0.isDefined) s"\"${rewritePattern0.get}\"" else s"\"\""
+          val sideStr = if (rwRhs) s"\"left\"" else s"\"\""
+          lpOlFunctionApp(lpOlConstantTerm(asOlTerm),Seq(Left(lpOlConstantTerm(sideStr)), Left(lpOlConstantTerm(patternStr)),Left(t)))
         case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${rewriteTerm.pretty} to $asOlTerm")
       }
     }
@@ -908,6 +910,24 @@ object lpDatastructures {
     override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpAssume(vars).pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpAssume(vars, tab)))
+  }
+
+  case class lpSetTac(name: String, dfn: lpStatement, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    def addTab(i: Int): lpSetTac = lpSetTac(name, dfn, tab + i)
+
+    val tabs: String = "\t" * tab
+
+    def pretty0: String = {
+      s"set ${name} ≔ ${dfn.pretty}"
+    }
+
+    override def pretty: String = {
+      s"${tabs}${lpSetTac(name, dfn, tab).pretty0}"
+    }
+
+    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{${lpSetTac(name, dfn, tab).pretty0}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpSetTac(name, dfn, tab)))
   }
 
   case class lpTacSimplify(tab: Int = 0) extends lpProofScriptStep(tab: Int) {

@@ -171,9 +171,14 @@ abstract sealed class ClauseAnnotation extends Pretty {
   def fromRule: leo.modules.calculus.CalculusRule
   def parents: Seq[_ <: ClauseProxy]
 }
+
+case class AddInfoSkolem(sko: Term,
+                         dfn: Term,
+                         freeVars: FVs,
+                         neg: Boolean)
 case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
                       renameHappend: Boolean = false,
-                      skolemTerms: Seq[(Term,Term,FVs)]    = Seq.empty,
+                      skolemTerms: Seq[AddInfoSkolem] = Seq.empty,
                       derivedClauses: Seq[Clause]  = Seq.empty,
                       numberInClause: Int = 0)
 

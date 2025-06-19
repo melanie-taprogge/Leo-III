@@ -1,12 +1,12 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.{ClauseProxy, Role_Axiom, Role_NegConjecture, Signature}
+import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature}
 import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{cnfLib, lpDne}
+import leo.modules.output.LPoutput.LPSignature.{lpDne, tempLib}
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
@@ -24,11 +24,11 @@ object LPoutput {
 
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
-  val leoSimpTacticFile = "UserTactic"
+  //val leoSimpTacticFile = "UserTactic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
 
-  //val nameCnfFile = "cnfLib"
+  val nameTempFile = "tempLib"
 
   val applyAllDefsTacName = "applyAllDefinitions"
 
@@ -40,7 +40,8 @@ object LPoutput {
   final class lpProofStepInfo (val clausifiedSteps: Map[lpConstantTerm, lpConstantTerm] = Map.empty,
                                val identicalSteps: mutable.HashMap[Long, lpConstantTerm] = mutable.HashMap.empty,
                                val tptpDefinedSymbols: Set[lpStatement] = Set.empty,
-                               val additionalDefinedSymbols: Set[Signature.Key] = Set.empty)
+                               val additionalDefinedSymbols: Set[Signature.Key] = Set.empty,
+                               val skDefinitions: Seq[lpDeclaration] = Seq.empty)
 
   def toProofStep(stepName: String, encStep: lpMlType, ruleName: String, proofTerm: lpProofScript, notEncoded: Option[String]): Seq[lpProofScriptStep] = {
     if (notEncoded.isDefined) {
@@ -93,21 +94,21 @@ object LPoutput {
     val (encStep, newTptpDefinedSymbols) = clause2LP(cl.cl, Set(), sig)
     val (needsEnc, newIdenticalSteps) = identifySteps(cl,stepInfo.identicalSteps,sig,encStep)
 
-    if ((!Seq(leo.datastructures.Role_Conjecture).contains(cl.role)) && needsEnc && (rule != null)) {
+    if ((cl.role != Role_Conjecture) && needsEnc && (rule != null)) {
         rule match {
 
           case leo.modules.calculus.RenameCNF =>
             // first, we check weather the
             // if the conjunction contains only one clause, there is no need for two seperate steps
             val encode2steps = cl.furtherInfo.cnfInfo.derivedClauses.length > 1
-            val (con_ref,stepsConj,updateMap,addSymbols) : (lpConstantTerm,Seq[lpProofScriptStep], Map[lpConstantTerm, lpConstantTerm], Set[Signature.Key]) =
+            val (con_ref,stepsConj,updateMap,addSymbols,skDefs) : (lpConstantTerm,Seq[lpProofScriptStep], Map[lpConstantTerm, lpConstantTerm], Set[Signature.Key],Seq[lpDeclaration]) =
               if (!stepInfo.clausifiedSteps.keySet.contains(parentInLpEncID.head)){
                 val cnf_stepName = if (encode2steps) s"${parentInLpEncID.head.name}_cnf" else stepName
                 val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
                 val stepsCNF = toProofStep(cnf_stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
-                (lpConstantTerm(cnf_stepName),stepsCNF,Map(parentInLpEncID.head -> lpConstantTerm(cnf_stepName)),encodingCNF._4)
-              }else (stepInfo.clausifiedSteps(parentInLpEncID.head),Seq(),Map.empty,Set.empty)
-                val outputInfo = new lpProofStepInfo(updateMap,newIdenticalSteps,newTptpDefinedSymbols,addSymbols)
+                (lpConstantTerm(cnf_stepName),stepsCNF,Map(parentInLpEncID.head -> lpConstantTerm(cnf_stepName)),encodingCNF._4,encodingCNF._5)
+              }else (stepInfo.clausifiedSteps(parentInLpEncID.head),Seq(),Map.empty,Set.empty,Seq.empty)
+                val outputInfo = new lpProofStepInfo(updateMap,newIdenticalSteps,newTptpDefinedSymbols,addSymbols,skDefs)
                 // the encoding of the step where we pick one of the clauses in the conjunction
                 val stepsPickupStep : Seq[lpProofScriptStep] = if (encode2steps) {
                   val encPickStep = encRenameCnf_cl(cl,con_ref,cl.furtherInfo.cnfInfo,sig)
@@ -179,7 +180,8 @@ object LPoutput {
         }
       }else{
       val outputInfo = new lpProofStepInfo(Map.empty, newIdenticalSteps, newTptpDefinedSymbols)
-      if (rule == null) {
+      if (rule == null && (cl.role != Role_Conjecture)) {
+        Out.lp_debug_info(s"role : ${cl.role}")
         (toProofStep(stepName, encStep, "Tautology", lpProofScript(Seq.empty), Some("Tautology generation not yet encoded")), outputInfo)
       }else{
         (Seq.empty, outputInfo)
@@ -311,6 +313,7 @@ object LPoutput {
         val compressedProof = proof
         var idClauseMap: mutable.HashMap[Long,ClauseProxy] = mutable.HashMap.empty
         val identicalSteps: mutable.HashMap[Long,lpConstantTerm] = mutable.HashMap.empty
+        var skDefinitions: Set[lpDeclaration] = Set.empty
         val clausifiedSteps: mutable.HashMap[lpConstantTerm, lpConstantTerm] = mutable.HashMap.empty
         var conjEnc = false
         var axCounter = 0
@@ -348,6 +351,7 @@ object LPoutput {
             identicalSteps ++= newInfo.identicalSteps
             tptpDefinedSymbols = tptpDefinedSymbols ++ newInfo.tptpDefinedSymbols
             additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
+            skDefinitions = skDefinitions ++ newInfo.skDefinitions
             proofSteps = proofSteps ++ newProofSteps
           }
       }
@@ -387,9 +391,10 @@ object LPoutput {
         proofFileSB.append("// TPTP SYMBOL ENCODINGS /////////////////////////////////\n\n")
         proofFileSB.append(tptpSymbolsSB)
       }
-      if (objectDecSB.length != 0) {
+      if (objectDecSB.length != 0 || skDefinitions.nonEmpty ) {
         proofFileSB.append("\n\n// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
         proofFileSB.append(objectDecSB)
+        proofFileSB.append(skDefinitions.map(_.pretty).mkString(""))
       }
 
       if (problemEncSB.length != 0) {
@@ -431,11 +436,11 @@ object LPoutput {
       proofFileSB.append(completeProof.pretty)
 
       val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
-      val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
+      val simpTacLibStr = ""//f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
       val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
-      val cnfLibStr: String = ""//f"${nameLpOutputFolder}.${nameCnfFile}"
+      val tempLibStr: String = s"${nameLpOutputFolder}.${nameTempFile}"
 
-      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $cnfLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tempLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
 
       // create a folder for the lambdapi package
       // Create the output directory if it doesn't exist
@@ -452,8 +457,8 @@ object LPoutput {
       val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
 
-      //val cnfFilePath = lpOutputPath.resolve(s"$nameCnfFile.lp")
-      //Files.write(cnfFilePath, cnfLib.getBytes(StandardCharsets.UTF_8))
+      val tempFilePath = lpOutputPath.resolve(s"$nameTempFile.lp")
+      Files.write(tempFilePath, tempLib.getBytes(StandardCharsets.UTF_8))
 
       // create the Makefile and the pkg file
       val pkgFileName = "lambdapi.pkg"

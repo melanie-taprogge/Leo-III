@@ -1,8 +1,9 @@
 package leo.modules.output.LPoutput
 import leo.Out
 import leo.datastructures.Literal.{asTerm, symbols}
+import leo.datastructures.Term.{:::>, ∙}
 import leo.modules.output.LPoutput.Encodings._
-import leo.datastructures.{AddInfoCnf, Clause, ClauseProxy, Literal, Signature, Term, Type}
+import leo.datastructures.{AddInfoCnf, Clause, ClauseProxy, Literal, Signature, Term, Type, mkPolyUnivQuant}
 import leo.modules.HOLSignature._
 import leo.modules.calculus.PolaritySwitch
 import leo.modules.output.LPoutput.lpDatastructures.{lpOlTerm, _}
@@ -10,7 +11,7 @@ import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.calculus.Simp.normalize
-import leo.modules.output.LPoutput.CNFEncoding.allBoolRuleApplicationStep
+import leo.modules.output.LPoutput.CNFEncoding.{allBoolRuleApplicationStep, cnfTac}
 import leo.modules.output.LPoutput.LPSignature.lpTheorems
 
 import scala.collection.mutable
@@ -196,8 +197,20 @@ object ModularProofEncoding {
     rev.reverse
   }
 
+  def generateSkList(skDefinitions:Set[lpDeclaration],allSkDefsListName:String):lpSetTac={
+    val allSkDefsList = skDefinitions.map(sk => sk.name.pretty)
+    //lpDefinition(lpConstantTerm(allSkDefsListName), Seq(), None, lpList(allSkDefsList.map(defName => lpRewrite(None, lpOlConstantTerm(defName), true).olTermApp).toSeq))
+    lpSetTac(allSkDefsListName, lpList(allSkDefsList.map(defName => lpRewrite(None, lpOlConstantTerm(defName), true).olTermApp).toSeq))
+  }
 
-  def encRenameCnf_conj(parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, cnfInfo: AddInfoCnf, sig: Signature) = {
+
+  def generateSkolemDefs()={
+    //val v = vargen.next(ty)
+    //val boundVar1 = Term.mkBound(v._2, v._1)
+    //val negA = mkTermAbs(ty, Not(mkTermApp(a,boundVar1)))
+    //val dfn = leo.modules.HOLSignature.Choice(negA)
+  }
+  def encRenameCnf_conj(parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, cnfInfo: AddInfoCnf, sig: Signature): (lpProofScript, Option[String], lpMlType, Set[Signature.Key], Seq[lpDeclaration]) = {
 
     // Encode the set of all derived clauses when applying RenameCNF to a given formula
 
@@ -240,51 +253,89 @@ object ModularProofEncoding {
     // Construct the conjunction of all derived clauses
     val conj = lpOlUntypedBinaryConnectiveTerm_multi(lpAnd, encChildClauses.map(_.term))
 
-    val allSteps_clausification: Seq[lpProofScriptStep] = if (cnfInfo.rewriteUnderBinder) {
+    val (allSteps_clausification, skDefs): (Seq[lpProofScriptStep],Seq[lpDeclaration]) = if (cnfInfo.rewriteUnderBinder) {
       // todo
       Out.lp_debug_info("Can not encode CNF since it requires rewriting under binder")
       cantEncode = Some("Clausification involving Binders not encoded")
 
-      /*
-      // encode skolem terms
-      cnfInfo.skolemTerms foreach { sk =>
-        Out.lp_debug_info(s" ")
-        val (sk0, defn, fVs) = sk
-        val bVarsMap = clauseVars2LP(fVs, sig, Set.empty)._2
-        Out.lp_debug_info(s"bVars map fVs: $bVarsMap")
-        val encSko = term2LP(sk0, bVarsMap, sig)._1
-        val skTy = type2LP(sk0.ty, sig)
-        Out.lp_debug_info(s"handling ${encSko.pretty}, type ${skTy.pretty}")
-        val freeVarsDfn = defn.fv.toSeq
-        val bVarsMap_dnf = clauseVars2LP(freeVarsDfn, sig, Set.empty)._2
-        Out.lp_debug_info(s"bVars ma free vars: $bVarsMap_dnf")
-        Out.lp_debug_info(s"diff in free vars: ${clauseVars2LP(freeVarsDfn.diff(fVs), sig, Set.empty)._2}")
-        // the last varible is the one we use choice on, all others are unbound in the term and an abstraction/ universal quantification has to be constructed (with regard to the variables that are included in the application to sko)
-        val encDfn = term2LP(defn, bVarsMap_dnf, sig)._1
-        // I need to construct a quantified term for the definition
-        //val maybeQuantDfn = mk
-        Out.lp_debug_info(s"enc defn and encoded skolem term:\n${encSko.pretty} = ${encDfn.pretty}")
-      }
-       */
-      Seq.empty
+      (Seq(), Seq())
     } else {
+      // sort the skolem terms by number
+
+      val skDefs0 : Seq[lpDeclaration] = if (cnfInfo.skolemTerms.nonEmpty) {
+        // encode skolem terms
+        Out.lp_debug_info(s"SKOLEMISAZION")
+        cnfInfo.skolemTerms.map { sk =>
+          Out.lp_debug_info(s" ")
+          //val (sk0, defn, fVs) = sk
+          Out.lp_debug_info(s"result of neg. forall? ${sk.neg}")
+          val bVarsMap = clauseVars2LP(sk.freeVars, sig, Set.empty)._2
+
+          val freeVarsDfn = sk.dfn.fv.toSeq
+          val (encFreeVarsDef, bVarsMap_dnf, _) = clauseVars2LP(freeVarsDfn, sig, Set.empty)
+          Out.lp_debug_info(s"bVars ma free vars: $bVarsMap_dnf")
+
+          Out.lp_debug_info(s"unencoded sk def: ${sk.dfn.pretty(sig)}")
+          Out.lp_debug_info(s"unencoded parent: ${Clause.asTerm(parent.cl).pretty(sig)}")
+          Out.lp_debug_info(s"bVars map fVs: $bVarsMap")
+          Out.lp_debug_info(s"bVars map dfn: $bVarsMap_dnf")
+          val encSko = term2LP(sk.sko, bVarsMap, sig)._1
+          val encSkoName = sk.sko match {
+            case f ∙ args =>
+              if (args.length > freeVarsDfn.length) cantEncode = Some("unused free variables in skolem term")
+              Out.lp_debug_info(s"args: ${args.length}, free vars: ${freeVarsDfn.length}, $cantEncode")
+              term2LP(f, bVarsMap, sig)._1
+            case _ => encSko
+          }
+          // Instead try to construct the code with the Leo term-structures
+          import leo.modules.HOLSignature.{=== => EQ}
+          val skDefEq = mkPolyUnivQuant(sk.freeVars.map(_._2),EQ(sk.sko,sk.dfn))
+          val (encFreeVarsDef_eq, bVarsMap_eq, _) = clauseVars2LP(skDefEq.fv.toSeq, sig, Set.empty)
+          val encSkDefEq = term2LP(skDefEq,bVarsMap_eq,sig,Set.empty, true)._1
+          val skTy = type2LP(sk.sko.ty, sig)
+          Out.lp_debug_info(s"handling ${encSkoName.pretty}, type ${skTy.pretty}")
+          Out.lp_debug_info(s"diff in free vars: ${clauseVars2LP(freeVarsDfn.diff(sk.freeVars), sig, Set.empty)._2}")
+          // the last varible is the one we use choice on, all others are unbound in the term and an abstraction/ universal quantification has to be constructed (with regard to the variables that are included in the application to sko)
+          val encDfn = term2LP(sk.dfn, bVarsMap_dnf, sig, Set.empty, true)._1
+          // I need to construct a quantified term for the definition
+          //val skoDef = lpDeclaration(lpConstantTerm(s"${encSkoName.pretty}_def"), encFreeVarsDef, lpOlTypedBinaryConnectiveTerm(lpEq, skTy, encSko, encDfn).prf)
+          val skoDef = lpDeclaration(lpConstantTerm(s"${encSkoName.pretty}_def"), encFreeVarsDef_eq, encSkDefEq.prf)
+          //Out.lp_debug_info(s"enc defn and encoded skolem term:\n${encSkoName.pretty} = ${encDfn.pretty}")
+          Out.lp_debug_info(s"encoded:${skoDef.pretty}")
+
+          skoDef
+        }
+      } else Seq()
       // In this case, only boolean identities were applied in clausification
       assert(encParent.vars.length <= allMetaVars.length, "LP encoding: Clausification unexpectedly increased number of free vars")
 
       // We verify the application via a have-step proving equality via a dedicated lambdapi tactic
+      val setVarListName : Option[lpConstantTerm] = None
+      val setVarList : Seq[lpSetTac] = Seq()
+
+      val (skListName, setSkList) : (Option[lpConstantTerm],Seq[lpSetTac]) = if (skDefs0.nonEmpty) {
+        val allSkDefsListName = s"allSkDefinitions_${parentNameLpEnc.name}"
+        val allSkDefsList = skDefs0.map(sk => lpOlConstantTerm(sk.name.pretty))
+        val setSkList = lpSetTac(allSkDefsListName, lpList(allSkDefsList.map(defName => lpRewrite(None, defName, true).olTermApp).toSeq))
+        (Some(lpConstantTerm(allSkDefsListName)),Seq(setSkList))
+        }else (None,Seq())
+
+
       val clauseStepName = "Clausification"
-      val clausStep = lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, Seq(allBoolRuleApplicationStep))
+      val instCNFTac = cnfTac(setVarListName,skListName)
+      val clausStep: lpHave = lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, Seq(instCNFTac))
+        lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, Seq(allBoolRuleApplicationStep))
 
       // we can then refine with the implication derived from this equality and the parent-step
       val refineStep = lpRefine(lpFunctionApp(lpFunctionApp(lpTheorems.eqImp, Seq(lpFunctionApp(lpConstantTerm(clauseStepName), allMetaVars))), Seq(lpFunctionApp(parentNameLpEnc, allMetaVars))))
-      (Seq(clausStep) ++ assumeStep) :+ refineStep
+      (((setSkList ++ setVarList) ++(Seq(clausStep)) ++ assumeStep) :+ refineStep, if (!cantEncode.isDefined) skDefs0 else Seq())
     }
 
     // Some additional information necessary to construct the proof-step and insert all necessary declarations of Skolem-Terms
     val maybeQuanrifiedConj: lpMlType = if (allMetaVars.isEmpty) conj.prf else lpMlDependType(allMetaVars, conj.prf)
     val allSymbols = cnfInfo.derivedClauses.flatMap(Clause.symbols(_)).toSet
 
-    (lpProofScript(allSteps_clausification), cantEncode, maybeQuanrifiedConj, allSymbols)
+    (lpProofScript(allSteps_clausification), cantEncode, maybeQuanrifiedConj, allSymbols, skDefs)
   }
 
   def encRenameCnf_cl(child: ClauseProxy, conj: lpConstantTerm, cnfInfo: AddInfoCnf, sig: Signature)={
@@ -1763,7 +1814,7 @@ object ModularProofEncoding {
     val finishedProof = lpProofScript(allSteps)
 
     if (allTransformationsEncoded) (finishedProof, usedSymbols, None)
-    else (finishedProof, usedSymbols, Some("When attempting to encode rewrite step, some transformation could not be encoded"))
+    else (finishedProof, usedSymbols, Some("RW: Non-ground rewrite step or missing transformation"))
   }
 
   ////////////////////////////////////////////////////////////////

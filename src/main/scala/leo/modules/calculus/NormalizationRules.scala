@@ -21,7 +21,8 @@ import scala.collection.mutable
 
 final class RewriteState {
   var rewriteUnderBinderHappened: Boolean = false
-  var skolemTerms: Seq[(Term,Term,FVs)] = Seq.empty
+
+  var skolemTerms: Seq[AddInfoSkolem] = Seq.empty
   var renamed: Boolean = false
 }
 object DefExpSimp extends CalculusRule {
@@ -187,10 +188,10 @@ object RenameCNF extends CalculusRule {
     normLits.map{ls => Clause(ls)}
   }
 
-  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], cl: Clause, THRESHHOLD: Int = 0)(implicit sig: Signature): (Seq[Clause], Boolean, Boolean, Seq[(Term,Term,FVs)]) = {
+  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], cl: Clause, THRESHHOLD: Int = 0)(implicit sig: Signature): (Seq[Clause], AddInfoCnf) = {
     val lits = cl.lits
-    val (normLits, unencodableRewrite, renameHappend, sks) = apply_rwUnderBinder(vargen, cashExtracts, lits, THRESHHOLD)
-    (normLits.map { ls => Clause(ls) }, unencodableRewrite, renameHappend, sks)
+    val (normLits, cnfInfo) = apply_rwUnderBinder(vargen, cashExtracts, lits, THRESHHOLD)
+    (normLits.map { ls => Clause(ls) }, cnfInfo)
   }
 
   final def apply(vargen: leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], l : Seq[Literal], THRESHHOLD : Int)(implicit sig: Signature): (Seq[Seq[Literal]]) = {
@@ -206,18 +207,18 @@ object RenameCNF extends CalculusRule {
     acc
   }
 
-  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], l: Seq[Literal], THRESHHOLD: Int)(implicit sig: Signature): (Seq[Seq[Literal]], Boolean, Boolean, Seq[(Term,Term,FVs)]) = {
+  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], l: Seq[Literal], THRESHHOLD: Int)(implicit sig: Signature): (Seq[Seq[Literal]], AddInfoCnf) = {
     var acc: Seq[Seq[Literal]] = Seq(Seq())
-    var accSko: Seq[(Term,Term,FVs)] = Seq()
+    var accSko: Seq[AddInfoSkolem] = Seq()
     var unencodableRewrite = false
     var renameHappened = false
     val it: Iterator[Literal] = l.iterator
     while (it.hasNext) {
       val nl = it.next()
-      val (l, rw, renamed, sks) = apply_rwUnderBinder(vargen, cashExtracts, nl, THRESHHOLD)
-      if (rw) unencodableRewrite = true
-      if (renamed) renameHappened = true
-      accSko = accSko ++ sks
+      val (l, cnfInfo) = apply_rwUnderBinder(vargen, cashExtracts, nl, THRESHHOLD)
+      if (cnfInfo.rewriteUnderBinder) unencodableRewrite = true
+      if (cnfInfo.renameHappend) renameHappened = true
+      accSko = accSko ++ cnfInfo.skolemTerms
       l match {
         case Seq(Seq(lit)) =>
           acc = acc.map { normLits => normLits :+ lit}
@@ -225,15 +226,15 @@ object RenameCNF extends CalculusRule {
           acc = multiply(acc, norms)
       }
     }
-    (acc, unencodableRewrite, renameHappened, accSko)
+    (acc, AddInfoCnf(unencodableRewrite, renameHappened, accSko))
   }
 
   final def apply(vargen: leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], l : Literal,THRESHHOLD : Int)(implicit sig: Signature): Seq[Seq[Literal]] = apply0(vargen.existingVars, vargen.existingTyVars, vargen, cashExtracts, l, THRESHHOLD)
 
-  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], l: Literal, THRESHHOLD: Int)(implicit sig: Signature): (Seq[Seq[Literal]], Boolean, Boolean, Seq[(Term,Term,FVs)]) = {
+  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], l: Literal, THRESHHOLD: Int)(implicit sig: Signature): (Seq[Seq[Literal]], AddInfoCnf) = {
     val st = new RewriteState
     val cnfSet = apply0(vargen.existingVars, vargen.existingTyVars, vargen, cashExtracts, l, THRESHHOLD, st)
-    (cnfSet, st.rewriteUnderBinderHappened, st.renamed, st.skolemTerms)
+    (cnfSet, AddInfoCnf(st.rewriteUnderBinderHappened,st.renamed,st.skolemTerms))
   }
 
   @inline
@@ -261,24 +262,25 @@ object RenameCNF extends CalculusRule {
         st.rewriteUnderBinderHappened = true
         val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Forall(a@(ty :::> t)) if !l.polarity =>
-        st.rewriteUnderBinderHappened = true
-        // if any universally quantified variables are applied to the term, we need to add quantification in our skolem term:
+        //st.rewriteUnderBinderHappened = true
         val v = vargen.next(ty)
-        val boundVar1 = Term.mkBound(v._2, v._1)
-        //val boundVar0 = Term.mkBound(ty,1)
-        val negA = mkTermAbs(ty, Not(mkTermApp(a,boundVar1)))
-
-        // generate defn for skolem term
+        val boundVar1 = Term.mkBound(ty,1)
+        val contrT = mkTermAbs(ty , t.etaContract)
+        val negA = mkTermAbs(ty, Not(mkTermApp(contrT.substitute(Subst.shift(1)),boundVar1)))
+        //val negA = mkTermAbs(ty, Not(mkTermApp(a,boundVar´1)))
+        //val dfn = leo.modules.HOLSignature.Choice(a)
         val dfn = leo.modules.HOLSignature.Choice(negA)
-        //val maybeQuantDfn =
 
         val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs)
         //val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs)
-        //st.skolemTerms = st.skolemTerms :+ (sko,dfn,fvs)
+        st.skolemTerms = st.skolemTerms :+ AddInfoSkolem(sko,dfn,fvs,true)
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD, st)
-      case Exists(a@(ty :::> t)) if l.polarity =>
-        st.rewriteUnderBinderHappened = true
+      case Exists(a@(ty :::> t)) if l.polarity => // todo: also eta contract t passed to sk info
+        //st.rewriteUnderBinderHappened = true
+        val contrT = mkTermAbs(ty, t.etaContract)
         val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs)
+        val dfn = leo.modules.HOLSignature.Choice(contrT)
+        st.skolemTerms = st.skolemTerms :+ AddInfoSkolem(sko,dfn,fvs,false)
         //val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs, Some(a));
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Exists(a@(ty :::> t)) if !l.polarity =>
