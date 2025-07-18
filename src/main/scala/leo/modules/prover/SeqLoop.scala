@@ -481,6 +481,16 @@ object SeqLoop {
       }
     }
 
+    if(Configuration.LP_PROOF_OBJECT && proof != null){
+      try {
+        val proofString = proof2LP(state)
+        Out.output(SZSOutput(SZS_Refutation, Configuration.PROBLEMFILE, proofString))
+      } catch {
+        case e: Exception => Out.comment("Translation of proof object failed. See error logs for details.")
+          Out.warn(e.toString)
+      }
+    }
+
     if (Configuration.LPOUTPUTPATH.isDefined && proof != null){
       val problemFileName = Paths.get(Configuration.PROBLEMFILE).getFileName.toString
       val problemFileNameWithoutExtension = problemFileName.lastIndexOf('.') match {

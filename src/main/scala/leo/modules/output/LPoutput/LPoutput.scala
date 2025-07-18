@@ -13,6 +13,7 @@ import leo.modules.output.LPoutput.ModularProofEncoding._
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
+import scala.util.matching.Regex
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -24,13 +25,21 @@ object LPoutput {
 
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
-  //val leoSimpTacticFile = "UserTactic"
+  val leoSimpTacticFile = "UserTactic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
+  val nameSignatureFile = "Signature"
+  val abbreviationSignatureFile = "S"
+  val nameFormulaeFile = "Formulae"
+  val abbreviationFormulaeFile = "F"
 
-  val nameTempFile = "tempLib"
+  val nameTempFile = "UserTactics"
 
   val applyAllDefsTacName = "applyAllDefinitions"
+
+  val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
+  val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
+  val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
 
   final class lpProofObject {
     var etaExpFlag: Boolean = false
@@ -103,7 +112,19 @@ object LPoutput {
             val encode2steps = cl.furtherInfo.cnfInfo.derivedClauses.length > 1
             val (con_ref,stepsConj,updateMap,addSymbols,skDefs) : (lpConstantTerm,Seq[lpProofScriptStep], Map[lpConstantTerm, lpConstantTerm], Set[Signature.Key],Seq[lpDeclaration]) =
               if (!stepInfo.clausifiedSteps.keySet.contains(parentInLpEncID.head)){
-                val cnf_stepName = if (encode2steps) s"${parentInLpEncID.head.name}_cnf" else stepName
+                val cnf_stepName = if (encode2steps) {
+                  val unPrefix = s"${parentInLpEncID.head.name.stripPrefix("F.")}"
+                  // If the name is a lp-Safe name, we have to insert "_cnf" into the brackets
+                  val pattern: Regex = raw"""\{\|(.+?)\|\}|(.+)""".r
+                  unPrefix match {
+                    case pattern(inner, null) =>
+                      s"{|${inner}_cnf|}"
+                    case pattern(null, plain) =>
+                      s"${plain}_cnf"
+                    case _ =>
+                      s"${unPrefix}_cnf"
+                  }
+                } else stepName
                 val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
                 val stepsCNF = toProofStep(cnf_stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
                 (lpConstantTerm(cnf_stepName),stepsCNF,Map(parentInLpEncID.head -> lpConstantTerm(cnf_stepName)),encodingCNF._4,encodingCNF._5)
@@ -243,29 +264,37 @@ object LPoutput {
     var tptpDefinedSymbols: Set[lpStatement] = Set.empty
     var definitions: Set[String] = Set.empty
     val typeDecSB: mutable.StringBuilder = new StringBuilder()
+    val skDecsSB: mutable.StringBuilder = new StringBuilder()
+    val tacticSB: mutable.StringBuilder = new StringBuilder()
     val defSB: mutable.StringBuilder = new StringBuilder()
 
     signatureSymbols.foreach { key =>
       val symbol = sig.apply(key)
-      val sName = lpEscapeName(symbol.name, sig)
+      val sName = lpEscapeName(symbol.name, sig, false)
 
       if (symbol.hasKind) {
         typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, lpSet).pretty)
       } else {
         if (symbol.hasType) {
-          val typeDec = type2LP(symbol._ty, sig)
-          typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
+          if (symbol.name.matches("^sk\\d+$")) {
+            val typeDec = type2LP(symbol._ty, sig, true)
+            skDecsSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
+          }
+          else {
+            val typeDec = type2LP(symbol._ty, sig, false)
+            typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
+          }
         }
 
         if (symbol.hasDefn) { // && (! additionalSymbols.contains(key))) {
 
           val (bVarTys, _) = collectLambdasLP(symbol._defn)
           val newBVars = makeBVarList(bVarTys, 0)
-          val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, fusebVarListwithMap(newBVars, Map()), sig)
+          val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, fusebVarListwithMap(newBVars, Map()), sig, Set.empty, false, true)
           tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
 
-          val defTermType = type2LP(symbol._defn.ty, sig)
-          val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(sName), Seq.empty), definition)
+          val defTermType = type2LP(symbol._defn.ty, sig, true)
+          val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(s"${abbreviationSignatureFile}." + sName), Seq.empty), definition)
           val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
           defSB.append(encodedDef.pretty)
 
@@ -278,193 +307,240 @@ object LPoutput {
     if (definitions.nonEmpty) {
       // define a tactic rewriting with all of the definitions
       val allDefsListName = "allDefinitions"
-      val decAllDefs = lpDefinition(lpConstantTerm(allDefsListName), Seq(), None, lpList(definitions.map(defName => lpRewrite(None, lpOlConstantTerm(defName)).olTermApp).toSeq))
+      val decAllDefs = lpDefinition(lpConstantTerm(allDefsListName), Seq(), None, lpList(definitions.map(defName => lpRewrite(None, lpOlConstantTerm(s"${abbreviationFormulaeFile}." + defName)).olTermApp).toSeq))
       val applyAllDefsTact = lpDefinition(lpConstantTerm(applyAllDefsTacName), Seq(), None, lpRepeat(applyAnyStep(lpOlConstantTerm(allDefsListName))).olTermApp)
-      defSB.append("\n")
-      defSB.append(decAllDefs.pretty)
-      defSB.append(applyAllDefsTact.pretty)
+      tacticSB.append(decAllDefs.pretty)
+      tacticSB.append(applyAllDefsTact.pretty)
     }
 
-    (tptpDefinedSymbols, typeDecSB, defSB)
+    (tptpDefinedSymbols, typeDecSB, skDecsSB, defSB, tacticSB)
+  }
+
+  def extractNecessaryFormulas(state: LocalState, gdv_mode: Boolean)  = {
+
+    val proofFileSB: mutable.StringBuilder = new StringBuilder()
+    val signatureFileSB: mutable.StringBuilder = new StringBuilder()
+    val formulaeFileSB: mutable.StringBuilder = new StringBuilder()
+    var proofSteps: Seq[lpProofScriptStep] = Seq.empty
+
+    val flagSt = new lpProofObject
+
+    val sig = state.signature
+    val proof = state.proof
+
+    var tptpDefinedSymbols: Set[lpStatement] = Set.empty
+    var additionalSymbols: Set[Signature.Key] = Set.empty
+
+    if ((sig.allUserConstants intersect symbolsInProof(proof)).map(sig.apply(_).hasDefn).contains(true)) flagSt.defRuleDefined = true
+
+
+    // encode the clauses representing the steps
+    // todo: Also make it possible to just output one long lambda-term
+    val compressedProof = proof
+    var idClauseMap: mutable.HashMap[Long, ClauseProxy] = mutable.HashMap.empty
+    val identicalSteps: mutable.HashMap[Long, lpConstantTerm] = mutable.HashMap.empty
+    var skDefinitions: Set[lpDeclaration] = Set.empty
+    val clausifiedSteps: mutable.HashMap[lpConstantTerm, lpConstantTerm] = mutable.HashMap.empty
+    var conjEnc = false
+    var axCounter = 0
+    val conjName = lpConstantTerm(s"negatedConjecture")
+
+    val problemEncSB: mutable.StringBuilder = new StringBuilder()
+
+    var conjecture: lpOlTerm = lpOlNothing
+
+    compressedProof foreach { step =>
+      val stepId = step.id
+      idClauseMap = idClauseMap + (stepId -> step)
+
+      if (step.role == Role_NegConjecture) {
+        if (conjEnc) throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
+        conjEnc = true
+        val (encConj, tptpDefinedSymbols0) = clause2LP(step.cl, Set(), sig)
+        tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
+        identicalSteps += (stepId -> conjName)
+        conjecture = encConj.lits match {
+          case Seq(lpOlUnaryConnectiveTerm(lpNot, conj)) => conj
+          case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
+        }
+      } else if (step.role == Role_Axiom) { //todo: what about other roles like lamme etc. ?
+        val (encClause, tptpDefinedSymbols0) = clause2LP(step.cl, Set(), sig)
+        tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
+        Out.lp_debug_info(s"${step.annotation.pretty}")
+        Out.lp_debug_info(s"${step.annotation.pretty.dropRight(1)}")
+        Out.lp_debug_info(s"${step.annotation.pretty.dropRight(1)}")
+        val tptpName = step.annotation.pretty
+        val axName0 = if (tptpName == "introduced(axiom_of_choice)") "axiom_of_choice" else s"${tptpName.dropRight(1).split(",", 2)(1)}"
+        val axName = if (gdv_mode) axName0 else axName0 + s"_p$axCounter"
+        val safeAxName = lpEscapeName(axName,sig,false)
+        problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty)
+        identicalSteps += (stepId -> lpConstantTerm(s"${abbreviationFormulaeFile}.$safeAxName"))
+        axCounter = axCounter + 1
+      } else {
+        val infoForStep = new lpProofStepInfo(clausifiedSteps.toMap, identicalSteps, tptpDefinedSymbols)
+        val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep)
+        clausifiedSteps ++= newInfo.clausifiedSteps
+        identicalSteps ++= newInfo.identicalSteps
+        tptpDefinedSymbols = tptpDefinedSymbols ++ newInfo.tptpDefinedSymbols
+        additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
+        skDefinitions = skDefinitions ++ newInfo.skDefinitions
+        proofSteps = proofSteps ++ newProofSteps
+      }
+    }
+
+    // add symbols of the user defined TPTP problem signature if necessary
+    val signatureSymbols = saturatedUserSignature(symbolsInProof(proof) ++ additionalSymbols)(sig)
+
+    val (tptpDefinedSymbols_defs, typeDecSB, skDecSB, defSB, tacticSB) = generateObjectDeclaartions(signatureSymbols, flagSt, sig)
+
+    tptpDefinedSymbols = tptpDefinedSymbols_defs ++ tptpDefinedSymbols
+
+    //val objectDecSB = typeDecSB.append(defSB)
+
+    // set necessary flags
+    if (flagSt.etaExpFlag) proofFileSB.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n")
+
+    // Generate declarations of symbols that are implicit in TPTP but not mapped to a Lambdapi encoding
+    if (tptpDefinedSymbols.nonEmpty) {
+      var declareInts = false
+      val tptpSymbolsSB: mutable.StringBuilder = new StringBuilder()
+      tptpDefinedSymbols foreach { tptpSymbol =>
+        tptpSymbol match {
+          case lpInt(_) =>
+            declareInts = true
+            val intDec = lpDeclaration(tptpSymbol, Seq(), lpIntType.lift2Meta)
+            tptpSymbolsSB.append(intDec.pretty)
+          case lpTptpOperator(name, ty, vars) =>
+            tptpSymbolsSB.append(lpTptpOperator(name, ty, vars).dec.pretty)
+          case _ => Out.lp_debug_info(s"LP-Encoding: Found TPTP defined symbol ${tptpSymbol.pretty}")
+        }
+      }
+      if (declareInts) {
+        val intDec = lpDeclaration(lpIntType, Seq(), lpSet)
+        Out.lp_debug_info(s"need to define ints: ${intDec.pretty}")
+        tptpSymbolsSB.insert(0, intDec.pretty)
+      }
+      signatureFileSB.append("// TPTP SYMBOL ENCODINGS /////////////////////////////////\n\n")
+      signatureFileSB.append(tptpSymbolsSB)
+    }
+    if (typeDecSB.length != 0) {
+      signatureFileSB.append("\n\n// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
+      signatureFileSB.append(typeDecSB)
+    }
+
+    if (skDefinitions.nonEmpty || skDecSB.length != 0) {
+      proofFileSB.append("\n\n// SKOLEM TERMS ///////////////////////////////////\n\n")
+      proofFileSB.append(skDecSB)
+      proofFileSB.append(skDefinitions.map(_.pretty).mkString(""))
+    }
+
+    if (tacticSB.nonEmpty) {
+      proofFileSB.append("\n\n// TACTIC TERMS ///////////////////////////////////\n\n")
+      proofFileSB.append(tacticSB)
+    }
+
+    if (problemEncSB.length != 0 || defSB.length != 0) {
+      formulaeFileSB.append("\n\n// PROBLEM ENCODING //////////////////////////////////////\n\n")
+      formulaeFileSB.append(defSB).append(problemEncSB)
+    }
+    Out.info("Done enocoding the inference rules")
+
+    proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
+
+    // construct the proof based on all the individual steps
+    // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
+    proofSteps = lpAssume(Seq(conjName)) +: proofSteps
+    proofSteps = lpRefine(lpFunctionApp(lpDne.name, Seq(conjecture, lpWildcard))) +: proofSteps
+    // finally, test if the derived last clause is the empty clause or a flex-flex clause.
+    // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
+    val emptyClause = lpClause(Seq(), Seq(lpOlBot))
+    val lastStep = proofSteps.last match {
+      case lpHave(name, `emptyClause`, _, _) => lpConstantTerm(name)
+      case lpHave(name, flexFlex0, _, _) =>
+        // transformation of flex-flex to bot necessary todo
+        Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
+        val proofFun = lpMlFunctionType(Seq(flexFlex0, lpOlBot.prf))
+        val flexFlexStepName = "flexflex_to_bot"
+        val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
+          case lpClause(vars, lits) =>
+            val appliedVars = vars.map(var0 => lpWitness(isTermVar(var0).ty))
+            (lpFunctionApp(lpConstantTerm(flexFlexStepName), appliedVars), (lpFunctionApp(lpConstantTerm(name), appliedVars)))
+          case _ => (lpConstantTerm(flexFlexStepName), lpConstantTerm(name))
+        }
+        //throw new Exception(s"vars are ${variablesToApply.map(_.pretty)}")
+        val proofHave = lpHave(flexFlexStepName, proofFun, lpProofScript(Seq(lpProofScriptAdmit())))
+        proofSteps = proofSteps :+ proofHave
+        lpFunctionApp(appliedflexFlexStepName, Seq(appliedStepName))
+      case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last.pretty}")
+    }
+    proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
+    val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
+    proofFileSB.append(completeProof.pretty)
+
+    (proofFileSB,signatureFileSB,formulaeFileSB)
   }
 
   def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String):Unit={
 
     val lpOutputPath = Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)
+    val (proofFileSB,signatureFileSB,formulaeFileSB) = extractNecessaryFormulas(state, false)
 
-    val proofFileSB: mutable.StringBuilder = new StringBuilder()
-    var proofSteps: Seq[lpProofScriptStep] = Seq.empty
-
-    val flagSt = new lpProofObject
-
-    def extractNecessaryFormulas(state:LocalState):Unit={
-
-      val sig = state.signature
-      val proof = state.proof
-
-      var tptpDefinedSymbols: Set[lpStatement] = Set.empty
-      var additionalSymbols: Set[Signature.Key] = Set.empty
-
-      if ((sig.allUserConstants intersect symbolsInProof(proof)).map(sig.apply(_).hasDefn).contains(true)) flagSt.defRuleDefined = true
+    val tempLibStr: String = s"${nameLpOutputFolder}.${nameTempFile}"
 
 
-      // encode the clauses representing the steps
-      // todo: Also make it possible to just output one long lambda-term
-        val compressedProof = proof
-        var idClauseMap: mutable.HashMap[Long,ClauseProxy] = mutable.HashMap.empty
-        val identicalSteps: mutable.HashMap[Long,lpConstantTerm] = mutable.HashMap.empty
-        var skDefinitions: Set[lpDeclaration] = Set.empty
-        val clausifiedSteps: mutable.HashMap[lpConstantTerm, lpConstantTerm] = mutable.HashMap.empty
-        var conjEnc = false
-        var axCounter = 0
-        val conjName = lpConstantTerm(s"negatedConjecture")
-
-      val problemEncSB: mutable.StringBuilder = new StringBuilder()
-
-      var conjecture : lpOlTerm = lpOlNothing
-
-        compressedProof foreach { step =>
-          val stepId = step.id
-          idClauseMap = idClauseMap + (stepId -> step)
-
-          if (step.role == Role_NegConjecture) {
-            if (conjEnc) throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
-            conjEnc = true
-            val (encConj, tptpDefinedSymbols0) = clause2LP(step.cl, Set(), sig)
-            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
-            identicalSteps += (stepId -> conjName)
-            conjecture = encConj.lits match {
-              case Seq(lpOlUnaryConnectiveTerm(lpNot, conj)) => conj
-              case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
-            }
-          } else if (step.role == Role_Axiom){ //todo: what about other roles like lamme etc. ?
-            val (encClause, tptpDefinedSymbols0) = clause2LP(step.cl, Set(), sig)
-            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
-            val axName = lpConstantTerm(s"axiom$axCounter")
-            problemEncSB.append(lpDeclaration(axName, Seq.empty, encClause).pretty)
-            identicalSteps += (stepId -> axName)
-            axCounter = axCounter + 1
-          }else {
-            val infoForStep = new lpProofStepInfo(clausifiedSteps.toMap, identicalSteps, tptpDefinedSymbols)
-            val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep)
-            clausifiedSteps ++= newInfo.clausifiedSteps
-            identicalSteps ++= newInfo.identicalSteps
-            tptpDefinedSymbols = tptpDefinedSymbols ++ newInfo.tptpDefinedSymbols
-            additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
-            skDefinitions = skDefinitions ++ newInfo.skDefinitions
-            proofSteps = proofSteps ++ newProofSteps
-          }
-      }
-
-      // add symbols of the user defined TPTP problem signature if necessary
-      val signatureSymbols = saturatedUserSignature(symbolsInProof(proof) ++ additionalSymbols)(sig)
-
-      val (tptpDefinedSymbols_defs, typeDecSB, defSB) = generateObjectDeclaartions(signatureSymbols, flagSt, sig)
-
-      tptpDefinedSymbols = tptpDefinedSymbols_defs ++ tptpDefinedSymbols
-
-      val objectDecSB = typeDecSB.append(defSB)
-
-      // set necessary flags
-      if (flagSt.etaExpFlag) proofFileSB.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n")
-
-      // Generate declarations of symbols that are implicit in TPTP but not mapped to a Lambdapi encoding
-      if (tptpDefinedSymbols.nonEmpty){
-        var declareInts = false
-        val tptpSymbolsSB: mutable.StringBuilder = new StringBuilder()
-        tptpDefinedSymbols foreach {tptpSymbol =>
-          tptpSymbol match {
-          case lpInt(_) =>
-              declareInts = true
-              val intDec = lpDeclaration(tptpSymbol,Seq(),lpIntType.lift2Meta)
-              tptpSymbolsSB.append(intDec.pretty)
-          case lpTptpOperator(name,ty,vars) =>
-              tptpSymbolsSB.append(lpTptpOperator(name,ty,vars).dec.pretty)
-          case _ => Out.lp_debug_info(s"LP-Encoding: Found TPTP defined symbol ${tptpSymbol.pretty}")
-        }
-        }
-        if (declareInts) {
-          val intDec = lpDeclaration(lpIntType,Seq(),lpSet)
-          Out.lp_debug_info(s"need to define ints: ${intDec.pretty}")
-          tptpSymbolsSB.insert(0,intDec.pretty)
-        }
-        proofFileSB.append("// TPTP SYMBOL ENCODINGS /////////////////////////////////\n\n")
-        proofFileSB.append(tptpSymbolsSB)
-      }
-      if (objectDecSB.length != 0 || skDefinitions.nonEmpty ) {
-        proofFileSB.append("\n\n// OBJECT DECLARATIONS ///////////////////////////////////\n\n")
-        proofFileSB.append(objectDecSB)
-        proofFileSB.append(skDefinitions.map(_.pretty).mkString(""))
-      }
-
-      if (problemEncSB.length != 0) {
-        proofFileSB.append("\n\n// PROBLEM ENCODING //////////////////////////////////////\n\n")
-        proofFileSB.append(problemEncSB)
-      }
-      Out.info("Done enocoding the inference rules")
-
-      proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
-
-      // construct the proof based on all the individual steps
-      // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
-      proofSteps =  lpAssume(Seq(conjName)) +: proofSteps
-      proofSteps =  lpRefine(lpFunctionApp(lpDne.name,Seq(conjecture, lpWildcard))) +: proofSteps
-      // finally, test if the derived last clause is the empty clause or a flex-flex clause.
-      // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
-      val emptyClause = lpClause(Seq(),Seq(lpOlBot))
-      val lastStep = proofSteps.last match {
-        case lpHave(name, `emptyClause`,_,_) => lpConstantTerm(name)
-        case lpHave(name, flexFlex0,_,_) =>
-          // transformation of flex-flex to bot necessary todo
-          Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
-          val proofFun = lpMlFunctionType(Seq(flexFlex0,lpOlBot.prf))
-          val flexFlexStepName = "flexflex_to_bot"
-          val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
-            case lpClause(vars,lits) =>
-              val appliedVars = vars.map(var0 => lpWitness(isTermVar(var0).ty))
-              (lpFunctionApp(lpConstantTerm(flexFlexStepName),appliedVars),(lpFunctionApp(lpConstantTerm(name),appliedVars)))
-            case _ => (lpConstantTerm(flexFlexStepName), lpConstantTerm(name))
-          }
-          //throw new Exception(s"vars are ${variablesToApply.map(_.pretty)}")
-          val proofHave = lpHave(flexFlexStepName,proofFun,lpProofScript(Seq(lpProofScriptAdmit())))
-          proofSteps = proofSteps :+ proofHave
-          lpFunctionApp(appliedflexFlexStepName,Seq(appliedStepName))
-        case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last.pretty}")
-      }
-      proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep,Seq.empty))
-      val completeProof = lpDefinition(lpConstantTerm("encodedProof"),Seq.empty,Some(conjecture.prf),lpProofScript(proofSteps),Seq(),Seq(lpOpaque))
-      proofFileSB.append(completeProof.pretty)
-
-      val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
-      val simpTacLibStr = ""//f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
-      val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
-      val tempLibStr: String = s"${nameLpOutputFolder}.${nameTempFile}"
-
-      proofFileSB.insert(0,s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tempLibStr;\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
-
-      // create a folder for the lambdapi package
-      // Create the output directory if it doesn't exist
-      if (!Files.exists(lpOutputPath)) {
-        Files.createDirectory(lpOutputPath)
-        println(s"Folder '$nameLpOutputFolder' created.")
-      } else {
-        println(s"Folder '$nameLpOutputFolder' already exists, overwriting files.")
-      }
-
-      // write the files
-      Out.info("Writing the Lambdapi files")
-
-      val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
-      Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
-
-      val tempFilePath = lpOutputPath.resolve(s"$nameTempFile.lp")
-      Files.write(tempFilePath, tempLib.getBytes(StandardCharsets.UTF_8))
-
-      // create the Makefile and the pkg file
-      val pkgFileName = "lambdapi.pkg"
-      createLambdapiFiles(lpOutputPath, nameLpOutputFolder, pkgFileName, nameProofFile)
-
+    // create a folder for the lambdapi package
+    // Create the output directory if it doesn't exist
+    if (!Files.exists(lpOutputPath)) {
+      Files.createDirectory(lpOutputPath)
+      println(s"Folder '$nameLpOutputFolder' created.")
+    } else {
+      println(s"Folder '$nameLpOutputFolder' already exists, overwriting files.")
     }
-    extractNecessaryFormulas(state)
+
+    // write the files
+    Out.info("Writing the Lambdapi files")
+
+    // todo: only require what we need
+    val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.Epsilon",tempLibStr,calcRuleLibStr,permLibStr)
+    //val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\n"
+    val reqString = reqList.map(s => s"require open $s;\n").mkString("")
+    var additions = ""
+
+    if (signatureFileSB.length != 0) {
+      val signatureFilePath = lpOutputPath.resolve(s"$nameSignatureFile.lp")
+      signatureFileSB.insert(0, reqString)
+      Files.write(signatureFilePath, signatureFileSB.toString.getBytes(StandardCharsets.UTF_8))
+      additions = s"require ${nameLpOutputFolder}.$nameSignatureFile as $abbreviationSignatureFile; \n"
+    }
+
+    if (formulaeFileSB.length != 0) {
+      val formulaeFilePath = lpOutputPath.resolve(s"$nameFormulaeFile.lp")
+      formulaeFileSB.insert(0, reqString + additions + "\n\n")
+      Files.write(formulaeFilePath, formulaeFileSB.toString.getBytes(StandardCharsets.UTF_8))
+      additions = additions + s"require ${nameLpOutputFolder}.$nameFormulaeFile as $abbreviationFormulaeFile;\n"
+    }
+
+    val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
+    proofFileSB.insert(0, reqString + additions + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+    Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
+
+    val tempFilePath = lpOutputPath.resolve(s"$nameTempFile.lp")
+    Files.write(tempFilePath, tempLib.getBytes(StandardCharsets.UTF_8))
+
+    // create the Makefile and the pkg file
+    val pkgFileName = "lambdapi.pkg"
+    createLambdapiFiles(lpOutputPath, nameLpOutputFolder, pkgFileName, nameProofFile)
+  }
+
+  def proof2LP(state: LocalState):String = {
+    val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
+    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
+    val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
+    proofFileSB.insert(0, reqString)
+    val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
+    val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile." + conjName), Seq.empty,lpConstantTerm(nameProofFile))
+    proofFileSB.append("\n")
+    proofFileSB.append(finalRule.pretty)
+    proofFileSB.toString()
   }
 }
