@@ -279,7 +279,7 @@ object ModularProofEncoding {
           Out.lp_debug_info(s"unencoded parent: ${Clause.asTerm(parent.cl).pretty(sig)}")
           Out.lp_debug_info(s"bVars map fVs: $bVarsMap")
           Out.lp_debug_info(s"bVars map dfn: $bVarsMap_dnf")
-          val encSko = term2LP(sk.sko, bVarsMap, sig)._1
+          val encSko = term2LP(sk.sko, bVarsMap, sig, Set.empty, false, false)._1
           val encSkoName = sk.sko match {
             case f ∙ args =>
               if (args.length > freeVarsDfn.length) cantEncode = Some("unused free variables in skolem term")
@@ -314,7 +314,7 @@ object ModularProofEncoding {
       val setVarList : Seq[lpSetTac] = Seq()
 
       val (skListName, setSkList) : (Option[lpConstantTerm],Seq[lpSetTac]) = if (skDefs0.nonEmpty) {
-        val allSkDefsListName = s"allSkDefinitions_${parentNameLpEnc.name}"
+        val allSkDefsListName = s"allSkDefinitions"
         val allSkDefsList = skDefs0.map(sk => lpOlConstantTerm(sk.name.pretty))
         val setSkList = lpSetTac(allSkDefsListName, lpList(allSkDefsList.map(defName => lpRewrite(None, defName, true).olTermApp).toSeq))
         (Some(lpConstantTerm(allSkDefsListName)),Seq(setSkList))

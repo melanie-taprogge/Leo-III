@@ -5,6 +5,7 @@ import leo.datastructures.Term.∙
 import leo.datastructures.{Clause, Literal, Signature, Term, Type}
 import leo.modules.HOLSignature.{===, HOLBinaryConnective, Not, |||}
 import leo.modules.output.LPoutput.Encodings.type2LP
+import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
 import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpInEq, lpLambdaTerm, lpNot, lpOlBinder, lpOlBot, lpOlBoundTerm, lpOlConnective, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlTerm, lpOlTop, lpOlTyVar, lpOlType, lpOlTypedBinaryConnective, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnappliedConnective, lpOlUnaryConnective, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnective, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
@@ -12,7 +13,6 @@ package object LPoutput {
   ////////////////////////////////////////////////////////////////
   ////////// Name Generation
   ////////////////////////////////////////////////////////////////
-
   def nameHypothesis(usedH: Int): lpConstantTerm = {
     lpConstantTerm(s"h${usedH + 1}")
   }
@@ -117,30 +117,33 @@ package object LPoutput {
     }
   }
 
-  final def lpEscapeName(str: String, sig: Signature): String = {
+  final def lpEscapeName(str: String, sig: Signature, prefix: Boolean = true): String = {
+    val prefixStr = if (prefix) s"${abbreviationSignatureFile}." else ""
     if (partiallyAlliedTPTPmap.keySet.contains(str)) {
       throw new Exception(s"trying to escape name for parially applied connective $str, this should not happen")
     } //throw new Exception(s"found illegal $str")
     else if (lpKeywords.contains(str)) {
       val newName = findSafeName(str, sig)
       //Out.lp_debug_info(s"renamed $str to $newName")
-      return newName
+      return prefixStr + newName
     }
     if (!str.matches(lpAllowedRegEx)) {
       val newName = s"{|$str|}"
       Out.lp_debug_info(s"renamed $str to $newName")
-      newName
+      prefixStr + newName
     }
-    else str
+    else (if (prefix && !str.matches("^sk\\d+(?:_def)?$")) prefixStr + str else str)
   }
 
-  final def lpEscapeTerm(str: String,sig: Signature): lpOlTerm = {
+  //final def lpPrefixSymbols()
+
+  final def lpEscapeTerm(str: String,sig: Signature, prefix: Boolean = true): lpOlTerm = {
     if (partiallyAlliedTPTPmap.keySet.contains(str)) {
       // todo: eventhough lambdapi can handle reusing of variable names, we should make sure to generate some fresh variable names for our new anonomus functions
       return partiallyAlliedTPTPmap(str)
     }
     else {
-      val safeName = lpEscapeName(str, sig)
+      val safeName = lpEscapeName(str, sig, prefix)
       lpOlConstantTerm(safeName)
     }
   }
