@@ -1,3 +1,4 @@
+@ -0,0 +1,546 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
@@ -58,7 +59,7 @@ object LPoutput {
       // add substeps for which the encoding is not implemented using the "admit" tactic
       // todo: encode these rules! :)
       Out.lp_debug_info(s"Not encoded yet (${notEncoded.get})\n")
-      Seq(lpProofScriptCommentLine(notEncoded.get), lpHave(stepName, encStep, lpProofScript(Seq(lpProofScriptAdmit()))))
+      Seq(lpProofScriptCommentLine("Unencoded step: " + notEncoded.get), lpHave(stepName, encStep, lpProofScript(Seq(lpProofScriptAdmit()))))
     } else {
       Out.lp_debug_info(s"Encoding finished!\n")
       // add the encoded proofs to the overall proof as substeps
@@ -104,102 +105,102 @@ object LPoutput {
     val (needsEnc, newIdenticalSteps) = identifySteps(cl,stepInfo.identicalSteps,sig,encStep)
 
     if ((cl.role != Role_Conjecture) && needsEnc && (rule != null)) {
-        rule match {
+      rule match {
 
-          case leo.modules.calculus.RenameCNF =>
-            // first, we check weather the
-            // if the conjunction contains only one clause, there is no need for two seperate steps
-            val encode2steps = cl.furtherInfo.cnfInfo.derivedClauses.length > 1
-            val (con_ref,stepsConj,updateMap,addSymbols,skDefs) : (lpConstantTerm,Seq[lpProofScriptStep], Map[lpConstantTerm, lpConstantTerm], Set[Signature.Key],Seq[lpDeclaration]) =
-              if (!stepInfo.clausifiedSteps.keySet.contains(parentInLpEncID.head)){
-                val cnf_stepName = if (encode2steps) {
-                  val unPrefix = s"${parentInLpEncID.head.name.stripPrefix("F.")}"
-                  // If the name is a lp-Safe name, we have to insert "_cnf" into the brackets
-                  val pattern: Regex = raw"""\{\|(.+?)\|\}|(.+)""".r
-                  unPrefix match {
-                    case pattern(inner, null) =>
-                      s"{|${inner}_cnf|}"
-                    case pattern(null, plain) =>
-                      s"${plain}_cnf"
-                    case _ =>
-                      s"${unPrefix}_cnf"
+        case leo.modules.calculus.RenameCNF =>
+          // first, we check weather the
+          // if the conjunction contains only one clause, there is no need for two seperate steps
+          val encode2steps = cl.furtherInfo.cnfInfo.derivedClauses.length > 1
+          val (con_ref,stepsConj,updateMap,addSymbols,skDefs) : (lpConstantTerm,Seq[lpProofScriptStep], Map[lpConstantTerm, lpConstantTerm], Set[Signature.Key],Seq[lpDeclaration]) =
+            if (!stepInfo.clausifiedSteps.keySet.contains(parentInLpEncID.head)){
+              val cnf_stepName = if (encode2steps) {
+                val unPrefix = s"${parentInLpEncID.head.name.stripPrefix("F.")}"
+                // If the name is a lp-Safe name, we have to insert "_cnf" into the brackets
+                val pattern: Regex = raw"""\{\|(.+?)\|\}|(.+)""".r
+                unPrefix match {
+                  case pattern(inner, null) =>
+                    s"{|${inner}_cnf|}"
+                  case pattern(null, plain) =>
+                    s"${plain}_cnf"
+                  case _ =>
+                    s"${unPrefix}_cnf"
+                }
+              } else stepName
+              val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
+              val stepsCNF = toProofStep(cnf_stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
+              (lpConstantTerm(cnf_stepName),stepsCNF,Map(parentInLpEncID.head -> lpConstantTerm(cnf_stepName)),encodingCNF._4,encodingCNF._5)
+            }else (stepInfo.clausifiedSteps(parentInLpEncID.head),Seq(),Map.empty,Set.empty,Seq.empty)
+          val outputInfo = new lpProofStepInfo(updateMap,newIdenticalSteps,newTptpDefinedSymbols,addSymbols,skDefs)
+          // the encoding of the step where we pick one of the clauses in the conjunction
+          val stepsPickupStep : Seq[lpProofScriptStep] = if (encode2steps) {
+            val encPickStep = encRenameCnf_cl(cl,con_ref,cl.furtherInfo.cnfInfo,sig)
+            toProofStep(stepName,encStep,"RenameCNF_select",encPickStep,None)
+          } else Seq()
+          (stepsConj ++ stepsPickupStep,outputInfo)
+
+        case _ =>
+          val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols)
+
+          rule match {
+            case leo.modules.calculus.PolaritySwitch =>
+              val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
+              (toProofStep(stepName, encStep, "PolaritySwitch", encoding._1, None),outputInfo)
+
+            case leo.modules.calculus.FuncExt =>
+              val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig)
+              (toProofStep(stepName, encStep, "FuncExt", encoding._1, encoding._3),outputInfo)
+
+            case leo.modules.calculus.BoolExt =>
+              val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
+              (toProofStep(stepName, encStep, "BoolExt", encoding._1, encoding._3),outputInfo)
+
+            case leo.modules.calculus.OrderedEqFac =>
+              val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
+              (toProofStep(stepName, encStep, "OrderedEqFac", encodings._1, None),outputInfo)
+
+            case leo.modules.calculus.DefExpSimp =>
+              //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
+              // todo: eta expansion
+              val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, st.defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName, parentInLpEncID.head, sig)
+              if (!cantENcode.isDefined) st.etaExpFlag = true
+              (toProofStep(stepName, encStep, "DefExpand", lpProofScript(proofSteps), cantENcode),outputInfo)
+
+            case leo.modules.calculus.Simp =>
+              if (cl.furtherInfo.addInfoSimpRule.isDefined) {
+                if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp") {
+                  if (cl.furtherInfo.rwUnderBinder) {
+                    (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
                   }
-                } else stepName
-                val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
-                val stepsCNF = toProofStep(cnf_stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
-                (lpConstantTerm(cnf_stepName),stepsCNF,Map(parentInLpEncID.head -> lpConstantTerm(cnf_stepName)),encodingCNF._4,encodingCNF._5)
-              }else (stepInfo.clausifiedSteps(parentInLpEncID.head),Seq(),Map.empty,Set.empty,Seq.empty)
-                val outputInfo = new lpProofStepInfo(updateMap,newIdenticalSteps,newTptpDefinedSymbols,addSymbols,skDefs)
-                // the encoding of the step where we pick one of the clauses in the conjunction
-                val stepsPickupStep : Seq[lpProofScriptStep] = if (encode2steps) {
-                  val encPickStep = encRenameCnf_cl(cl,con_ref,cl.furtherInfo.cnfInfo,sig)
-                  toProofStep(stepName,encStep,"RenameCNF_select",encPickStep,None)
-                } else Seq()
-                (stepsConj ++ stepsPickupStep,outputInfo)
-
-          case _ =>
-            val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols)
-
-            rule match {
-              case leo.modules.calculus.PolaritySwitch =>
-                val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
-                (toProofStep(stepName, encStep, "PolaritySwitch", encoding._1, None),outputInfo)
-
-              case leo.modules.calculus.FuncExt =>
-                val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig)
-                (toProofStep(stepName, encStep, "FuncExt", encoding._1, encoding._3),outputInfo)
-
-              case leo.modules.calculus.BoolExt =>
-                val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
-                (toProofStep(stepName, encStep, "BoolExt", encoding._1, encoding._3),outputInfo)
-
-              case leo.modules.calculus.OrderedEqFac =>
-                val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
-                (toProofStep(stepName, encStep, "OrderedEqFac", encodings._1, None),outputInfo)
-
-              case leo.modules.calculus.DefExpSimp =>
-                //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
-                // todo: eta expansion
-                val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, st.defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName, parentInLpEncID.head, sig)
-                if (!cantENcode.isDefined) st.etaExpFlag = true
-                (toProofStep(stepName, encStep, "DefExpand", lpProofScript(proofSteps), cantENcode),outputInfo)
-
-              case leo.modules.calculus.Simp =>
-                if (cl.furtherInfo.addInfoSimpRule.isDefined) {
-                  if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp") {
-                    if (cl.furtherInfo.rwUnderBinder) {
-                      (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
-                    }
-                    else {
-                      val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
-                      (toProofStep(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None),outputInfo)
-                    }
-                  } else {
-                    val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
-                    (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
+                  else {
+                    val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
+                    (toProofStep(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None),outputInfo)
                   }
                 } else {
-                  val annotation = Some("Simp: Unidentified formula simplification unencoded")
+                  val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
                   (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
                 }
+              } else {
+                val annotation = Some("Simp: Unidentified formula simplification unencoded")
+                (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
+              }
 
-              case leo.modules.calculus.PreUni =>
-                val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
-                (toProofStep(stepName, encStep, "PreUni", encodingPreUni._1, encodingPreUni._3),outputInfo)
+            case leo.modules.calculus.PreUni =>
+              val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
+              (toProofStep(stepName, encStep, "PreUni", encodingPreUni._1, encodingPreUni._3),outputInfo)
 
-              case leo.modules.calculus.RewriteSimp =>
-                val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
-                (toProofStep(stepName, encStep, "RewriteSimp", encodingRewrite._1, encodingRewrite._3),outputInfo)
+            case leo.modules.calculus.RewriteSimp =>
+              val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
+              (toProofStep(stepName, encStep, "RewriteSimp", encodingRewrite._1, encodingRewrite._3),outputInfo)
 
-              case leo.modules.calculus.LiftEq =>
-                val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
-                (toProofStep(stepName, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._3),outputInfo)
-              case _ =>
-                val parentIDs = parentInLpEncID.map(id => id.name)
-                (toProofStep(stepName, encStep, "", lpProofScript(Seq.empty), Option(s"Unencoded rule ${rule.name} applied to ${parentIDs.mkString(", ")}")),outputInfo)
-            }
-        }
-      }else{
+            case leo.modules.calculus.LiftEq =>
+              val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
+              (toProofStep(stepName, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._3),outputInfo)
+            case _ =>
+              val parentIDs = parentInLpEncID.map(id => id.name)
+              (toProofStep(stepName, encStep, "", lpProofScript(Seq.empty), Option(s"Unencoded Rule (${rule.name}) applied to ${parentIDs.mkString(", ")}")),outputInfo)
+          }
+      }
+    }else{
       val outputInfo = new lpProofStepInfo(Map.empty, newIdenticalSteps, newTptpDefinedSymbols)
       if (rule == null && (cl.role != Role_Conjecture)) {
         Out.lp_debug_info(s"role : ${cl.role}")
