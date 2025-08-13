@@ -596,7 +596,7 @@ object OrderedParamod extends CalculusRule {
     */
   final def apply(withClause: Clause, withIndex: Int, withSide: Literal.Side,
             intoClause: Clause, intoIndex: Int, intoSide: Literal.Side, intoPosition: Position, intoSubterm: Term,
-                  simulateResolution: Boolean = false)(implicit sig: Signature): Clause = {
+                  simulateResolution: Boolean = false)(implicit sig: Signature): (Clause,Clause) = {
     assert(withClause.lits.isDefinedAt(withIndex))
     assert(intoClause.lits.isDefinedAt(intoIndex))
     assert(withClause.lits(withIndex).polarity)
@@ -610,8 +610,9 @@ object OrderedParamod extends CalculusRule {
     Out.finest(s"replaceBy: ${replaceBy.pretty(sig)}")
 
     /* We cannot delete an element from the list, thats way we replace it by a trivially false literal,
-    * i.e. it is lated eliminated using Simp. */
-    val withLits_without_withLiteral = withClause.lits.updated(withIndex, Literal.mkLit(LitTrue(),false)).map(l =>
+    * i.e. it is later eliminated using Simp. */
+    val withLits_without_withLiteral0 = withClause.lits.updated(withIndex, Literal.mkLit(LitTrue(),false))
+    val withLits_without_withLiteral = withLits_without_withLiteral0.map(l =>
       Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)
     )
     Out.finest(s"withLits_without_withLiteral: \n\t${withLits_without_withLiteral.map(_.pretty(sig)).mkString("\n\t")}")
@@ -628,7 +629,8 @@ object OrderedParamod extends CalculusRule {
     /* Replace subterm (and shift accordingly) */
     val rewrittenIntoLit = Literal.mkOrdered(findWithin.replaceAt(intoPosition,replaceBy.substitute(Subst.shift(intoPosition.abstractionCount))).betaNormalize,otherSide,intoLiteral.polarity)(sig)
     /* Replace old literal in intoClause (at index intoIndex) by the new literal `rewrittenIntoLit` */
-    val rewrittenIntoLits = shiftedIntoLits.updated(intoIndex, rewrittenIntoLit).map(l =>
+    val rewrittenIntoLits0 = shiftedIntoLits.updated(intoIndex, rewrittenIntoLit)
+    val rewrittenIntoLits = rewrittenIntoLits0.map(l =>
       Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)
     )
     /* unification literal between subterm of intoLiteral (in findWithin side) and right side of withLiteral. */
@@ -637,10 +639,14 @@ object OrderedParamod extends CalculusRule {
     val unificationLit = Literal.mkNegOrdered(toFind.etaExpand, intoSubterm.etaExpand)(sig)
     Out.finest(s"unificationLit: ${unificationLit.pretty(sig)}")
 
+    val result_preSimp = Clause(withLits_without_withLiteral0.patch(withIndex,Nil,1) ++ rewrittenIntoLits0 :+ unificationLit)
+
     val newlits_simp = Simp.shallowSimp(withLits_without_withLiteral ++ rewrittenIntoLits)(sig)  :+ unificationLit
+    // todo: we need this in order to get rid of the "bot" we created in the other literal. But can other things also be simplified here?
+    //  In that case: Introduce extra step
     val result = Clause(newlits_simp)
     Out.finest(s"result: ${result.pretty(sig)}")
-    result
+    (result,result_preSimp)
   }
 }
 

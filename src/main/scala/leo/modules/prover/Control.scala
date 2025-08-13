@@ -320,7 +320,7 @@ package inferenceControl {
           // We cannot use _.substitute on literal since this will forget the ordering
           val termShift = Subst.shift(Clause.maxImplicitlyBound(withClause))
           val typeShift = Subst.shift(Clause.maxTypeVar(withClause))
-          val shiftedIntoClause: Clause = Clause(intoClause.lits.map { _.applyRenamingSubstitution(termShift, typeShift) })
+          val shiftedIntoClause: Clause = Clause(intoClause.lits.map { _.applyRenamingSubstitution(termShift, typeShift)})
           val shiftedIntoTerm: Term = intoTerm.substitute(Subst.shift(Clause.maxImplicitlyBound(withClause)-intoPos.abstractionCount), typeShift)
           Out.finest(s"shifted into: ${shiftedIntoClause.pretty(sig)}")
           Out.finest(s"shiftedIntoSubterm: ${shiftedIntoTerm.pretty(sig)}")
@@ -394,7 +394,7 @@ package inferenceControl {
                                      intoPos: Position,
                                      shiftedIntoTerm: Term)(implicit sig: Signature): AnnotatedClause = {
 
-      val result0 = OrderedParamod(withClause, withIndex, withSide,
+      val (result0,preSimp) = OrderedParamod(withClause, withIndex, withSide,
         shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm)(sig)
 
       val uniLit = result0.lits.last
@@ -406,7 +406,9 @@ package inferenceControl {
       if (uniEqLeft.ty == uniEqRight.ty) {
         // all good, no type unification needed
         Out.finest(s"[Paramod] No type unification needed.")
-        val intermediateClause = AnnotatedClause(result0, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties)
+        val addInfoPara = FurtherInfo()
+        addInfoPara.para = Some(AddInfoPara(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm, preSimp,false))
+        val intermediateClause = AnnotatedClause(result0, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
         singleParamod1(withWrapper, withClause, withIndex, withSide, withTerm,
           otherTerm, intoWrapper, shiftedIntoClause, intoIndex, intoSide, intoPos,
           shiftedIntoTerm, intermediateClause, Subst.id)
@@ -419,7 +421,9 @@ package inferenceControl {
           Out.finest(s"[Paramod] Type unification succeeded: ${initialTypeSubst.pretty}")
           val result1 = result0.substituteOrdered(Subst.id, initialTypeSubst)(sig)
           val result2 = Clause(result1.lits.map(l => Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)))
-          val intermediateClause = AnnotatedClause(result2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties)
+          val addInfoPara = FurtherInfo()
+          addInfoPara.para = Some(AddInfoPara(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm, preSimp, true))
+          val intermediateClause = AnnotatedClause(result2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
           // TODO: Include type unification in annotated clause
           singleParamod1(withWrapper, withClause, withIndex, withSide, withTerm,
             otherTerm, intoWrapper, shiftedIntoClause, intoIndex, intoSide, intoPos,

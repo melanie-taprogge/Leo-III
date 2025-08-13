@@ -6,14 +6,43 @@ object LPSignature {
 
   abstract class lpAxioms extends lpTerm{
     def name: lpConstantTerm
-    def ty: lpMlType
+    //def ty: lpMlType
   }
 
   case object lpEm extends lpAxioms{
     //  Π x: Prop, Prf (x ∨ ¬ x)
     override def name: lpConstantTerm = lpConstantTerm("em")
-    override def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"),lpOtype.lift2Meta)),lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlConstantTerm("x"),lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm("x"))).prf)
+    def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"),lpOtype.lift2Meta)),lpOlUntypedBinaryConnectiveTerm(lpOr,lpOlConstantTerm("x"),lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm("x"))).prf)
     override def pretty: String = lpDeclaration(lpEm.name,Seq.empty,lpEm.ty).pretty
+  }
+
+  case object lpLorelim extends lpAxioms {
+    override def name: lpConstantTerm = lpConstantTerm("∨ₑ")
+    override def pretty: String = name.pretty
+  }
+
+  case object lpLorIntro1 extends lpAxioms {
+    override def name: lpConstantTerm = lpConstantTerm("∨ᵢ₁")
+
+    override def pretty: String = name.pretty
+  }
+
+  case object lpLorIntro2 extends lpAxioms {
+    override def name: lpConstantTerm = lpConstantTerm("∨ᵢ₂")
+
+    override def pretty: String = name.pretty
+  }
+
+  case object lpLorIntroMulti2 extends lpAxioms {
+    override def name: lpConstantTerm = lpConstantTerm("∨ᵢₙ₂")
+    def instanciate(c0: Seq[lpOlTerm],c1: Seq[lpOlTerm]): lpFunctionApp = lpFunctionApp(name,Seq(lpList(c0),lpList(c1)))
+    override def pretty: String = name.pretty
+  }
+
+  case object lpLorIntroMulti1 extends lpAxioms {
+    override def name: lpConstantTerm = lpConstantTerm("∨ᵢₙ₁")
+    def instanciate(c0: Seq[lpOlTerm],c1: Seq[lpOlTerm]): lpFunctionApp = lpFunctionApp(name,Seq(lpList(c0),lpList(c1)))
+    override def pretty: String = name.pretty
   }
 
   abstract class lpTheorems extends lpTerm {
@@ -32,7 +61,7 @@ object LPSignature {
     // todo: add proof encoding
     override def name: lpConstantTerm = lpConstantTerm("¬¬ₑ")
 
-    override def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"), lpOtype.lift2Meta)),lpMlFunctionType(Seq(lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm("x"))).prf,lpOlConstantTerm("x").prf)))
+    def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"), lpOtype.lift2Meta)),lpMlFunctionType(Seq(lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm("x"))).prf,lpOlConstantTerm("x").prf)))
 
     override def pretty: String = lpDeclaration(lpDne.name, Seq.empty, lpDne.ty).pretty
   }
@@ -41,7 +70,7 @@ object LPSignature {
     override def name: lpConstantTerm = lpConstantTerm("propExt")
 
     // Π x: Els (↑ o), Π y: Els (↑ o), (Prf x → Prf y) → (Prf y → Prf x) → Prf (eq x y)
-    override def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"), lpOtype.lift2Meta),lpTypedVar(lpConstantTerm("y"), lpOtype.lift2Meta)), lpMlFunctionType(Seq(lpMlFunctionType(Seq(lpOlConstantTerm("x").prf,lpOlConstantTerm("y").prf)),lpMlFunctionType(Seq(lpOlConstantTerm("y").prf,lpOlConstantTerm("x").prf)),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlConstantTerm("x"),lpOlConstantTerm("y")).prf)))
+    def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"), lpOtype.lift2Meta),lpTypedVar(lpConstantTerm("y"), lpOtype.lift2Meta)), lpMlFunctionType(Seq(lpMlFunctionType(Seq(lpOlConstantTerm("x").prf,lpOlConstantTerm("y").prf)),lpMlFunctionType(Seq(lpOlConstantTerm("y").prf,lpOlConstantTerm("x").prf)),lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlConstantTerm("x"),lpOlConstantTerm("y")).prf)))
 
     override def pretty: String = lpDeclaration(lpPropExt.name, Seq.empty, lpPropExt.ty).pretty
   }

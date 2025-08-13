@@ -1,4 +1,3 @@
-@ -0,0 +1,546 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
@@ -25,6 +24,7 @@ import scala.util.matching.Regex
 object LPoutput {
 
   val permlibFile = "MetaTheorems"
+  val multiNDFile = "Multi_ND"
   val calcRuleLibFile = "EPrules"
   val leoSimpTacticFile = "UserTactic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
@@ -39,6 +39,7 @@ object LPoutput {
   val applyAllDefsTacName = "applyAllDefinitions"
 
   val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
+  val multiNdLibStr: String = f"${nameLeoIIILPlib}.${multiNDFile}"
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
 
@@ -59,7 +60,7 @@ object LPoutput {
       // add substeps for which the encoding is not implemented using the "admit" tactic
       // todo: encode these rules! :)
       Out.lp_debug_info(s"Not encoded yet (${notEncoded.get})\n")
-      Seq(lpProofScriptCommentLine("Unencoded step: " + notEncoded.get), lpHave(stepName, encStep, lpProofScript(Seq(lpProofScriptAdmit()))))
+      Seq(lpProofScriptCommentLine(s"Unencoded step ($ruleName): " + notEncoded.get), lpHave(stepName, encStep, lpProofScript(Seq(lpProofScriptAdmit()))))
     } else {
       Out.lp_debug_info(s"Encoding finished!\n")
       // add the encoded proofs to the overall proof as substeps
@@ -158,6 +159,10 @@ object LPoutput {
               val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
               (toProofStep(stepName, encStep, "OrderedEqFac", encodings._1, None),outputInfo)
 
+            case leo.modules.calculus.OrderedParamod =>
+              val (encProof, cantencode) = encPara(cl, cl.annotation.parents, parentInLpEncID, cl.furtherInfo.para, sig)
+              (toProofStep(stepName, encStep, "OrderedPara", encProof, cantencode),outputInfo)
+
             case leo.modules.calculus.DefExpSimp =>
               //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
               // todo: eta expansion
@@ -197,7 +202,7 @@ object LPoutput {
               (toProofStep(stepName, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._3),outputInfo)
             case _ =>
               val parentIDs = parentInLpEncID.map(id => id.name)
-              (toProofStep(stepName, encStep, "", lpProofScript(Seq.empty), Option(s"Unencoded Rule (${rule.name}) applied to ${parentIDs.mkString(", ")}")),outputInfo)
+              (toProofStep(stepName, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")),outputInfo)
           }
       }
     }else{
@@ -502,7 +507,7 @@ object LPoutput {
     Out.info("Writing the Lambdapi files")
 
     // todo: only require what we need
-    val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.Epsilon",tempLibStr,calcRuleLibStr,permLibStr)
+    val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.Epsilon",tempLibStr,calcRuleLibStr,permLibStr,multiNdLibStr)
     //val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\n"
     val reqString = reqList.map(s => s"require open $s;\n").mkString("")
     var additions = ""
@@ -535,7 +540,7 @@ object LPoutput {
 
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
-    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
+    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $multiNdLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
     val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
     proofFileSB.insert(0, reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"

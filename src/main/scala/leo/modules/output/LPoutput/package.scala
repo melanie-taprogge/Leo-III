@@ -1,9 +1,9 @@
 package leo.modules.output
 
 import leo.Out
-import leo.datastructures.Term.∙
-import leo.datastructures.{Clause, Literal, Signature, Term, Type}
-import leo.modules.HOLSignature.{===, HOLBinaryConnective, Not, |||}
+import leo.datastructures.Term.{:::>, TypeLambda, ∙}
+import leo.datastructures.{Clause, Literal, Position, Signature, Term, Type}
+import leo.modules.HOLSignature._
 import leo.modules.output.LPoutput.Encodings.type2LP
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
 import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpInEq, lpLambdaTerm, lpNot, lpOlBinder, lpOlBot, lpOlBoundTerm, lpOlConnective, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlTerm, lpOlTop, lpOlTyVar, lpOlType, lpOlTypedBinaryConnective, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnappliedConnective, lpOlUnaryConnective, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnective, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
@@ -205,11 +205,27 @@ package object LPoutput {
     else indicesOfOccurrence
   }
 
+  def generateWrapperPattern(litIndex:Int, clauseLen:Int, polarity:Boolean, lhs:Option[Boolean], eqType:Option[lpOlType], patternTerm:lpOlTerm):lpOlUntypedBinaryConnectiveTerm_multi={
+    Out.lp_debug_info(s"lit indices: $litIndex, clause length: $clauseLen")
+    val literal = {
+      if (! lhs.isDefined) patternTerm
+      else if (lhs.get) {
+        assert(eqType.isDefined, "Error in Lambdapi encoidng when generating a pattern: Missing type of an euqational literal")
+        lpOlTypedBinaryConnectiveTerm(lpEq,eqType.get,patternTerm,lpOlWildcard)
+      } else {
+        assert(eqType.isDefined, "Error in Lambdapi encoidng when generating a pattern: Missing type of an euqational literal")
+        lpOlTypedBinaryConnectiveTerm(lpEq, eqType.get, lpOlWildcard, patternTerm)
+      }
+    }
+    generateClausePattern(Seq(litIndex),clauseLen, polarity, literal)
+  }
+
   def generateClausePattern(termPosSeq:Seq[Int],clauseLen:Int, polarity:Boolean = true, patternTerm:lpOlTerm = lpOlUntypedVar(lpOlConstantTerm("x"))): lpOlUntypedBinaryConnectiveTerm_multi ={
+    assert(termPosSeq.max <= clauseLen, s"Error in Lambdapi encoidng when generating a pattern: Literal index (${termPosSeq.max} out of bounds for clause of length $clauseLen)")
     val litPol = if (polarity) patternTerm else lpOlUnaryConnectiveTerm(lpNot,patternTerm)
     var args : Seq[lpOlTerm] = Seq.fill(clauseLen)(lpOlWildcard)
     termPosSeq foreach {pos =>
-      args = Seq.fill(clauseLen)(lpOlWildcard).updated(pos, litPol)
+      args = args.updated(pos, litPol)
     }
     lpOlUntypedBinaryConnectiveTerm_multi(lpOr, args)
   }
@@ -218,6 +234,7 @@ package object LPoutput {
   def generateClausePatternTerm(varPos: Seq[Int], clauseLen: Int, eqPos: Option[Int] = None, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpOlConstantTerm("x")), polarity: Boolean = true): Option[lpRewritePattern] = {
     // given the position of the literal that a rule should be applied to in a clause and weather or not this clause in embedded in an equality to be proven,
     // generate a rewrite pattern
+    // todo: change encoding to take true/false as argument for equality position
 
     val maybeNegatedPatternVar = {
       if (polarity) patternVar
@@ -245,17 +262,15 @@ package object LPoutput {
   }
 
   def acessSubterm(t: Term, position: Seq[Int], sig: Signature, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))): (lpOlTerm, Term) = {
-    // generate a pattern for the application of rewriting
-    //todo: for longer clauses we need to loop through the literals and for literals we need to consider both sides
+    // generate a pattern
+    // todo: rahter than using this function, use leoPosition2LpPattern and rely on the leo encodings of positions for a unified approach
 
     // if the length of position is 1, we arrived at the last step and want to provide a proof
     if (position.length == 0) (patternVar, t)
 
     else {
-
       val currentPosition = position.head
       t match {
-        //case HOLBinaryConnective(lhs,rhs) => throw new Exception("")
         case tl ||| tr =>
           if (currentPosition == 1) {
             val (intermediatePattern, intermediateTerm) = acessSubterm(tr, position.tail, sig, patternVar)
@@ -390,6 +405,66 @@ package object LPoutput {
       case _ => throw new Exception(s"encountered unexptcted term $searchIn when trying to find terms ${termRwMap.keySet.map(_.pretty)} in ${searchIn.pretty}")
     }
     }
+  }
+
+
+  def leoPosition2LpPattern (t:Term, p:Position, sig:Signature, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) : (lpOlTerm, Term, Option[String]) ={
+
+    Out.lp_debug_info(s"posVector: ${p.pretty}")
+    val underBinderError = Some("Rewriting under binders not possible")
+
+    // todo: do i need to also output the term or does it not matter in my use-cases?
+    if (p.seq.length == 0) (patternVar, t, None)
+
+    else {
+      val currentPosition = p.posHead
+      t match {
+        case tl ||| tr =>
+          if (currentPosition == 0) throw new Exception(s"when generating a rewrite pattern for Lambdapi, encountered position $currentPosition indicating ${lpOr.pretty}")
+          else if (currentPosition == 1) {
+          val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tr, p.tail, sig, patternVar)
+          (lpOlUntypedBinaryConnectiveTerm (lpOr, intermediatePattern, lpOlWildcard), intermediateTerm, cantEncode)}
+          else if (currentPosition == 2) {
+          val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tl, p.tail, sig, patternVar)
+          (lpOlUntypedBinaryConnectiveTerm (lpOr, lpOlWildcard, intermediatePattern), intermediateTerm, cantEncode)}
+          else throw new Exception (s"invalid position $currentPosition for connective ${lpOr.pretty}")
+
+          /*
+        case Forall(_) => true
+        case Exists(_) => true
+        case TyForall(_) => true
+        case TypeLambda(_) => true
+        case _ :::> _ => true
+        case Not(t) => check(t :: rest)
+        case lt & rt => check(lt :: rt :: rest)
+        case lt ||| rt => check(lt :: rt :: rest)
+        case Impl(lt, rt) => check(lt :: rt :: rest)
+        case tl === tr => check(tl :: tr :: rest)
+        case tl !=== tr => check(tl :: tr :: rest)
+        */
+
+        case _ :::> _  => (lpOlWildcard, t, underBinderError)
+
+        case f ∙ args =>
+          val wildcardSeq = Seq.fill(args.length)(Left(lpOlWildcard))
+          if (currentPosition == 0) {
+            val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(f, p.tail, sig, patternVar)
+            (lpOlFunctionApp(intermediatePattern,wildcardSeq),intermediateTerm,cantEncode)
+          } else {
+            assert(currentPosition <= (args.length + 1), s"Error generating Lambdpai Pattern: Found position $currentPosition out of bounds")
+            val (newArgs, newTerm, cantEncode) =
+              args(currentPosition - 1) match {
+                case Left(lTerm) =>
+                  val (intermediatePattern, intermediateTerm,cantEncode0) = leoPosition2LpPattern(lTerm, p.tail, sig, patternVar)
+                  (wildcardSeq.updated(currentPosition -1,Left(intermediatePattern)),intermediateTerm,cantEncode0)
+                case Right(rType) =>
+                  throw new Exception(s"Error generating Lambdpai Pattern: Patterns in types not encoded yet")
+              }
+            (lpOlFunctionApp(lpOlWildcard,newArgs),newTerm,cantEncode)
+          }
+      case _ => throw new Exception (s"generating pattern for LP but ${t.pretty} not encodedable?")
+      }
+      }
   }
 
 //todo: in order to implmement this I need proper type substitution implementation

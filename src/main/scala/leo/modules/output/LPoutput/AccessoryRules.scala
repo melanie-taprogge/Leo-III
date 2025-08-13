@@ -522,12 +522,16 @@ object AccessoryRules {
 
     override def pretty: String = lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(T)).pretty
 
-    def instanciate(x0: lpOlTerm, y0: lpOlTerm, prfXeqY0: Option[lpTerm]): lpFunctionApp = {
-      val prfXeqY = prfXeqY0 match {
-        case Some(prfTerm) => Seq(prfTerm)
+    def instanciate(ty: lpOlType, x0: Option[lpOlTerm] = None, y0: Option[lpOlTerm] = None): lpFunctionApp = {
+      val x = x0 match {
+        case Some(term) => Seq(term)
         case None => Seq()
       }
-      lpFunctionApp(name, Seq(x0, y0) ++ prfXeqY)
+      val y = y0 match {
+        case Some(term) => Seq(term)
+        case None => Seq()
+      }
+      lpFunctionApp(name, x ++ y,Seq(ty))
     }
 
     def res(polarity: Boolean, T0: lpOlPolyType, x0: lpOlTerm, y0: lpOlTerm) = { // todo unite encoding with type
