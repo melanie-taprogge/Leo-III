@@ -391,7 +391,15 @@ object AccessoryRules {
             Out.lp_debug_info(s"Unencoded transformation 1")
             false
         }
-      } else false
+      } else if (lhs0 == rhs0) {
+        if (!pol0 && (lhs1 == Some(lpOlBot))) {
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpSimp_negEq_idem.instanciate(ty1.get, lhs1))
+          true
+        } else if (pol0 && (lhs1 == Some(lpOlTop))) {
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpSimp_eq_idem.instanciate(ty1.get, lhs1))
+          true
+        } else false
+      }else false
     } else if (!ty0.isDefined && ty1.isDefined) {
       // we need to transform to equational literal
       Out.lp_debug_info(s"Transformation from non-equational to equational form neccesary...")
@@ -464,7 +472,15 @@ object AccessoryRules {
             Out.lp_debug_info(s"Unencoded transformation 2")
             false
         }
-    } else false
+    } else if (lhs1 == rhs1) {
+        if (!pol1 && (lhs0 == Some(lpOlBot))){
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpSimp_negEq_idem.instanciate(ty1.get, lhs1),true)
+          true
+        } else if (pol1 && (lhs0 == Some(lpOlTop))){
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpSimp_eq_idem.instanciate(ty1.get, lhs1), true)
+          true
+        } else false
+      } else false
     } else if (ty0.isDefined && ty1.isDefined) {
       // both literals are equational, maybe we need to switch sides or transform bot/ top and polarity
       if (Seq(lhs0,rhs0).contains(lhs1) && Seq(lhs0,rhs0).contains(rhs1)){
@@ -489,11 +505,25 @@ object AccessoryRules {
         false
       }
     } else {
-      // both literals are non-equational and should already be the same
-      assert(lit0 == lit1)
-      Out.lp_debug_info(s"Literals are already identical")
-      // maybe transform bot to not top and vice versa?
-      true
+      // both literals are non-equational
+      // -> They either are already the same ...
+      if(lit0 == lit1){
+        Out.lp_debug_info(s"Literals are already identical")
+        // maybe transform bot to not top and vice versa?
+        true
+      }else{ // todo maybe check this first? may be more efficient...
+        (lit0, lit1) match {
+          // ... or we transform back and forth between top and bottom with negations
+          case (`lpOlBot`,lpOlUnaryConnectiveTerm(`lpNot`,`lpOlTop`)) =>
+            allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(lpSimp_negTop.name, Seq()), true)
+            true
+          case (lpOlUnaryConnectiveTerm(`lpNot`, `lpOlTop`), `lpOlBot`) =>
+            allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(lpSimp_negTop.name, Seq()))
+            true
+          case _ => throw new Exception(s"Unable to transform ${lit0.pretty} to ${lit1.pretty}")
+        }
+        // ... or one is a double negation of the other todo
+      }
     }
     if (canEncode) Out.lp_debug_info(s"success")
     (allSteps,usedSymbols,canEncode)
