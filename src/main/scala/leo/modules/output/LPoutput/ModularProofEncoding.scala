@@ -897,6 +897,7 @@ object ModularProofEncoding {
 
         // attempt to create rewrite pattern for the targeted subterm
         val term = if (info.intoSide) targetLit.left else targetLit.right
+        Out.lp_debug_info(s"trying to find ${info.intoPosition} in ${term2LP(term,bVarsMap,sig)._1.pretty}")
         val (encPattern, encTerm, cantEncodeRwPattern) = leoPosition2LpPattern(term, info.intoPosition, sig)
         if (cantEncodeRwPattern.isDefined) {
           cantEncode = cantEncodeRwPattern

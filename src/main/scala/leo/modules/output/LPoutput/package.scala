@@ -4,9 +4,9 @@ import leo.Out
 import leo.datastructures.Term.{:::>, TypeLambda, ∙}
 import leo.datastructures.{Clause, Literal, Position, Signature, Term, Type}
 import leo.modules.HOLSignature._
-import leo.modules.output.LPoutput.Encodings.type2LP
+import leo.modules.output.LPoutput.Encodings.{term2LP, type2LP}
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
-import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpInEq, lpLambdaTerm, lpNot, lpOlBinder, lpOlBot, lpOlBoundTerm, lpOlConnective, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlTerm, lpOlTop, lpOlTyVar, lpOlType, lpOlTypedBinaryConnective, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnappliedConnective, lpOlUnaryConnective, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnective, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
+import leo.modules.output.LPoutput.lpDatastructures.{lpAnd, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpImp, lpInEq, lpLambdaTerm, lpNot, lpOlBinder, lpOlBot, lpOlBoundTerm, lpOlConnective, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlTerm, lpOlTop, lpOlTyVar, lpOlType, lpOlTypedBinaryConnective, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnappliedConnective, lpOlUnaryConnective, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnective, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
 
@@ -410,7 +410,7 @@ package object LPoutput {
 
   def leoPosition2LpPattern (t:Term, p:Position, sig:Signature, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) : (lpOlTerm, Term, Option[String]) ={
 
-    Out.lp_debug_info(s"posVector: ${p.pretty}")
+    Out.lp_debug_info(s"posVector: ${p.pretty} (term: ${t.pretty})")
     val underBinderError = Some("Rewriting under binders not possible")
 
     // todo: do i need to also output the term or does it not matter in my use-cases?
@@ -422,28 +422,73 @@ package object LPoutput {
         case tl ||| tr =>
           if (currentPosition == 0) throw new Exception(s"when generating a rewrite pattern for Lambdapi, encountered position $currentPosition indicating ${lpOr.pretty}")
           else if (currentPosition == 1) {
-          val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tr, p.tail, sig, patternVar)
+          val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tl, p.tail, sig, patternVar)
           (lpOlUntypedBinaryConnectiveTerm (lpOr, intermediatePattern, lpOlWildcard), intermediateTerm, cantEncode)}
           else if (currentPosition == 2) {
-          val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tl, p.tail, sig, patternVar)
+          val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tr, p.tail, sig, patternVar)
           (lpOlUntypedBinaryConnectiveTerm (lpOr, lpOlWildcard, intermediatePattern), intermediateTerm, cantEncode)}
           else throw new Exception (s"invalid position $currentPosition for connective ${lpOr.pretty}")
 
-          /*
-        case Forall(_) => true
-        case Exists(_) => true
-        case TyForall(_) => true
-        case TypeLambda(_) => true
-        case _ :::> _ => true
-        case Not(t) => check(t :: rest)
-        case lt & rt => check(lt :: rt :: rest)
-        case lt ||| rt => check(lt :: rt :: rest)
-        case Impl(lt, rt) => check(lt :: rt :: rest)
-        case tl === tr => check(tl :: tr :: rest)
-        case tl !=== tr => check(tl :: tr :: rest)
-        */
+        case lt & rt =>
+          if (currentPosition == 0) throw new Exception(s"when generating a rewrite pattern for Lambdapi, encountered position $currentPosition indicating ${lpAnd.pretty}")
+          else if (currentPosition == 1) {
+            val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(lt, p.tail, sig, patternVar)
+            (lpOlUntypedBinaryConnectiveTerm(lpAnd, intermediatePattern, lpOlWildcard), intermediateTerm, cantEncode)
+          }
+          else if (currentPosition == 2) {
+            val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(rt, p.tail, sig, patternVar)
+            (lpOlUntypedBinaryConnectiveTerm(lpAnd, lpOlWildcard, intermediatePattern), intermediateTerm, cantEncode)
+          }
+          else throw new Exception(s"invalid position $currentPosition for connective ${lpAnd.pretty}")
+
+        case Impl(lt, rt) =>
+          if (currentPosition == 0) throw new Exception(s"when generating a rewrite pattern for Lambdapi, encountered position $currentPosition indicating ${lpImp.pretty}")
+          else if (currentPosition == 1) {
+            val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(lt, p.tail, sig, patternVar)
+            (lpOlUntypedBinaryConnectiveTerm(lpImp, intermediatePattern, lpOlWildcard), intermediateTerm, cantEncode)
+          }
+          else if (currentPosition == 2) {
+            val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(rt, p.tail, sig, patternVar)
+            (lpOlUntypedBinaryConnectiveTerm(lpImp, lpOlWildcard, intermediatePattern), intermediateTerm, cantEncode)
+          }
+          else throw new Exception(s"invalid position $currentPosition for connective ${lpImp.pretty}")
+
+        case tl === tr =>
+          val encTy = type2LP(tl.ty,sig)
+            if (currentPosition == 2) {
+              val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tl, p.tail, sig, patternVar)
+              (lpOlTypedBinaryConnectiveTerm(lpEq,encTy, intermediatePattern, lpOlWildcard), intermediateTerm, cantEncode)
+            }
+            else if (currentPosition == 3) {
+              val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tr, p.tail, sig, patternVar)
+              (lpOlTypedBinaryConnectiveTerm(lpEq,encTy, lpOlWildcard, intermediatePattern), intermediateTerm, cantEncode)
+            }
+            else throw new Exception(s"invalid position $currentPosition for connective ${lpEq.pretty}")
+
+        case tl !=== tr =>
+            val encTy = type2LP(tl.ty, sig)
+            if (currentPosition == 2) {
+              val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tl, p.tail, sig, patternVar)
+              (lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, encTy, intermediatePattern, lpOlWildcard)), intermediateTerm, cantEncode)
+            }
+            else if (currentPosition == 3) {
+              val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(tr, p.tail, sig, patternVar)
+              (lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq, encTy, lpOlWildcard, intermediatePattern)), intermediateTerm, cantEncode)
+            }
+            else throw new Exception(s"invalid position $currentPosition for connective ${lpNot.pretty} ${lpEq.pretty}")
+
+        case Not(t) =>
+          if (currentPosition == 0) throw new Exception(s"when generating a rewrite pattern for Lambdapi, encountered position $currentPosition indicating ${lpNot.pretty}")
+          else if (currentPosition == 1) {
+            val (intermediatePattern, intermediateTerm, cantEncode) = leoPosition2LpPattern(t, p.tail, sig, patternVar)
+            (lpOlUnaryConnectiveTerm(lpNot, intermediatePattern), intermediateTerm, cantEncode)
+          } else throw new Exception (s"invalid position $currentPosition for connective ${lpNot.pretty}")
 
         case _ :::> _  => (lpOlWildcard, t, underBinderError)
+        case Forall(_) => (lpOlWildcard, t, underBinderError)
+        case Exists(_) => (lpOlWildcard, t, underBinderError)
+        case TyForall(_) => (lpOlWildcard, t, underBinderError)
+        case TypeLambda(_) => (lpOlWildcard, t, underBinderError)
 
         case f ∙ args =>
           val wildcardSeq = Seq.fill(args.length)(Left(lpOlWildcard))
@@ -458,7 +503,8 @@ package object LPoutput {
                   val (intermediatePattern, intermediateTerm,cantEncode0) = leoPosition2LpPattern(lTerm, p.tail, sig, patternVar)
                   (wildcardSeq.updated(currentPosition -1,Left(intermediatePattern)),intermediateTerm,cantEncode0)
                 case Right(rType) =>
-                  throw new Exception(s"Error generating Lambdpai Pattern: Patterns in types not encoded yet ()")
+                  val encType = type2LP(rType,sig)
+                  throw new Exception(s"Error generating Lambdpai Pattern: Patterns in types not encoded yet (trying to generate pattern in ${encType.pretty} (${rType.pretty}) with ${p.tail})")
               }
             (lpOlFunctionApp(lpOlWildcard,newArgs),newTerm,cantEncode)
           }
