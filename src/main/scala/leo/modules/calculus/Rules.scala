@@ -596,7 +596,7 @@ object OrderedParamod extends CalculusRule {
     */
   final def apply(withClause: Clause, withIndex: Int, withSide: Literal.Side,
             intoClause: Clause, intoIndex: Int, intoSide: Literal.Side, intoPosition: Position, intoSubterm: Term,
-                  simulateResolution: Boolean = false)(implicit sig: Signature): (Clause,Clause) = {
+                  simulateResolution: Boolean = false)(implicit sig: Signature): (Clause,Clause,Boolean) = {
     assert(withClause.lits.isDefinedAt(withIndex))
     assert(intoClause.lits.isDefinedAt(intoIndex))
     assert(withClause.lits(withIndex).polarity)
@@ -639,14 +639,19 @@ object OrderedParamod extends CalculusRule {
     val unificationLit = Literal.mkNegOrdered(toFind.etaExpand, intoSubterm.etaExpand)(sig)
     Out.finest(s"unificationLit: ${unificationLit.pretty(sig)}")
 
-    val result_preSimp = Clause(withLits_without_withLiteral0.patch(withIndex,Nil,1) ++ rewrittenIntoLits0 :+ unificationLit)
+    val result_preSimp = Clause(withLits_without_withLiteral.patch(withIndex,Nil,1) ++ rewrittenIntoLits :+ unificationLit)
 
-    val newlits_simp = Simp.shallowSimp(withLits_without_withLiteral ++ rewrittenIntoLits)(sig)  :+ unificationLit
+    val (newlits_simp0, rwUnderBinder) = Simp.shallowSimp_rwUnderBinder(withLits_without_withLiteral ++ rewrittenIntoLits)(sig)
+    val newlits_simp = newlits_simp0 :+ unificationLit
+
+    //val newlits_simp =Simp.shallowSimp(withLits_without_withLiteral ++ rewrittenIntoLits)(sig) :+ unificationLit
+    //val rwUnderBinder = true
+
     // todo: we need this in order to get rid of the "bot" we created in the other literal. But can other things also be simplified here?
     //  In that case: Introduce extra step
     val result = Clause(newlits_simp)
     Out.finest(s"result: ${result.pretty(sig)}")
-    (result,result_preSimp)
+    (result,result_preSimp,rwUnderBinder)
   }
 }
 

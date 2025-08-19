@@ -394,7 +394,7 @@ package inferenceControl {
                                      intoPos: Position,
                                      shiftedIntoTerm: Term)(implicit sig: Signature): AnnotatedClause = {
 
-      val (result0,preSimp) = OrderedParamod(withClause, withIndex, withSide,
+      val (result0,preSimp,simpUnderBilnder) = OrderedParamod(withClause, withIndex, withSide,
         shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm)(sig)
 
       val uniLit = result0.lits.last
@@ -407,8 +407,15 @@ package inferenceControl {
         // all good, no type unification needed
         Out.finest(s"[Paramod] No type unification needed.")
         val addInfoPara = FurtherInfo()
-        addInfoPara.para = Some(AddInfoPara(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm, preSimp,false))
-        val intermediateClause = AnnotatedClause(result0, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
+        addInfoPara.para = Some(AddInfoPara(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm, preSimp, false))
+        val intermediateClause =  if (result0 != preSimp) {
+          val intermediateClause0 = AnnotatedClause(preSimp, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
+          val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder)
+          AnnotatedClause(result0, InferredFrom(Simp, intermediateClause0), newProperties, addInfoSimp) // todo: properties and annotations
+        }
+        else {
+          AnnotatedClause(result0, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
+        }
         singleParamod1(withWrapper, withClause, withIndex, withSide, withTerm,
           otherTerm, intoWrapper, shiftedIntoClause, intoIndex, intoSide, intoPos,
           shiftedIntoTerm, intermediateClause, Subst.id)
@@ -423,7 +430,15 @@ package inferenceControl {
           val result2 = Clause(result1.lits.map(l => Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)))
           val addInfoPara = FurtherInfo()
           addInfoPara.para = Some(AddInfoPara(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm, preSimp, true))
-          val intermediateClause = AnnotatedClause(result2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
+          val intermediateClause = if (result0 != preSimp) {
+            val preSimpRes1 = preSimp.substituteOrdered(Subst.id, initialTypeSubst)(sig)
+            val preSimpRes2 = Clause(preSimpRes1.lits.map(l => Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)))
+            val intermediateClause0 = AnnotatedClause(preSimpRes2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
+            val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder)
+            AnnotatedClause(result2, InferredFrom(Simp, intermediateClause0), newProperties, addInfoSimp)
+          }else {
+            AnnotatedClause(result2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
+          }
           // TODO: Include type unification in annotated clause
           singleParamod1(withWrapper, withClause, withIndex, withSide, withTerm,
             otherTerm, intoWrapper, shiftedIntoClause, intoIndex, intoSide, intoPos,
@@ -1023,7 +1038,7 @@ package inferenceControl {
             defaultUnify(vargen, cl)(state)
           } else {
             val fromRule = cl.annotation.fromRule
-            if (fromRule == OrderedParamod) {
+            if (fromRule == OrderedParamod || (fromRule == Simp && cl.annotation.parents.head.annotation.fromRule == OrderedParamod)) {
               paramodUnify(vargen, cl)(state)
             } else if (fromRule == OrderedEqFac) {
               factorUnify(vargen, cl)(state)

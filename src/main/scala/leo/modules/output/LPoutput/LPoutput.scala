@@ -160,7 +160,7 @@ object LPoutput {
               (toProofStep(stepName, encStep, "OrderedEqFac", encodings._1, None),outputInfo)
 
             case leo.modules.calculus.OrderedParamod =>
-              val (encProof, cantencode) = encPara(cl, cl.annotation.parents, parentInLpEncID, cl.furtherInfo.para, sig)
+              val (encProof, cantencode) = encPara(cl.cl, cl.annotation.parents, parentInLpEncID, cl.furtherInfo.para, sig)
               (toProofStep(stepName, encStep, "OrderedPara", encProof, cantencode),outputInfo)
 
             case leo.modules.calculus.DefExpSimp =>
@@ -180,7 +180,17 @@ object LPoutput {
                     val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
                     (toProofStep(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None),outputInfo)
                   }
-                } else {
+                  /*
+                } else if (cl.furtherInfo.addInfoSimpRule.get == "paraSimp") {
+                  if (cl.furtherInfo.rwUnderBinder) {
+                    (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
+                  }
+                  else {
+                    val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
+                    (toProofStep(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None), outputInfo)
+                  }
+                   */
+                }else {
                   val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
                   (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
                 }

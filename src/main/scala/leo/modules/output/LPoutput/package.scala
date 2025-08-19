@@ -458,7 +458,7 @@ package object LPoutput {
                   val (intermediatePattern, intermediateTerm,cantEncode0) = leoPosition2LpPattern(lTerm, p.tail, sig, patternVar)
                   (wildcardSeq.updated(currentPosition -1,Left(intermediatePattern)),intermediateTerm,cantEncode0)
                 case Right(rType) =>
-                  throw new Exception(s"Error generating Lambdpai Pattern: Patterns in types not encoded yet")
+                  throw new Exception(s"Error generating Lambdpai Pattern: Patterns in types not encoded yet ()")
               }
             (lpOlFunctionApp(lpOlWildcard,newArgs),newTerm,cantEncode)
           }
