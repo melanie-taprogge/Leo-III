@@ -180,16 +180,14 @@ object LPoutput {
                     val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
                     (toProofStep(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None),outputInfo)
                   }
-                  /*
                 } else if (cl.furtherInfo.addInfoSimpRule.get == "paraSimp") {
                   if (cl.furtherInfo.rwUnderBinder) {
                     (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
                   }
                   else {
-                    val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
+                    val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig, Seq(cl.annotation.parents.head.cl.lits.length - 1))
                     (toProofStep(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None), outputInfo)
                   }
-                   */
                 }else {
                   val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
                   (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)

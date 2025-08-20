@@ -276,9 +276,10 @@ object AccessoryRules {
     (haveStep, transformations.toMap, clauseAfter.lits, usedSymbols)
   }
 
-  def flipStep(litCount: Int, clauseLen: Int, pol: Boolean, eqType: lpOlType) = {
-    val rewritePatternEq = lpRewritePattern(generateClausePattern(Seq(litCount), clauseLen, pol))
-    lpRewrite(Some(rewritePatternEq), lpFunctionApp(flipLiteral().name, Seq.empty, Seq(eqType)))
+  def flipStep(litCount: Int, clauseLen: Int, pol: Boolean, eqType: lpOlType, embedInPattern: Option[lpOlTerm => lpOlTerm] = None) = {
+    val rewritePatternEq = generateClausePattern(Seq(litCount), clauseLen, pol)
+    val pattern = if (!embedInPattern.isDefined) rewritePatternEq else embedInPattern.get(rewritePatternEq)
+    lpRewrite(Some(lpRewritePattern(pattern)), lpFunctionApp(flipLiteral().name, Seq.empty, Seq(eqType)))
   }
 
   def extractSides(lit0:lpOlTerm):(Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean, Boolean)={
@@ -303,7 +304,7 @@ object AccessoryRules {
   }
 
   // todo: restructure to use lpLiterl as input
-  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
+  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int, embedInPattern: Option[lpOlTerm => lpOlTerm] = None): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
     Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
     // todo: compare modulo alpha conversion?
 
@@ -313,7 +314,11 @@ object AccessoryRules {
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     var canEncode = false
     var flip: Boolean = false
-    val rewritePattern = Some(lpRewritePattern(generateClausePattern(Seq(litCount), clauseLen)))
+    val clausePattern = generateClausePattern(Seq(litCount), clauseLen)
+    val embclausePattern =
+      if (!embedInPattern.isDefined) clausePattern
+      else embedInPattern.get(clausePattern)
+    val rewritePattern = Some(lpRewritePattern(embclausePattern))
 
     // first we register the two sides of the literals and weather or not the literals are negative
     val (lhs0, rhs0, ty0, pol0, _) = extractSides(lit0)
@@ -380,7 +385,7 @@ object AccessoryRules {
           case Some(rule) =>
             if (flip) {
               usedSymbols = usedSymbols + flipLiteral()
-              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty0.get)
+              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty0.get, embedInPattern)
               Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
             }
             usedSymbols = usedSymbols + rule
@@ -464,7 +469,7 @@ object AccessoryRules {
             Out.lp_debug_info(s"Applying ${rule.term} to transform non-equational literal to equational form")
             if (flip) {
               usedSymbols = usedSymbols + flipLiteral()
-              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty1.get)
+              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty1.get, embedInPattern)
               Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
             }
             true
@@ -488,7 +493,7 @@ object AccessoryRules {
         if (lhs0 != lhs1){
           val necessaryFlip = if (pol0) true else false
           usedSymbols = usedSymbols + flipLiteral()
-          allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty0.get)
+          allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty0.get, embedInPattern)
           Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           true
         }else {
