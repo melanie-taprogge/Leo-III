@@ -12,7 +12,7 @@ import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.calculus.Simp.normalize
 import leo.modules.output.LPoutput.CNFEncoding.{allBoolRuleApplicationStep, cnfTac}
-import leo.modules.output.LPoutput.LPSignature.{lpEm, lpLorIntro1, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim, lpTheorems}
+import leo.modules.output.LPoutput.LPSignature.{lpEm, lpLorElimMulti, lpLorIntro1, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim, lpTheorems}
 
 import scala.collection.mutable
 
@@ -826,7 +826,7 @@ object ModularProofEncoding {
     }else{
      */
 
-    val (addTargetLitProof, currentChildLits) : (Seq[lpProofScriptStep],Seq[Literal]) =
+    val (transformTargetLitSteps, currentChildLits) : (Seq[lpProofScriptStep],Seq[Literal]) =
       /*
       if (lenDif == 1) { // (encRwClause.lits.length + encParClause.lits.length)) {
       //cantEncode = Some(s"Deletion of target lit not encoded yet")
@@ -954,22 +954,56 @@ object ModularProofEncoding {
 
           // cosntruct the refine step
           val instIntoClause = lpFunctionApp(parClauseName, encParClause.metaVars)
-          val instRule = lpLorIntroMulti1.instanciate(encParClause.lits, Seq(encUniLit))
-          val refineStep2 = lpRefine(lpFunctionApp(instRule, Seq(instIntoClause)))
+          val vIntro1_intoClause_uniLit = lpFunctionApp(lpLorIntroMulti1.instanciate(encParClause.lits, Seq(encUniLit)), Seq(instIntoClause))
 
-          // If the RW clause is longer than 1, we need to do anohter case distinction...
-          if (encRwClause.lits.length > 1) {
+          ////////////////////////////
+          // 2. II) Depending on weather or not the RW Clause has length 1 or is longer, we can either use it directly or do another case distinction
+
+          val case_uniLit_true =  if (encRwClause.lits.length > 1) {
             Out.lp_debug_info(s"Clause we rewrite has more than one literal")
-            cantEncode = Some("Paramodulation with RW clause longer than one")
+
+            // Encode the literals that we need to add
+            val encAddLits = addLitsRwClause.map(lit => term2LP(asTerm(lit), bVarsMap, sig)._1)
+            Out.lp_debug_info(s"additional literals in the RW-clause: ${encAddLits.map(_.pretty)}")
+
+            Out.lp_debug_info(s"Doing an additional case split on the RW clause literals:")
+
+            // We do a case split and prove the resulting clause both based on the With-Lit and based on the remaining clause
+            val caseSplit_withLit = lpFunctionApp(lpLorElimMulti.instanciate(info.withIndex,encWithClause.lits,None),Seq(eqRwClauseName, lpWildcard, lpWildcard))
+
+            // Case with lit is true
+            val nameWithLit = lpConstantTerm("withLit")
+            val assumeWithLit = lpAssume(Seq(nameWithLit))
+            // like in the base case, we can not rewrite with the with-Lit
+            val rewriteWithRWLit = lpRewrite(Some(lpRewritePattern(clausePattern)), nameWithLit, info.withSide)
+            // Constructing the refine step is slightly more intricate: The literals we can prove based on the Into-Clause are not embedded in a disjuncion with the 
+            // WithClause literals on the LHS and the UniConstraint on the RHS. We thus need a nested appication of n-ary lor introductions. 
+            val lorIntro_withClause = lpLorIntroMulti2.instanciate(encAddLits, encParClause.lits :+ encUniLit)
+            val refineStep_caseRwLit = lpRefine(lpFunctionApp(lorIntro_withClause, Seq(vIntro1_intoClause_uniLit)))
+            // combine all of these steps into one step
+            val caseRwLitHolds = lpProofScript((assumeWithLit +: transformTargetLitSteps) ++ maybeFlipStep ++ Seq(lpProofScriptCommentLine("Rewrite parent with with-literal"), rewriteWithRWLit, lpProofScriptCommentLine("Rewrite parent with unification constraint"), rewriteWithUniLit, refineStep_caseRwLit))
+
+            // Case where other lits in withClause are true
+            val nameWithClauseWithoutLit = lpConstantTerm("withClause")
+            val assumeWithClause = Seq(lpAssume(Seq(nameWithClauseWithoutLit)))
+            // use the multivariant introduction rule of lor to prove the clause based on the literals
+            val vIntro_withClauseWithoutLit = lpLorIntroMulti1.instanciate(encAddLits,encChildClause.lits.drop(encAddLits.length))
+            val refineStep_caseWithClause = lpRefine(lpFunctionApp(vIntro_withClauseWithoutLit, Seq(nameWithClauseWithoutLit)))
+            val caseRWClauseWithoutLit = lpProofScript(assumeWithClause :+ refineStep_caseWithClause)
+
+            val proofWithClauseCaseSplit = lpRefine(caseSplit_withLit, Seq(caseRwLitHolds,caseRWClauseWithoutLit))
+            lpProofScript(Seq(lpAssume(Seq(nameUniLitEq))) ++ Seq(proofWithClauseCaseSplit))
           }
           else {
+            val refineStep2 = lpRefine(vIntro1_intoClause_uniLit)
             // We can directly rewrite with the instanciated RW clause
             val rewriteWithRWClause = lpRewrite(Some(lpRewritePattern(clausePattern)), eqRwClauseName, info.withSide)
             Out.lp_debug_info(s"first rewrite step: ${rewriteWithRWClause.pretty}")
-            val case_uniLit_true = lpProofScript(Seq(lpAssume(Seq(nameUniLitEq))) ++ addTargetLitProof ++ maybeFlipStep ++ Seq(lpProofScriptCommentLine("Rewrite parent with with-literal"), rewriteWithRWClause, lpProofScriptCommentLine("Rewrite parent with unification constraint"), rewriteWithUniLit, refineStep2))
-            val arg = lpRefine(caseSplit_uniLit, Seq(case_uniLit_true, case_uniLit_false))
-            allSteps = allSteps :+ arg
+            lpProofScript(Seq(lpAssume(Seq(nameUniLitEq))) ++ transformTargetLitSteps ++ maybeFlipStep ++ Seq(lpProofScriptCommentLine("Rewrite parent with with-literal"), rewriteWithRWClause, lpProofScriptCommentLine("Rewrite parent with unification constraint"), rewriteWithUniLit, refineStep2))
           }
+
+          val arg = lpRefine(caseSplit_uniLit, Seq(case_uniLit_true, case_uniLit_false))
+          allSteps = allSteps :+ arg
 
           // 1. case splitting on (em uni_lit)
           //    Case with equality

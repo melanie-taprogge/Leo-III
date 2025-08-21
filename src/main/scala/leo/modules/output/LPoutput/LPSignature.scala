@@ -45,6 +45,17 @@ object LPSignature {
     override def pretty: String = name.pretty
   }
 
+  case object lpLorElimMulti extends lpAxioms {
+    override def name: lpConstantTerm = lpConstantTerm("∨ₑₙ")
+
+    def instanciate(n : Int, c: Seq[lpOlTerm], r: Option[lpOlTerm]): lpFunctionApp = {
+      val impArgs : Seq[lpOlTerm] = if (r.isDefined) Seq(r.get) else Seq()
+      lpFunctionApp(name, Seq(lpNum(n), lpList(c)),impArgs)
+    }
+
+    override def pretty: String = name.pretty
+  }
+
   abstract class lpTheorems extends lpTerm {
     def name: lpConstantTerm
     override def pretty: String = name.pretty
