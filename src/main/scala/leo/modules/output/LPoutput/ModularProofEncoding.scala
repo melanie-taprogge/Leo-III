@@ -795,7 +795,7 @@ object ModularProofEncoding {
     ////////////////////////////
     // 1.5. transform rewrite literal to equation
 
-    val (eqRwClause, eqRwLiteral, eqWithClauseName, proofRwLit2Eq) : (lpClauseInst,lpOlTerm,lpTerm,Seq[lpProofScriptStep]) = if (!withLit.equational) {
+    val (currWithClauseLits, eqRwLiteral, eqWithClauseName, proofRwLit2Eq) : (Seq[lpOlTerm],lpOlTerm,lpTerm,Seq[lpProofScriptStep]) = if (!withLit.equational) {
       Out.lp_debug_info(s"rewrite literal needs to be transformed to equational form")
       // todo: we probably also need to transform it back -> do additional transformation before rewriting the child
       //cantEncode = Some("implicit transformation to equational literal not yet encoded")
@@ -811,8 +811,8 @@ object ModularProofEncoding {
       val refLit2Eq = lpRefine(instWithClause)
       val haveEqRwLit = lpHave(nameHaveEqRwLit,newRWClause.term.prf,lpProofScript(Seq(rwRwLit2eq,refLit2Eq)))
       Out.lp_debug_info(s"additional step for rewrtingt :\n ${haveEqRwLit.pretty}")
-      (newRWClause,eqRwLit0,lpConstantTerm(nameHaveEqRwLit),Seq(haveEqRwLit))
-    } else {(encRwClause,encRwClause.lits(info.withIndex),instWithClause,Seq())}
+      (newRwLits,eqRwLit0,lpConstantTerm(nameHaveEqRwLit),Seq(haveEqRwLit))
+    } else {(encRwClause.lits,encRwClause.lits(info.withIndex),instWithClause,Seq())}
     allSteps = allSteps ++ proofRwLit2Eq
 
 
@@ -969,7 +969,7 @@ object ModularProofEncoding {
             Out.lp_debug_info(s"Doing an additional case split on the RW clause literals:")
 
             // We do a case split and prove the resulting clause both based on the With-Lit and based on the remaining clause
-            val caseSplit_withLit = lpFunctionApp(lpLorElimMulti.instanciate(info.withIndex,encWithClause.lits,None),Seq(eqWithClauseName, lpWildcard, lpWildcard))
+            val caseSplit_withLit = lpFunctionApp(lpLorElimMulti.instanciate(info.withIndex,currWithClauseLits,None),Seq(eqWithClauseName, lpWildcard, lpWildcard))
 
             // Case with lit is true
             val nameWithLit = lpConstantTerm("withLit")
