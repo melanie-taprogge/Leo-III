@@ -29,7 +29,7 @@ package object LPoutput {
     lpOlUserDefinedPolyType(s"t${usedT + 1}")
   }
 
-  def nameStep(number: Int): lpConstantTerm = {
+  def nameStep(number: Long): lpConstantTerm = {
     lpConstantTerm(s"step${number}")
   }
 

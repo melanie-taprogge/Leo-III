@@ -3,7 +3,7 @@ import leo.Out
 import leo.datastructures.Literal.{asTerm, leftSide, mkLit, rightSide, symbols}
 import leo.datastructures.Term.{:::>, ∙}
 import leo.modules.output.LPoutput.Encodings._
-import leo.datastructures.{AddInfoCnf, AddInfoPara, Clause, ClauseProxy, Literal, Signature, Subst, Term, Type, mkPolyUnivQuant, partitionArgs}
+import leo.datastructures.{AddInfoCnf, AddInfoPara, AnnotatedClause, Clause, ClauseProxy, Literal, Signature, Subst, Term, Type, mkPolyUnivQuant, partitionArgs}
 import leo.modules.HOLSignature._
 import leo.modules.calculus.PolaritySwitch
 import leo.modules.output.LPoutput.lpDatastructures.{lpOlTerm, _}
@@ -13,7 +13,9 @@ import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.calculus.Simp.normalize
 import leo.modules.output.LPoutput.CNFEncoding.{allBoolRuleApplicationStep, cnfTac}
 import leo.modules.output.LPoutput.LPSignature.{lpEm, lpLorElimMulti, lpLorIntro1, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim, lpTheorems}
+import leo.modules.output.LPoutput.LPoutput.ParentInfo
 
+import scala.collection.immutable.{AbstractSeq, LinearSeq}
 import scala.collection.mutable
 
 /** Modular encoding of proofs
@@ -248,7 +250,7 @@ object ModularProofEncoding {
 
     ///////////////////////////////////////////////////////////////////////////////////////
     //// 2. Proof the conjunction in a sub-step using a Lambdapi tactic and
-    //// 3. Refine with the (instanciated) parent
+    //// 3. Refine with the (instantiated) parent
 
     // Construct the conjunction of all derived clauses
     val conj = lpOlUntypedBinaryConnectiveTerm_multi(lpAnd, encChildClauses.map(_.term))
@@ -721,303 +723,282 @@ object ModularProofEncoding {
   }
 
    */
+  final case class ParaWithClause(withLit: Literal, otherLits : Seq[Literal], enc: lpClauseInst, encWithLit: lpOlTerm, name: lpConstantTerm, instantiated: lpFunctionApp, len: Int)
+  final case class ParaIntoClause(intoLit: Literal, enc: lpClauseInst, name: lpConstantTerm, instantiated: lpFunctionApp)
+  final case class ParaChildClause(uni: Literal, enc: lpClauseInst, encUniLit: lpOlTerm, encPosUniLit: lpOlTerm, intoLitIdx: Int, len: Int)
+  final case class EncParaCtx(withC: ParaWithClause, intoC: ParaIntoClause, childC: ParaChildClause, bvars: Map[Int, String])
 
-  def encPara(child: Clause, parents: Seq[ClauseProxy], parentNames:  Seq[lpConstantTerm], info0: Option[AddInfoPara], sig: Signature): (lpProofScript, Option[String]) = {
+  def encParaClauses(child: Clause, parentWithClause: ParentInfo, parentIntoClause:ParentInfo, info: AddInfoPara, sig: Signature):
+                    Either[String,EncParaCtx]={
 
+    // extract clauses and names
+    val withClause = parentWithClause.clPr.cl
+    val withClauseName = parentWithClause.lpName
+    // The variable names in the into clause are consistent with the ones used in the child, the one in the parent may not be
+    val intoClause = info.intoClause
+    val intoClauseName = parentIntoClause.lpName
+
+    // extract specific literals
+    // check that the provided indices are in range
+    def inRange(who: String, idx: Int, size: Int): Either[String, Unit] = if (0 <= idx && idx < size) Right(()) else Left(s"$who index $idx out of range (${size - 1})")
+    val validation = for {
+      _ <- inRange("withLit", info.withIndex, withClause.lits.length)
+      _ <- inRange("intoLit", info.intoIndex, intoClause.lits.length)
+      _ <- Either.cond(child.lits.nonEmpty, (), "child has no literals")}
+    yield ()
+    validation match {
+      case Left(err) => return Left(err)
+      case Right(_) => ()
+    }
+    val withLit = withClause.lits(info.withIndex)
+    val addLitsWithClause = withClause.lits.patch(info.withIndex, Nil, 1)
+    val intoLit = intoClause.lits(info.intoIndex)
+    val childIndexIntoLit = (addLitsWithClause.length) + info.intoIndex
+    val uniLit = child.lits.last
+
+    // encodings
+    val (bVarsMap, clauses) = lpClauseInst.apply_to_set(Seq(intoClause, withClause), sig)
+    val encWithClause = clauses(1)
+    val encIntoClause = clauses(0)
+    val encWithLit = encWithClause.lits(info.withIndex)
+    val encChildClause = lpClauseInst(child, sig)
+    val encUniLit = encChildClause.lits.last
+    val encPosUniLit = encUniLit match {
+      case lpOlUnaryConnectiveTerm(`lpNot`, nonNegLit) => nonNegLit
+      case _ => return Left(s"uni lit ${encUniLit.pretty} should be negated but is not")
+    }
+
+    // get the lengths
+    val withClauseLen = withClause.lits.length
+    val childLen = child.lits.length
+
+    // instanciation of RW clause
+    val instWithClause = lpFunctionApp(withClauseName, encWithClause.metaVars)
+    val instIntoClause = lpFunctionApp(intoClauseName, encIntoClause.metaVars)
+
+    val withClauseObject = ParaWithClause(withLit, addLitsWithClause, encWithClause, encWithLit, withClauseName, instWithClause, withClauseLen)
+    val intoClauseObject = ParaIntoClause(intoLit, encIntoClause, intoClauseName, instIntoClause)
+    val childClauseObject = ParaChildClause(uniLit, encChildClause, encUniLit, encPosUniLit, childIndexIntoLit, childLen)
+    Right(EncParaCtx(withClauseObject, intoClauseObject, childClauseObject, bVarsMap))
+  }
+
+  /**
+    * encPara — Outline of the encoded proof
+    *
+    * Notation:
+    *   - withClause / withLit: clause and literal used for rewriting.
+    *   - intoClause / intoLit: clause and literal that is rewritten.
+    *   - UF: the (positive) equality u = v that becomes the new unification constraint;
+    *     in the child clause it appears as ¬(u = v).
+    *
+    * Steps:
+    * 0) Assume all free variables of the child.
+    *
+    * 1) Ensure the rewrite literal is equational:
+    * If withLit is positive and non-equational, transform it into an equality in a separate sub-step.
+    *
+    * 2) Case split on UF (the equality u = v underlying the new constraint):
+    *   A) Case UF is TRUE (u = v holds):
+    *       - If withClause has one literal:
+    *         Assume withLit; perform (i)–(ii); in (iii) refine using disjunction introduction from intoClause ∨ UF.
+    *       - If withClause has multiple literals, perform an inner case split on withLit:
+    *         A1) withLit TRUE:
+    *             Assume withLit; perform (i)–(ii); then introduce using the remaining withClause literals
+    *             together with (intoClause ∨ UF).
+    *         A2) “withClause without withLit” TRUE:
+    *              Assume the remaining withClause literals and introduce directly to match the goal’s prefix.
+    *      (i) Prepare the target (the intoLit in the child):
+    *         - If the intoLit in the child is non-equational, expand it to an equality.
+    *         - If the orientation differs from what we need, flip the equality.
+    *      (ii) Rewrite the targeted subterm of intoLit:
+    *         - First using the (equational) withLit.
+    *         - Then using UF (u = v).
+    *      (iii) Close by disjunction introduction
+    *   B) Case UF is FALSE (¬(u = v) holds):
+    *     Assume ¬(u = v) and close the goal by disjunction introduction with the assumed negated constraint.
+    *
+    * Notes:
+    *   - Rewriting under binders is not encoded; if the target position lies under a binder, we return a “can’t encode” result.
+    */
+  def encPara(child: Clause, parentWithClause: ParentInfo, parentIntoClause:ParentInfo, info: AddInfoPara, sig: Signature): (lpProofScript, Option[String]) = {
+    
     // todo: review the saved inforamation and weather we need all of it
-    
-    // Preliminary checks and instanciations
-    // todo: do the checks performed in the rule itself too for definedness etc.
-    assert(parents.length == 2, "Error in Lmabdapi encoding: Paramodulation step has wrong number of parents")
-    assert(parentNames.length == 2, "Error in Lmabdapi encoding: Paramodulation step has wrong number of parent names")
-    assert(info0.isDefined, "Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
-    var allSteps: Seq[lpProofScriptStep] = Seq.empty
-    var cantEncode: Option[String] = None
-    val info = info0.get
-    
 
     ////////////////////////////
     // Encodings
-    
-    // Following the naming conventions of the original rule implementation, the following names are used:
-    // withClause, withLiteral : The clause containing the literal used for rewriting and said literal
-    // intoClause, intoLiteral : The clause containing the rewritten literal and said literal
+    val ctxt = encParaClauses(child, parentWithClause, parentIntoClause, info, sig) match {
+      case Left(error) => throw new Exception(error)
+      case Right(value) => value
+    }
+    val (withCl, intoCl, childCl, bVarsMap) = (ctxt.withC, ctxt.intoC, ctxt.childC, ctxt.bvars)
 
-    // todo: I am using both the parent corresponding to the withClause (called rwClause here) and the withClause from further info. 
-    //  => clear up confusion
-    
-    // withClause
-    val rwClause = parents(0).cl
-    val withClauseName = parentNames(0)
-    val withLit = rwClause.lits(info.withIndex)
-    val addLitsWithClause = rwClause.lits.patch(info.withIndex, Nil, 1)
+    Out.lp_debug_info(s"Rewriting ${intoCl.enc.lits(info.intoIndex).pretty} in ${intoCl.enc.term.pretty}")
+    Out.lp_debug_info(s"With ${withCl.encWithLit.pretty} in ${withCl.enc.term.pretty}")
+    Out.lp_debug_info(s"Resulting in ${childCl.enc.term.pretty} (with uni const ${childCl.encUniLit.pretty})")
 
-    // intoClause
-    // The variable names in the into clause are consistent with the ones used in the child, the one in the parent may not be
-    val intoClause = info.intoClause 
-    val intoClauseName = parentNames(1)
-    val intoLit = intoClause.lits(info.intoIndex)
-    val childIndexIntoLit = (addLitsWithClause.length) + info.intoIndex
 
-    // encodings
-    val (bVarsMap, clauses) = lpClauseInst.apply_to_set(Seq(intoClause,rwClause),sig)
-    val encRwClause = clauses(1)
-    val encIntoClause = clauses(0)
-    val encWithClause = lpClauseInst(info.withClause, sig)
-    // todo: again, we have encRwClause and EncWithClause, this is not nice
-    
-    // instanciation of RW clause
-    val instWithClause = lpFunctionApp(withClauseName, encRwClause.metaVars)
-    val instIntoClause = lpFunctionApp(intoClauseName, encIntoClause.metaVars)
+    ////////////////////////////
+    // 1. Assume free variables
+    val allMetaVars = childCl.enc.metaVars
+    val assumeVarsStep = if (allMetaVars.nonEmpty) Seq(lpAssume(allMetaVars)) else Seq()
 
-    // child
-    val encChildClause = lpClauseInst(child, sig)
-    val uniLit = child.lits.last
-    val encUniLit = encChildClause.lits.last
-    val nonNegEncUniLit = encUniLit match {
-      case lpOlUnaryConnectiveTerm(`lpNot`, body) => body
-      case _ => throw new Exception(s"uni lit ${encUniLit.pretty} should be negated but is not")
+
+    ////////////////////////////
+    // 2. If the withLiteral needs to be transformed to equational form, do so in a seperate step
+    val (currWithClauseLits, eqWithClauseName, stepWithLit2Eq) : (Seq[lpOlTerm],lpTerm,Seq[lpProofScriptStep]) = if (!withCl.withLit.equational) {
+      Out.lp_debug_info(s"withLit needs to be transformed to equational form ...")
+      assert(withCl.withLit.polarity, "Error in Lambdapi encoding: trying to encode paramodulation with negative non-equational RW-lit")
+      // Construct equational withLit and new clause
+      val encEqWithLit = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,withCl.encWithLit,lpOlTop)
+      val newEncWithLits = withCl.enc.lits.updated(info.withIndex,encEqWithLit)
+      val newWithClause = lpClauseInst(lpOlUntypedBinaryConnectiveTerm_multi(lpOr,newEncWithLits),newEncWithLits,withCl.enc.vars)
+      // Carry out transformation in a sub-step
+      val nameHaveEqWithClause = "equationalWithClause"
+      val withClausePattern = generateClausePatternTerm(Seq(info.withIndex),withCl.len)
+      // rewrite with corresponding accessory rule
+      val rwWithLit2eq = lpRewrite(withClausePattern,lpSimp_eqTop.name)
+      // refine with parent representing withClause
+      val refWithLit2Eq = lpRefine(withCl.instantiated)
+      // combine into one sub-step
+      val haveEqRwLit = lpHave(nameHaveEqWithClause,newWithClause.term.prf,lpProofScript(Seq(rwWithLit2eq,refWithLit2Eq)))
+      val commentStep = lpProofScriptCommentLine(s"Transform withLiteral to an equation")
+      Out.lp_debug_info(s"New withLit: ${encEqWithLit.pretty}")
+      (newEncWithLits,lpConstantTerm(nameHaveEqWithClause),Seq(commentStep,haveEqRwLit))
+    } else (withCl.enc.lits,withCl.instantiated,Seq())
+
+    ////////////////////////////
+    // 3. Perform a case-split on the equality making up the new unification constraint in the child
+
+    ////////////////////////////
+    // 3 II) The UF equation is assumed to be false
+
+    // second case is always the same: We refine with disjunction introduction and the assumed, negated unification constraint
+    val nameUniLit = lpConstantTerm("uniLitInEq")
+    val assumeUniLit = lpAssume(Seq(nameUniLit))
+    val caseUniLitFalse: lpProofScript = if (childCl.enc.lits.length == 1) lpProofScript(Seq(assumeUniLit, lpRefine(nameUniLit)))
+    else {
+      val orIntro = if (childCl.enc.lits.length > 2) lpLorIntroMulti2.instanciate((childCl.enc.lits.init), Seq(childCl.encUniLit)) else lpLorIntro2
+      lpProofScript(Seq(assumeUniLit, lpRefine(lpFunctionApp(orIntro, Seq(nameUniLit)))))
     }
 
-    Out.lp_debug_info(s"rewriting ${encIntoClause.lits(info.intoIndex).pretty} in ${encIntoClause.term.pretty}")
-    Out.lp_debug_info(s"with ${encRwClause.lits(info.withIndex).pretty} in ${encRwClause.term.pretty}")
-    Out.lp_debug_info(s"(corresponding lit in with clause is ${encWithClause.lits(info.withIndex).pretty}")
-    Out.lp_debug_info(s"resulting in ${encChildClause.term.pretty} (with uni const ${encUniLit.pretty})")
-    Out.lp_debug_info(s"Rewriting at position ${info.intoPosition} (subterm ${term2LP(info.intoSubterm, bVarsMap, sig)._1.pretty})")
-    Out.lp_debug_info(s"the literal is ${info.intoIndex} and the side is ${info.intoSide}")
-
     ////////////////////////////
-    // 1. assume Meta-Vars
+    // 3 I) The UF equation is assumed to be true
+    // The following steps are the same regardless of weather we are in case b i) or b ii)
 
-    val allMetaVars = encChildClause.metaVars
-    if (allMetaVars.nonEmpty) allSteps = allSteps :+ lpAssume(allMetaVars)
-
-    ////////////////////////////
-    // 1.5. transform rewrite literal to equation
-
-    val (currWithClauseLits, eqRwLiteral, eqWithClauseName, proofRwLit2Eq) : (Seq[lpOlTerm],lpOlTerm,lpTerm,Seq[lpProofScriptStep]) = if (!withLit.equational) {
-      Out.lp_debug_info(s"rewrite literal needs to be transformed to equational form")
-      // todo: we probably also need to transform it back -> do additional transformation before rewriting the child
-      //cantEncode = Some("implicit transformation to equational literal not yet encoded")
-
-      // we need to transform the rewrite literal to equational form
-      assert(withLit.polarity, "Error in Lambdapi encoding: trying to encode paramodulation with negative non-equational RW-lit")
-      val eqRwLit0 = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,encRwClause.lits(info.withIndex),lpOlTop)
-      val newRwLits = encRwClause.lits.updated(info.withIndex,eqRwLit0)
-      val newRWClause = lpClauseInst(lpOlUntypedBinaryConnectiveTerm_multi(lpOr,newRwLits),newRwLits,encRwClause.vars)
-      val nameHaveEqRwLit = "equational_Rw_clause"
-      val rwLitPattern = generateClausePatternTerm(Seq(info.withIndex),rwClause.lits.length)
-      val rwRwLit2eq = lpRewrite(rwLitPattern,lpSimp_eqTop.name)
-      val refLit2Eq = lpRefine(instWithClause)
-      val haveEqRwLit = lpHave(nameHaveEqRwLit,newRWClause.term.prf,lpProofScript(Seq(rwRwLit2eq,refLit2Eq)))
-      Out.lp_debug_info(s"additional step for rewrtingt :\n ${haveEqRwLit.pretty}")
-      (newRwLits,eqRwLit0,lpConstantTerm(nameHaveEqRwLit),Seq(haveEqRwLit))
-    } else {(encRwClause.lits,encRwClause.lits(info.withIndex),instWithClause,Seq())}
-    allSteps = allSteps ++ proofRwLit2Eq
+    // Create a pattern for the target sub-term of the intoLit in the child
+    val intoLitSideTerm = if (info.intoSide) intoCl.intoLit.left else intoCl.intoLit.right
+    val (encPattern, _, cantEncodeRwPattern) = leoPosition2LpPattern(intoLitSideTerm, info.intoPosition, sig)
+    val (allSteps, cantEncode) : (Seq[lpProofScriptStep], Option[String]) = if (cantEncodeRwPattern.isDefined) {
+      Out.lp_debug_info(s"unable to encode rewrite pattern as it attempts to rewrite under binder")
+      (Seq(), cantEncodeRwPattern)
+    } else {
+      val (intoLitSide, intoLitLhsTy) = if (!intoCl.intoLit.equational) {
+        Out.lp_debug_info(s"intoLit is non-equational")
+        (None, lpOtype)
+      } else {
+        val encType = type2LP(intoCl.intoLit.left.ty, sig)
+        Out.lp_debug_info(s"intoLit is equational (with type ${encType.pretty})")
+        (Some(info.intoSide), encType)
+      }
+      val childIntoTermPattern = generateWrapperPattern(childCl.intoLitIdx, childCl.len, intoCl.intoLit.polarity, intoLitSide, Some(intoLitLhsTy), encPattern)
+      Out.lp_debug_info(s"Pattern of targeted sub-term of intoLit in child: ${childIntoTermPattern.pretty}")
 
 
-
-    ////////////////////////////
-    // 1.7. If the target literal became trivially wrong, e.g. ~(X=X), Leo deletes it.
-    // I will have to either delete it, or to reintroduce it by first proving the initial step and then the simplification in an extra step.
-    /*
-    val lenDif = info.preSimpClause.lits.length - child.lits.length
-    if (lenDif > 1){
-      cantEncode = Some("simplification needed (removal of literals)")
-    }else{
-     */
-
-    val (transformintoLitSteps, currentChildLits) : (Seq[lpProofScriptStep],Seq[Literal]) =
-      /*
-      if (lenDif == 1) { // (encRwClause.lits.length + encIntoClause.lits.length)) {
-      //cantEncode = Some(s"Deletion of target lit not encoded yet")
-      // we need to introduce bottom in the position where the target literal would have been in the clause
-      Out.lp_debug_info(s"Child of length ${child.lits.length}, missing lits = ${info.preSimpClause.lits.length - child.lits.length}")
-      val encPreSimp = lpClauseInst(info.preSimpClause,sig).term
-      Out.lp_debug_info(s"pre-simp: ${encPreSimp.pretty}")
-      Out.lp_debug_info(s"simplified: ${encChildClause.term.pretty}")
-      val addBotPattern = generateClausePatternTerm(Seq(childIndexIntoLit),childIndexIntoLit + 1)
-      val addBotRW = lpRewrite(addBotPattern,lpSimp_botOr.name,true)
-      Out.lp_debug_info(s"add bot ${addBotRW.pretty}")
-      val rewriteTo = info.preSimpClause.lits(childIndexIntoLit)
-      val encRewriteTo = term2LP(asTerm(rewriteTo),bVarsMap,sig)._1
-      Out.lp_debug_info(s"the added target lit needs to be rewritten to ${encRewriteTo.pretty}")
-      // ...
-      val (steps, _, canEncodeTransf) = transformLiteral(lpOlBot,encRewriteTo,childIndexIntoLit,child.lits.length + 1)
-      if (!canEncodeTransf) throw new Exception(s"unable to perform transforamtion, help!") // Out.lp_debug_info(s"that did not work, here the pre-simp lit: ${term2LP(Clause.asTerm(info.preSimpClause),bVarsMap,sig)._1.pretty}")
-      Out.lp_debug_info(s"necessary transormation: ${steps.map(_.pretty)}")
-      val addComment = lpProofScriptCommentLine("Target literal was removed via simpification and needs to be reintorduced")
-
-
-     ( (addComment +: Seq(addBotRW)) ++ steps,child.lits.patch(childIndexIntoLit,Seq(rewriteTo),0))
-    } else
-       */
-      if (intoLit.equational && !child.lits(childIndexIntoLit).equational) {
-      // in other instances, the target literal may end up being non-equational, then we need to tranform it to an equation
-      val addComment = lpProofScriptCommentLine("Target literal needs expansion to euqational form")
-      //val eqLit = mkLit(child.cl.lits(childIndexIntoLit).left,LitTrue,child.cl.lits(childIndexIntoLit).polarity,child.cl.lits(childIndexIntoLit).oriented) gets normalized to non-eq form
-      //val updatedChildLits = child.cl.lits.updated(childIndexIntoLit,eqLit)
-      val expandPattern = generateClausePattern(Seq(childIndexIntoLit), child.lits.length, child.lits(childIndexIntoLit).polarity)
-      val expandStep = lpRewrite(Some(lpRewritePattern(expandPattern)),lpSimp_eqTop.name,true)
-      (Seq(addComment,expandStep),child.lits)
-    } else {(Seq(),child.lits)}//todo : maybe actually use the literals in the encoding, as this differentiates between equational and non-equational form?
-
-    ////////////////////////////
-    // 0. Check if an additinal simplification is required
-    /*
-      val zipped = info.preSimpClause.lits.zip(currentChildLits)
-      val notEqualPairs = zipped.filter { case (a, b) => a != b }
-      if (notEqualPairs.nonEmpty){
-        val encNotEqualPairs = notEqualPairs.map(p => (term2LP(asTerm(p._1),bVarsMap,sig)._1,term2LP(asTerm(p._2),bVarsMap,sig)._1))
-        Out.lp_debug_info(s"Simplification was applied: \n${encNotEqualPairs.map(p => s"${p._1.pretty} to ${p._2.pretty}\n")}")
-        cantEncode = Some("application of additional simplifications not yet encoded")
-      }else {
-     */
-
-        ////////////////////////////
-        // 1.8 If we have performed a flip of the target literal, we need to rewrite here with eq_sym
-        Out.lp_debug_info(s"original target literal: ${term2LP(asTerm(intoLit), bVarsMap, sig)._1.pretty}")
-        Out.lp_debug_info(s"Target literal in child: ${term2LP(asTerm(currentChildLits(childIndexIntoLit)), bVarsMap, sig)._1.pretty}")
-
-        val (intoLitSide, targetLhsTy) = if (!intoLit.equational) {
-          Out.lp_debug_info(s"target literal is non-equational")
-          (None, lpOtype)
+      ////////////////////////////
+      // 3. I) b) a) if the intoLit in the child is non-equational, we need to transform it
+      val intoLitChild = child.lits(childCl.intoLitIdx)
+      val transformIntoLitSteps: Seq[lpProofScriptStep] =
+        if (intoCl.intoLit.equational && !intoLitChild.equational) {
+          Out.lp_debug_info(s"intoLit in child needs to be transformed to equational form ...")
+          // in other instances, the target literal may end up being non-equational, then we need to tranform it to an equation
+          val addComment = lpProofScriptCommentLine("Target literal needs expansion to euqational form")
+          //val eqLit = mkLit(child.cl.lits(childCl.intoLitIdx).left,LitTrue,child.cl.lits(childCl.intoLitIdx).polarity,child.cl.lits(childCl.intoLitIdx).oriented) gets normalized to non-eq form
+          //val updatedChildLits = child.cl.lits.updated(childCl.intoLitIdx,eqLit)
+          val expandPattern = generateClausePattern(Seq(childCl.intoLitIdx), childCl.len, intoLitChild.polarity)
+          val expandStep = lpRewrite(Some(lpRewritePattern(expandPattern)), lpSimp_eqTop.name, true)
+          Seq(addComment, expandStep)
         } else {
-          val encType = type2LP(intoLit.left.ty, sig)
-          Out.lp_debug_info(s"target literal is equational (with type ${encType.pretty})")
-          (Some(info.intoSide), encType)
+          Seq()
         }
 
+      ////////////////////////////
+      // 3. I) b) b) if the intoLit in the child was fliped, we need to flip it
+      val writeIntoLhs = if (info.intoSide) true else false
+      val intoLitInChildNeedsflip = if (writeIntoLhs) !alphaEquivalent(term2LP(intoCl.intoLit.right,bVarsMap,sig)._1, term2LP(child.lits(childCl.intoLitIdx).right,bVarsMap,sig)._1) else !alphaEquivalent(term2LP(intoCl.intoLit.left,bVarsMap,sig)._1, term2LP(child.lits(childCl.intoLitIdx).left,bVarsMap,sig)._1)
+      val maybeFlipIntoLitStep: Seq[lpProofScriptStep] = if (intoLitInChildNeedsflip) {
+        Out.lp_debug_info(s"intoLit in child needs to be flipped")
+        val flipPattern = generateClausePattern(Seq(childCl.intoLitIdx), childCl.len, child.lits(childCl.intoLitIdx).polarity)
+        val flipStep = lpRewrite(Some(lpRewritePattern(flipPattern)), flipLiteral().instanciate(intoLitLhsTy))
+        Seq(lpProofScriptCommentLine("Target literal needs to be flipped ()"), flipStep)
+      } else Seq()
+
+
+      ////////////////////////////
+      // 3. I) b) d) rewrite with the unification constraint
+      val nameUniLitEq = lpConstantTerm("uniLitEq")
+      val rewriteTarget = if (info.withSide) withCl.withLit.left else withCl.withLit.right
+      val flipUniLit = (!alphaEquivalent(term2LP(rewriteTarget,bVarsMap,sig)._1, term2LP(childCl.uni.left,bVarsMap,sig)._1)) //todo: can uni lit become non-equational and how do we handle that?!
+      if (flipUniLit) Out.lp_debug_info(s"Unification Constraint needs to be flipped!")
+      val rewriteWithUniLit = lpRewrite(Some(lpRewritePattern(childIntoTermPattern)), nameUniLitEq, flipUniLit)
+
+      // the refine step varies between b i) and b ii)
+      val vIntro1_intoClause_uniLit = lpFunctionApp(lpLorIntroMulti1.instanciate(intoCl.enc.lits, Seq(childCl.encUniLit)), Seq(intoCl.instantiated))
+
+      
+      //            a) Assume the withLiteral
+      //            -> do as in step b ii)
+
+      ////////////////////////////
+      // 3. I) b i) If the WithClause has a length greater than one, we need another case split:
+      
+      
+      val case_uniLit_true =  if (withCl.len > 1) {
         ////////////////////////////
-        // 2. do a case-split on the unification constraint
+        // 3. I) b ii) If the WithClause has a length greater than one, we need another case split:
+        Out.lp_debug_info(s"Clause we rewrite has more than one literal")
+        // Encode the literals that we need to add
+        val encAddLits = withCl.otherLits.map(lit => term2LP(asTerm(lit), bVarsMap, sig)._1)
+        val caseSplit_withLit = lpFunctionApp(lpLorElimMulti.instanciate(info.withIndex,currWithClauseLits,None),Seq(eqWithClauseName, lpWildcard, lpWildcard))
 
-        // reconstructing some positional information of the generated clause
-        // the child clause is generated by prepending the literals that are not used to rewrite from the "withClause" to the "into clause"
-        // and appending the unification constraing literal.
-        Out.lp_debug_info(s"child len: ${currentChildLits.length} (index: $childIndexIntoLit), with clause ${rwClause.lits.length}, into clause: ${intoClause.lits.length}")
+        ////////////////////////////
+        //          I) The withLit is assumed to be true
+        //            a) Assume the withLiteral
+        val nameWithLit = lpConstantTerm("withLit")
+        val assumeWithLit = lpAssume(Seq(nameWithLit))
+        // like in the base case, we can not rewrite with the with-Lit
+        val rewriteWithWithLit = lpRewrite(Some(lpRewritePattern(childIntoTermPattern)), nameWithLit, info.withSide)
+        // Constructing the refine step is slightly more intricate: The literals we can prove based on the Into-Clause are not embedded in a disjuncion with the 
+        // WithClause literals on the LHS and the UniConstraint on the RHS. We thus need a nested appication of n-ary lor introductions. 
+        val lorIntro_withClause = lpLorIntroMulti2.instanciate(encAddLits, intoCl.enc.lits :+ childCl.encUniLit)
+        val refineStep_caseRwLit = lpRefine(lpFunctionApp(lorIntro_withClause, Seq(vIntro1_intoClause_uniLit)))
+        // combine all of these steps into one step
+        val caseRwLitHolds = lpProofScript((assumeWithLit +: transformIntoLitSteps) ++ maybeFlipIntoLitStep ++ Seq(lpProofScriptCommentLine("Rewrite parent with with-literal"), rewriteWithWithLit, lpProofScriptCommentLine("Rewrite parent with unification constraint"), rewriteWithUniLit, refineStep_caseRwLit))
 
-        // attempt to create rewrite pattern for the targeted subterm
-        val term = if (info.intoSide) intoLit.left else intoLit.right
-        Out.lp_debug_info(s"trying to find ${info.intoPosition} in ${term2LP(term,bVarsMap,sig)._1.pretty}")
-        val (encPattern, encTerm, cantEncodeRwPattern) = leoPosition2LpPattern(term, info.intoPosition, sig)
-        if (cantEncodeRwPattern.isDefined) {
-          cantEncode = cantEncodeRwPattern
-          Out.lp_debug_info(s"unable to encode rewrite pattern as it attempts to rewrite under binder")
-        } else {
-          Out.lp_debug_info(s"found pattern ${encPattern.pretty}") //(with term ${term2LP(encTerm,bVarsMap,sig)._1.pretty})
-          //if (!child.cl.lits(childIndexIntoLit).equational) Out.lp_debug_info(s"target lit in child is not equational")
+        //          II) The rest of the withClause is assumed to be true
+        val nameWithClauseWithoutLit = lpConstantTerm("withClause")
+        val assumeWithClause = Seq(lpAssume(Seq(nameWithClauseWithoutLit)))
+        // use the multivariant introduction rule of lor to prove the clause based on the literals
+        val vIntro_withClauseWithoutLit = lpLorIntroMulti1.instanciate(encAddLits,childCl.enc.lits.drop(encAddLits.length))
+        val refineStep_caseWithClause = lpRefine(lpFunctionApp(vIntro_withClauseWithoutLit, Seq(nameWithClauseWithoutLit)))
+        val caseWithClauseWithoutLit = lpProofScript(assumeWithClause :+ refineStep_caseWithClause)
 
-          // todo: in case we rewrite to true or false we need to carry out the transformations here ...
-          val clausePattern = generateWrapperPattern(childIndexIntoLit, currentChildLits.length, intoLit.polarity, intoLitSide, Some(targetLhsTy), encPattern)
-          Out.lp_debug_info(s"embedded pattern: ${clausePattern.pretty}")
+        val proofWithClauseCaseSplit = lpRefine(caseSplit_withLit, Seq(caseRwLitHolds,caseWithClauseWithoutLit))
+        lpProofScript(Seq(lpAssume(Seq(nameUniLitEq))) ++ Seq(proofWithClauseCaseSplit))
+      } else {
+        ////////////////////////////
+        // 3. I) b i) If the withClause only has one literal
+        val refineStep2 = lpRefine(vIntro1_intoClause_uniLit)
+        // We can directly rewrite with the instantiated RW clause
+        val rewriteWithWithClause = lpRewrite(Some(lpRewritePattern(childIntoTermPattern)), eqWithClauseName, info.withSide)
+        Out.lp_debug_info(s"first rewrite step: ${rewriteWithWithClause.pretty}")
+        lpProofScript(Seq(lpAssume(Seq(nameUniLitEq))) ++ transformIntoLitSteps ++ maybeFlipIntoLitStep ++ Seq(lpProofScriptCommentLine("Rewrite parent with with-literal"), rewriteWithWithClause, lpProofScriptCommentLine("Rewrite parent with unification constraint"), rewriteWithUniLit, refineStep2))
+      }
 
+      // assemble the case split on uni lit
+      val caseSplitUniLit = lpFunctionApp(lpLorelim, Seq(lpFunctionApp(lpEm.name, Seq(childCl.encPosUniLit)), lpWildcard, lpWildcard))
+      val arg = lpRefine(caseSplitUniLit, Seq(case_uniLit_true, caseUniLitFalse))
 
-          // case split on uni lit
-          val caseSplit_uniLit = lpFunctionApp(lpLorelim, Seq(lpFunctionApp(lpEm.name, Seq(nonNegEncUniLit)), lpWildcard, lpWildcard))
-
-          ////////////////////////////
-          // 2. II) Under the assumption that the unification constraint is false
-
-          // second case is always the same, it can be defined for all cases
-          val nameUniLit = lpConstantTerm("uniLitInEq")
-          val assumeUniLit = lpAssume(Seq(nameUniLit))
-          val case_uniLit_false: lpProofScript = if (encChildClause.lits.length == 1) lpProofScript(Seq(assumeUniLit, lpRefine(nameUniLit)))
-          else {
-            val orIntro = if (encChildClause.lits.length > 2) lpLorIntroMulti2.instanciate((encChildClause.lits.init), Seq(encUniLit)) else lpLorIntro2
-            lpProofScript(Seq(assumeUniLit, lpRefine(lpFunctionApp(orIntro, Seq(nameUniLit)))))
-          }
-
-          ////////////////////////////
-          // 2. I) Under the assumption that the unification constraint is true
-          //        -> We need to reason using the rw clause and potentially do another case split on it
-
-          // We may need to flip the resulting literal
-          val writeIntoLhs = if (info.intoSide) true else false
-          //val needsflip = if (writeIntoLhs) (intoLit.right != currentChildLits(childIndexIntoLit).right) else (intoLit.left != currentChildLits(childIndexIntoLit).left)
-          val needsflip = if (writeIntoLhs) !alphaEquivalent(term2LP(intoLit.right,bVarsMap,sig)._1, term2LP(currentChildLits(childIndexIntoLit).right,bVarsMap,sig)._1) else !alphaEquivalent(term2LP(intoLit.left,bVarsMap,sig)._1, term2LP(currentChildLits(childIndexIntoLit).left,bVarsMap,sig)._1)
-          val maybeFlipStep: Seq[lpProofScriptStep] = if (needsflip) {
-            Out.lp_debug_info(s"Literal in Child needs to be flipped!")
-            val flipPattern = generateClausePattern(Seq(childIndexIntoLit), currentChildLits.length, currentChildLits(childIndexIntoLit).polarity)
-            val flipStep = lpRewrite(Some(lpRewritePattern(flipPattern)), flipLiteral().instanciate(targetLhsTy))
-            Seq(lpProofScriptCommentLine("Target literal needs to be flipped ()"), flipStep)
-          } else Seq()
-
-          // first case varies based on the length of the rewrite clause.
-          val nameUniLitEq = lpConstantTerm("uniLitEq")
-
-          // if the uni-lit was flipped by term ordering, we need to rewrite in the reverse direction
-          val rewriteTarget = if (info.withSide) withLit.left else withLit.right
-          val flipUniLit = (!alphaEquivalent(term2LP(rewriteTarget,bVarsMap,sig)._1, term2LP(uniLit.left,bVarsMap,sig)._1)) //todo: can uni lit become non-equational and how do we handle that?!
-          if (flipUniLit) Out.lp_debug_info(s"Unification Constraint needs to be flipped!")
-
-
-          val rewriteWithUniLit = lpRewrite(Some(lpRewritePattern(clausePattern)), nameUniLitEq, flipUniLit)
-
-          // cosntruct the refine step
-          val vIntro1_intoClause_uniLit = lpFunctionApp(lpLorIntroMulti1.instanciate(encIntoClause.lits, Seq(encUniLit)), Seq(instIntoClause))
-
-          ////////////////////////////
-          // 2. II) Depending on weather or not the RW Clause has length 1 or is longer, we can either use it directly or do another case distinction
-
-          val case_uniLit_true =  if (encRwClause.lits.length > 1) {
-            Out.lp_debug_info(s"Clause we rewrite has more than one literal")
-
-            // Encode the literals that we need to add
-            val encAddLits = addLitsWithClause.map(lit => term2LP(asTerm(lit), bVarsMap, sig)._1)
-            Out.lp_debug_info(s"additional literals in the RW-clause: ${encAddLits.map(_.pretty)}")
-
-            Out.lp_debug_info(s"Doing an additional case split on the RW clause literals:")
-
-            // We do a case split and prove the resulting clause both based on the With-Lit and based on the remaining clause
-            val caseSplit_withLit = lpFunctionApp(lpLorElimMulti.instanciate(info.withIndex,currWithClauseLits,None),Seq(eqWithClauseName, lpWildcard, lpWildcard))
-
-            // Case with lit is true
-            val nameWithLit = lpConstantTerm("withLit")
-            val assumeWithLit = lpAssume(Seq(nameWithLit))
-            // like in the base case, we can not rewrite with the with-Lit
-            val rewriteWithRWLit = lpRewrite(Some(lpRewritePattern(clausePattern)), nameWithLit, info.withSide)
-            // Constructing the refine step is slightly more intricate: The literals we can prove based on the Into-Clause are not embedded in a disjuncion with the 
-            // WithClause literals on the LHS and the UniConstraint on the RHS. We thus need a nested appication of n-ary lor introductions. 
-            val lorIntro_withClause = lpLorIntroMulti2.instanciate(encAddLits, encIntoClause.lits :+ encUniLit)
-            val refineStep_caseRwLit = lpRefine(lpFunctionApp(lorIntro_withClause, Seq(vIntro1_intoClause_uniLit)))
-            // combine all of these steps into one step
-            val caseRwLitHolds = lpProofScript((assumeWithLit +: transformintoLitSteps) ++ maybeFlipStep ++ Seq(lpProofScriptCommentLine("Rewrite parent with with-literal"), rewriteWithRWLit, lpProofScriptCommentLine("Rewrite parent with unification constraint"), rewriteWithUniLit, refineStep_caseRwLit))
-
-            // Case where other lits in withClause are true
-            val nameWithClauseWithoutLit = lpConstantTerm("withClause")
-            val assumeWithClause = Seq(lpAssume(Seq(nameWithClauseWithoutLit)))
-            // use the multivariant introduction rule of lor to prove the clause based on the literals
-            val vIntro_withClauseWithoutLit = lpLorIntroMulti1.instanciate(encAddLits,encChildClause.lits.drop(encAddLits.length))
-            val refineStep_caseWithClause = lpRefine(lpFunctionApp(vIntro_withClauseWithoutLit, Seq(nameWithClauseWithoutLit)))
-            val caseRWClauseWithoutLit = lpProofScript(assumeWithClause :+ refineStep_caseWithClause)
-
-            val proofWithClauseCaseSplit = lpRefine(caseSplit_withLit, Seq(caseRwLitHolds,caseRWClauseWithoutLit))
-            lpProofScript(Seq(lpAssume(Seq(nameUniLitEq))) ++ Seq(proofWithClauseCaseSplit))
-          }
-          else {
-            val refineStep2 = lpRefine(vIntro1_intoClause_uniLit)
-            // We can directly rewrite with the instanciated RW clause
-            val rewriteWithRWClause = lpRewrite(Some(lpRewritePattern(clausePattern)), eqWithClauseName, info.withSide)
-            Out.lp_debug_info(s"first rewrite step: ${rewriteWithRWClause.pretty}")
-            lpProofScript(Seq(lpAssume(Seq(nameUniLitEq))) ++ transformintoLitSteps ++ maybeFlipStep ++ Seq(lpProofScriptCommentLine("Rewrite parent with with-literal"), rewriteWithRWClause, lpProofScriptCommentLine("Rewrite parent with unification constraint"), rewriteWithUniLit, refineStep2))
-          }
-
-          val arg = lpRefine(caseSplit_uniLit, Seq(case_uniLit_true, case_uniLit_false))
-          allSteps = allSteps :+ arg
-
-          // 1. case splitting on (em uni_lit)
-          //    Case with equality
-          //    2. a) i) if rw-clause has length 1:
-          //              - rewirte with rw-clause
-          //              - assume and rw with uni-lit
-          //              - refine with lor intro and parent
-          //    2. a) Ii) if rw-clause has more lits:
-          //              First do a case split again on the rw-lit itself
-          //    Case with inequality
-          //    2. b) just do lor intro with neg. uni_lit
-
-          // maybe reuse the non-ground rewriting i have to implement here for the RW rule of Leo?
-
+      (assumeVarsStep ++ stepWithLit2Eq :+ arg, None)
     }
     val proof = lpProofScript(allSteps)
     (proof, cantEncode)
@@ -1890,7 +1871,7 @@ object ModularProofEncoding {
     // 2. For each of the literals in the original caluse:
     //    a) in case of negative equality lift, a rewrite tactic has to be applied
     //    b) for the new equality literlas, the order within the equality may have changed, if so: apply rewrite tactic
-    // 3. If the order of literals has changed, apply meta theorem and refine with instanciated meta-theorem
+    // 3. If the order of literals has changed, apply meta theorem and refine with instantiated meta-theorem
     //    Else refine with the last step
 
     assert(parents.length == 1, "trying to encode lift equaltiy step with more than one parent")
@@ -1991,7 +1972,7 @@ object ModularProofEncoding {
         }
       }
 
-      // 3. If the order of literals has changed, apply meta theorem and refine with instanciated meta-theorem
+      // 3. If the order of literals has changed, apply meta theorem and refine with instantiated meta-theorem
       //    Else refine with the last step
       val needsPermute = permutation != permutation.sorted
       if (needsPermute) {

@@ -12,6 +12,7 @@ import leo.modules.output.LPoutput.ModularProofEncoding._
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
+import scala.collection.immutable.HashMap
 import scala.collection.mutable
 import scala.util.matching.Regex
 
@@ -75,7 +76,7 @@ object LPoutput {
       val encParent = clause2LP(parent.cl, Set.empty, sig)._1
       if (encParent == encStep) {
         if (identicalSteps.contains(cl.id)) {
-          if (identicalSteps(cl.id) != nameStep(parent.id.toInt)) {
+          if (identicalSteps(cl.id) != nameStep(parent.id)) {
             throw new Exception(s"step $cl.id ($encStep) is equivalent to two parents: ${cl.id}, ${parent.id} ")
           }
         }
@@ -85,7 +86,7 @@ object LPoutput {
           identicalSteps.update(cl.id, exVal)
         } else {
           // in this case we just want to link the child to the parent
-          val exVal = nameStep(parent.id.toInt)
+          val exVal = nameStep(parent.id)
           identicalSteps.update(cl.id, exVal)
         }
       } else encodeStep = true
@@ -93,12 +94,45 @@ object LPoutput {
     (encodeStep, identicalSteps)
   }
 
+  final case class ParentInfo(clPr: ClauseProxy, lpName: lpConstantTerm)
+
+  def extractParentInfoN(child: ClauseProxy,
+                         identicalSteps: Map[Long, lpConstantTerm],
+                         expectedParents: Int
+                        ): Either[String, Seq[ParentInfo]] = {
+    val parents = child.annotation.parents
+    if (parents.length != expectedParents)
+      Left(s"Lambdapi encoding error: expected $expectedParents parents, got ${parents.length} (child id ${child.id})")
+    else {
+      def nameOf(p: ClauseProxy): lpConstantTerm =
+        identicalSteps.getOrElse(p.id, nameStep(p.id))
+
+     Right(parents.map(p => ParentInfo(p, nameOf(p))))
+    }
+  }
+
+  def extractParentInfo2(child: ClauseProxy, identicalSteps: Map[Long, lpConstantTerm]): Either[String, (ParentInfo, ParentInfo)] = {
+    extractParentInfoN(child, identicalSteps, 2) match {
+      case Left(error) => Left(error)
+      case Right(Seq(parent0, parent1)) => Right((parent0, parent1))
+      case _ => Left(s"Lambdapi encoding error: Failure when extracting parent info")
+    }
+  }
+
+  def extractParentInfo1(child: ClauseProxy, identicalSteps: Map[Long, lpConstantTerm]): Either[String, ParentInfo] = {
+    extractParentInfoN(child, identicalSteps, 1) match {
+      case Left(error) => Left(error)
+      case Right(Seq(parent0)) => Right(parent0)
+      case _ => Left(s"Lambdapi encoding error: Failure when extracting parent info")
+    }
+  }
+
   def step2LP(cl: ClauseProxy, sig: Signature, st: lpProofObject, stepInfo: lpProofStepInfo): (Seq[lpProofScriptStep], lpProofStepInfo) = {
 
-    val stepName = nameStep(cl.id.toInt).name
+    val stepName = nameStep(cl.id).name
     val rule = cl.annotation.fromRule
     // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
-    val parentInLpEncID = cl.annotation.parents.map(parent => stepInfo.identicalSteps.getOrElse(parent.id, nameStep(parent.id.toInt)))
+    val parentInLpEncID = cl.annotation.parents.map(parent => stepInfo.identicalSteps.getOrElse(parent.id, nameStep(parent.id)))
     Out.lp_debug_info(s"Encoding step $stepName: application of caluclus rule ${if (rule == null) "Tautology" else rule.name}")
     Out.lp_debug_info(s"The parents are ${parentInLpEncID.map(term => term.pretty).mkString(", ")}")
 
@@ -159,8 +193,18 @@ object LPoutput {
               val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
               (toProofStep(stepName, encStep, "OrderedEqFac", encodings._1, None),outputInfo)
 
+            ////////////////////////////////////////
+            // Paramodulation encoding
             case leo.modules.calculus.OrderedParamod =>
-              val (encProof, cantencode) = encPara(cl.cl, cl.annotation.parents, parentInLpEncID, cl.furtherInfo.para, sig)
+              val (parentWithClause, parentIntoClause) = extractParentInfo2(cl, stepInfo.identicalSteps.toMap) match {
+                case Left(error) => throw new Exception(error)
+                case Right(value) => value
+              }
+              val addInfoPara = cl.furtherInfo.para match {
+                case Some(value) => value
+                case None => throw new Exception("Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
+              }
+              val (encProof, cantencode) = encPara(cl.cl, parentWithClause, parentIntoClause, addInfoPara, sig)
               (toProofStep(stepName, encStep, "OrderedPara", encProof, cantencode),outputInfo)
 
             case leo.modules.calculus.DefExpSimp =>
