@@ -276,9 +276,10 @@ object AccessoryRules {
     (haveStep, transformations.toMap, clauseAfter.lits, usedSymbols)
   }
 
-  def flipStep(litCount: Int, clauseLen: Int, pol: Boolean, eqType: lpOlType) = {
-    val rewritePatternEq = lpRewritePattern(generateClausePattern(Seq(litCount), clauseLen, pol))
-    lpRewrite(Some(rewritePatternEq), lpFunctionApp(flipLiteral().name, Seq.empty, Seq(eqType)))
+  def flipStep(litCount: Int, clauseLen: Int, pol: Boolean, eqType: lpOlType, embedInPattern: Option[lpOlTerm => lpOlTerm] = None) = {
+    val rewritePatternEq = generateClausePattern(Seq(litCount), clauseLen, pol)
+    val pattern = if (!embedInPattern.isDefined) rewritePatternEq else embedInPattern.get(rewritePatternEq)
+    lpRewrite(Some(lpRewritePattern(pattern)), lpFunctionApp(flipLiteral().name, Seq.empty, Seq(eqType)))
   }
 
   def extractSides(lit0:lpOlTerm):(Option[lpOlTerm], Option[lpOlTerm], Option[lpOlType], Boolean, Boolean)={
@@ -303,7 +304,7 @@ object AccessoryRules {
   }
 
   // todo: restructure to use lpLiterl as input
-  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
+  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int, embedInPattern: Option[lpOlTerm => lpOlTerm] = None): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
     Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
     // todo: compare modulo alpha conversion?
 
@@ -313,7 +314,11 @@ object AccessoryRules {
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     var canEncode = false
     var flip: Boolean = false
-    val rewritePattern = Some(lpRewritePattern(generateClausePattern(Seq(litCount), clauseLen)))
+    val clausePattern = generateClausePattern(Seq(litCount), clauseLen)
+    val embclausePattern =
+      if (!embedInPattern.isDefined) clausePattern
+      else embedInPattern.get(clausePattern)
+    val rewritePattern = Some(lpRewritePattern(embclausePattern))
 
     // first we register the two sides of the literals and weather or not the literals are negative
     val (lhs0, rhs0, ty0, pol0, _) = extractSides(lit0)
@@ -380,7 +385,7 @@ object AccessoryRules {
           case Some(rule) =>
             if (flip) {
               usedSymbols = usedSymbols + flipLiteral()
-              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty0.get)
+              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty0.get, embedInPattern)
               Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
             }
             usedSymbols = usedSymbols + rule
@@ -391,7 +396,15 @@ object AccessoryRules {
             Out.lp_debug_info(s"Unencoded transformation 1")
             false
         }
-      } else false
+      } else if (lhs0 == rhs0) {
+        if (!pol0 && (lhs1 == Some(lpOlBot))) {
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpSimp_negEq_idem.instanciate(ty1.get, lhs1))
+          true
+        } else if (pol0 && (lhs1 == Some(lpOlTop))) {
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpSimp_eq_idem.instanciate(ty1.get, lhs1))
+          true
+        } else false
+      }else false
     } else if (!ty0.isDefined && ty1.isDefined) {
       // we need to transform to equational literal
       Out.lp_debug_info(s"Transformation from non-equational to equational form neccesary...")
@@ -456,7 +469,7 @@ object AccessoryRules {
             Out.lp_debug_info(s"Applying ${rule.term} to transform non-equational literal to equational form")
             if (flip) {
               usedSymbols = usedSymbols + flipLiteral()
-              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty1.get)
+              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty1.get, embedInPattern)
               Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
             }
             true
@@ -464,7 +477,15 @@ object AccessoryRules {
             Out.lp_debug_info(s"Unencoded transformation 2")
             false
         }
-    } else false
+    } else if (lhs1 == rhs1) {
+        if (!pol1 && (lhs0 == Some(lpOlBot))){
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpSimp_negEq_idem.instanciate(ty1.get, lhs1),true)
+          true
+        } else if (pol1 && (lhs0 == Some(lpOlTop))){
+          allSteps = allSteps :+ lpRewrite(rewritePattern, lpSimp_eq_idem.instanciate(ty1.get, lhs1), true)
+          true
+        } else false
+      } else false
     } else if (ty0.isDefined && ty1.isDefined) {
       // both literals are equational, maybe we need to switch sides or transform bot/ top and polarity
       if (Seq(lhs0,rhs0).contains(lhs1) && Seq(lhs0,rhs0).contains(rhs1)){
@@ -472,7 +493,7 @@ object AccessoryRules {
         if (lhs0 != lhs1){
           val necessaryFlip = if (pol0) true else false
           usedSymbols = usedSymbols + flipLiteral()
-          allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty0.get)
+          allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty0.get, embedInPattern)
           Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           true
         }else {
@@ -489,11 +510,25 @@ object AccessoryRules {
         false
       }
     } else {
-      // both literals are non-equational and should already be the same
-      assert(lit0 == lit1)
-      Out.lp_debug_info(s"Literals are already identical")
-      // maybe transform bot to not top and vice versa?
-      true
+      // both literals are non-equational
+      // -> They either are already the same ...
+      if(lit0 == lit1){
+        Out.lp_debug_info(s"Literals are already identical")
+        // maybe transform bot to not top and vice versa?
+        true
+      }else{ // todo maybe check this first? may be more efficient...
+        (lit0, lit1) match {
+          // ... or we transform back and forth between top and bottom with negations
+          case (`lpOlBot`,lpOlUnaryConnectiveTerm(`lpNot`,`lpOlTop`)) =>
+            allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(lpSimp_negTop.name, Seq()), true)
+            true
+          case (lpOlUnaryConnectiveTerm(`lpNot`, `lpOlTop`), `lpOlBot`) =>
+            allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(lpSimp_negTop.name, Seq()))
+            true
+          case _ => throw new Exception(s"Unable to transform ${lit0.pretty} to ${lit1.pretty}")
+        }
+        // ... or one is a double negation of the other todo
+      }
     }
     if (canEncode) Out.lp_debug_info(s"success")
     (allSteps,usedSymbols,canEncode)
@@ -522,12 +557,16 @@ object AccessoryRules {
 
     override def pretty: String = lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(T)).pretty
 
-    def instanciate(x0: lpOlTerm, y0: lpOlTerm, prfXeqY0: Option[lpTerm]): lpFunctionApp = {
-      val prfXeqY = prfXeqY0 match {
-        case Some(prfTerm) => Seq(prfTerm)
+    def instanciate(ty: lpOlType, x0: Option[lpOlTerm] = None, y0: Option[lpOlTerm] = None): lpFunctionApp = {
+      val x = x0 match {
+        case Some(term) => Seq(term)
         case None => Seq()
       }
-      lpFunctionApp(name, Seq(x0, y0) ++ prfXeqY)
+      val y = y0 match {
+        case Some(term) => Seq(term)
+        case None => Seq()
+      }
+      lpFunctionApp(name, x ++ y,Seq(ty))
     }
 
     def res(polarity: Boolean, T0: lpOlPolyType, x0: lpOlTerm, y0: lpOlTerm) = { // todo unite encoding with type

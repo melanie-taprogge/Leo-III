@@ -56,6 +56,13 @@ object SimplificationEncoding {
     override def pretty: String = name.pretty
   }
 
+  /** Rule (x : τ T): π ((⊥ ∨ x) = x) */
+  case object lpSimp_botOr extends simplificationRules {
+    override def name: lpConstantTerm = lpConstantTerm("⊥∨")
+
+    override def pretty: String = name.pretty
+  }
+
   // Negation of ⊤ and ⊥
 
   // 18
@@ -71,6 +78,10 @@ object SimplificationEncoding {
   /** Rule (T : Set) (x : τ T): (π ((x = x) = ⊤)) */
   case object lpSimp_eq_idem extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("=_idem")
+    def instanciate(ty: lpOlType, term: Option[lpOlTerm]): lpFunctionApp = {
+      val args = if (term.isDefined) Seq(ty, term.get) else Seq(ty)
+      lpFunctionApp(name, args)
+    }
     override def pretty: String = name.pretty
   }
 
@@ -78,6 +89,10 @@ object SimplificationEncoding {
   /** Rule (T : Set) (x : τ T): π (¬ (x = x) = ⊥) */
   case object lpSimp_negEq_idem extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("¬=_idem")
+
+    def instanciate(ty: lpOlType, term: Option[lpOlTerm]):lpFunctionApp ={
+      val args = if (term.isDefined) Seq(ty, term.get) else Seq(ty)
+      lpFunctionApp(name, args)}
     override def pretty: String = name.pretty
   }
 
