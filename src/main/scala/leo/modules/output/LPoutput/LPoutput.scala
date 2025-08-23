@@ -7,6 +7,7 @@ import leo.modules.prover.LocalState
 import leo.modules.{saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.{lpDne, tempLib}
+import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 

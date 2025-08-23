@@ -71,7 +71,7 @@ package object LPoutput {
   // todo: the other connectives
 
   def applyPartiallyAppliedConnective(con: lpOlUnappliedConnective, args: Seq[Either[lpOlTerm,lpOlType]], impArgs: Seq[Either[lpOlTerm,lpOlType]]): lpOlTerm ={
-    Out.lp_debug_info(s"encoding partially applied connective: ${con.pretty} with args ${args}")
+    //Out.lp_debug_info(s"encoding partially applied connective: ${con.pretty} with args ${args}")
     con.base match {
       case con0: lpOlUnaryConnective =>
         // if there is at leas one arguemnt, we can apply it
