@@ -176,7 +176,6 @@ package object modules {
       sb.append(ToTPTP(key, typeOnly = true))
       sb.append("\n")
     }
-
     // then print definitions (except for additional symbols)
     otherSymbols.foreach { key =>
       if (sig(key).hasDefn && !additionalSymbols.contains(key)) {

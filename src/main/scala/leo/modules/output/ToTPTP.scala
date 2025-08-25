@@ -52,7 +52,6 @@ object ToTPTP {
     def apply(): String = toTPTP(cl.id.toString, cl.cl, cl.role, cl.annotation)(sig)
   }
 
-
   ///////////////////////
   // Methods on symbols/definitions
   ///////////////////////
@@ -107,8 +106,7 @@ object ToTPTP {
       ""
     }
   }
-
-
+  
   final def printDefinitions(sig : Signature) : String = {
     val sb : StringBuilder = new StringBuilder
     val keys1 = sig.allUserConstants.iterator
