@@ -149,36 +149,59 @@ package inferenceControl {
 
     private final def cnf1(cl: AnnotatedClause, sig: Signature): Set[AnnotatedClause] = {
       Out.trace(s"Standard CNF of ${cl.pretty(sig)}")
-      val cnfresult = FullCNF(leo.modules.calculus.freshVarGen(cl.cl), cl.cl)(sig).toSet
-      if (cnfresult.size == 1 && cnfresult.head == cl.cl) {
-        // no CNF step at all
-        Out.trace(s"CNF result:\n\t${cl.pretty(sig)}")
-        Set(cl)
-      } else {
-        val cnfsimp = cnfresult //.map(Simp.shallowSimp)
-        val result = cnfsimp.map {c => AnnotatedClause(c, InferredFrom(FullCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties))}
+      val cnfresult0 = FullCNF(leo.modules.calculus.freshVarGen(cl.cl), cl.cl)(sig)
+      if (CnfConj.canApply(cnfresult0)) {
+        // conjunction of all derived clauses
+        val (conjCl, cnfresult) = CnfConj(cnfresult0)
+        val conjResult = AnnotatedClause(conjCl, InferredFrom(FullCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
+        // individual clauses of the conjunction
+        val result = cnfresult.map { c => AnnotatedClause(c._1, InferredFrom(CnfConj, conjResult), conjResult.properties) }
         Out.trace(s"CNF result:\n\t${result.map(_.pretty(sig)).mkString("\n\t")}")
         result
+      } else if (cnfresult0.isEmpty) Set.empty
+      else {
+        Out.trace(s"CNF result:\n\t${cnfresult0.head.pretty(sig)}")
+        if (cnfresult0.head == cl.cl) {
+          // no CNF step at all
+          Out.trace(s"CNF result:\n\t${cl.pretty(sig)}")
+          Set(cl)
+        } else {
+          // CNF resulted in only one clause
+          val result = AnnotatedClause(cnfresult0.head, InferredFrom(FullCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
+          Out.trace(s"CNF result:\n\t${result.pretty(sig)}")
+          Set(result)
+        }
       }
     }
 
     private final def cnf2(cl: AnnotatedClause, s: GeneralState[AnnotatedClause]): Set[AnnotatedClause] = {
       Out.trace(s"Rename CNF of ${cl.pretty(s.signature)}")
       val (cnfresult0, cnfInfo) = RenameCNF.apply_rwUnderBinder(leo.modules.calculus.freshVarGen(cl.cl), s.renamingCash, cl.cl)(s.signature)
-      val cnfresult = cnfresult0.distinct
-      if (cnfresult.size == 1 && cnfresult.head == cl.cl) {
-        // no CNF step at all
-        Out.trace(s"CNF result:\n\t${cl.pretty(s.signature)}")
-        Set(cl)
-      } else {
-        val cnfsimp = cnfresult //.map(Simp.shallowSimp)
-        //todo: you need to trace weather any of the clauses are deleted and then verify with a new meta theorem
-        val result = cnfsimp.zipWithIndex.map {case (c, idx) =>
-
-          val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder,cnfInfo.renameHappend,cnfInfo.skolemTerms,cnfresult0,idx))
-          AnnotatedClause(c, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties),furtherInfo)}
+      if (CnfConj.canApply(cnfresult0)) {
+        // conjunction of all derived clauses
+        val (conjCl, cnfresult) = CnfConj(cnfresult0)
+        val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder, cnfInfo.renameHappend, cnfInfo.skolemTerms, cnfresult0))
+        val conjResult = AnnotatedClause(conjCl, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties), furtherInfo)
+        // individual clauses of the conjunction
+        val result = cnfresult.map { (cIdx) =>
+          val furtherInfo = FurtherInfo(cnfConjInfo = Some(cIdx._2))
+          AnnotatedClause(cIdx._1, InferredFrom(CnfConj, conjResult), conjResult.properties, furtherInfo)
+        } // TODO Definitions other way into the CNF.
         Out.trace(s"CNF result:\n\t${result.map(_.pretty(s.signature)).mkString("\n\t")}")
-        result.toSet
+        result
+      } else if (cnfresult0.isEmpty) Set.empty
+      else {
+        if (cnfresult0.head == cl.cl) {
+          // no CNF step at all
+          Out.trace(s"CNF result:\n\t${cl.pretty(s.signature)}")
+          Set(cl)
+        } else {
+          // CNF resulted in only one clause
+          val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder, cnfInfo.renameHappend, cnfInfo.skolemTerms, cnfresult0))
+          val result = AnnotatedClause(cnfresult0.head, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties), furtherInfo)
+          Out.trace(s"CNF result:\n\t${result.pretty(s.signature)}")
+          Set(result)
+        }
       }
     }
 

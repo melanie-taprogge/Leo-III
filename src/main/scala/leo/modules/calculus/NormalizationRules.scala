@@ -1,11 +1,12 @@
 package leo.modules.calculus
 
 import leo._
+import leo.datastructures.Clause.asTerm
 import leo.datastructures.Term.{:::>, TypeLambda, mkReal}
 import leo.datastructures.Term.local._
-import leo.datastructures.{Clause, Subst, Type, _}
+import leo.datastructures.{Clause, Literal, Subst, Type, _}
 import leo.modules.HOLSignature.{!===, &, ===, Choice, Exists, Forall, Impl, LitFalse, LitTrue, Not, TyForall, |||}
-import leo.modules.calculus.FullCNF.FVs
+import leo.modules.calculus.FullCNF.{FVs, multiply}
 import leo.modules.output.{SZS_EquiSatisfiable, SZS_Theorem, SuccessSZS}
 
 import scala.annotation.{switch, tailrec}
@@ -84,6 +85,31 @@ object PolaritySwitch extends CalculusRule {
       case Not(l2) => Literal(l2, !l.polarity)
       case _ => l
     }
+  }
+}
+object CnfConj extends CalculusRule{
+  final val name: String = "cnfConj"
+  final val inferenceStatus = SZS_Theorem
+
+  @inline final def canApply(cls: Seq[Clause]): Boolean = cls.size > 1
+
+  final def apply(cls0 : Seq[Clause]): (Clause, Set[(Clause, AddInfoCnfConj)]) = {
+    import scala.collection.mutable.LinkedHashMap
+    val unquantifiedClauses = cls0.map(c => mkDisjunction(c.lits.map(Literal.asTerm(_))))
+    val conjCl =  Clause(Literal(mkConjunction(unquantifiedClauses),true))
+
+    val clauseCount = cls0.length
+    val seen = LinkedHashMap.empty[Clause, AddInfoCnfConj]
+    var idx = 0
+    val it = cls0.iterator
+    while (it.hasNext) {
+      val c = it.next()
+      if (!seen.contains(c)) seen += (c -> AddInfoCnfConj(idx, clauseCount))
+      idx += 1
+    }
+    val uniqWithFirstIdx = seen.toSet
+
+    (conjCl,uniqWithFirstIdx)
   }
 }
 
@@ -200,8 +226,8 @@ object RenameCNF extends CalculusRule {
     while(it.hasNext){
       val nl = it.next()
       apply(vargen, cashExtracts, nl, THRESHHOLD) match {
-        case Seq(Seq(lit)) => acc = acc.map{normLits => lit +: normLits}
-        case norms =>  acc = multiply(norms, acc)
+        case Seq(Seq(lit)) => acc = acc.map {normLits => normLits :+ lit }
+        case norms => acc = multiply(acc, norms)
       }
     }
     acc
@@ -263,7 +289,7 @@ object RenameCNF extends CalculusRule {
         val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Forall(a@(ty :::> t)) if !l.polarity =>
         //st.rewriteUnderBinderHappened = true
-        val v = vargen.next(ty)
+        //val v = vargen.next(ty)
         val boundVar1 = Term.mkBound(ty,1)
         val contrT = mkTermAbs(ty , t.etaContract)
         val negA = mkTermAbs(ty, Not(mkTermApp(contrT.substitute(Subst.shift(1)),boundVar1)))
@@ -355,8 +381,8 @@ object FullCNF extends CalculusRule {
     while(it.hasNext){
       val nl = it.next()
       apply(vargen, nl) match {
-        case Seq(Seq(lit)) => acc = acc.map{normLits => lit +: normLits}
-        case norms =>  acc = multiply(norms, acc)
+        case Seq(Seq(lit)) => acc = acc.map {normLits => normLits :+ lit }
+        case norms => acc = multiply(acc, norms)
       }
     }
     acc

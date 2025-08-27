@@ -2,7 +2,7 @@ package leo.modules.output
 
 import leo.Out
 import leo.datastructures.Term.{:::>, TypeLambda, ∙}
-import leo.datastructures.{Clause, Literal, Position, Signature, Term, Type}
+import leo.datastructures.{Clause, Literal, Position, Signature, Subst, Term, Type}
 import leo.modules.HOLSignature._
 import leo.modules.output.LPoutput.Encodings.{term2LP, type2LP}
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
@@ -673,6 +673,20 @@ package object LPoutput {
   }
   }
 
+  def doubleIndexList[A](xs: Seq[A]): Seq[Int] = {
+    // generate an index list where identical elements have identical indices
+    val (_, _, rev) = xs.foldLeft((Map.empty[A, Int], 0, List.empty[Int])) {
+      case ((m, next, acc), x) =>
+        m.get(x) match {
+          case Some(id) =>
+            (m, next, id :: acc)
+          case None =>
+            (m + (x -> next), next + 1, next :: acc)
+        }
+    }
+    rev.reverse
+  }
+
   /*
   def wholeHaveRewriteStep(rewriteSteps: Seq[lpProofScriptStep], nameStep: String, nameSubStep: String, before: lpOlTerm, sourceBefore: lpTerm, after: lpOlTerm): lpHave = {
     //todo: use this in my simplification steps?
@@ -712,6 +726,26 @@ package object LPoutput {
       i = i + 1
     }
     resultBindingMap
+  }
+
+  def shiftClause (cls: Seq[Clause]) = {
+    // check if ther are gaps in the variable identifiers and if so, close them
+    // check for "holes" in the variable-numbers
+    val allVars = cls.flatMap(cl => cl.lits.flatMap(l => l.fv)).distinct
+    val fvs = allVars.map(_._1).distinct.sortWith { case (a, b) => a > b }
+
+    //val prefvs = newLits.flatMap(_.fv).distinct
+    //val fvs = prefvs.map(_._1).distinct.sortWith { case (a, b) => a > b }
+    //val tyFVs = lits.flatMap(_.tyFV).distinct.sortWith { case (a, b) => a > b }
+    Out.lp_debug_info(s"fvs: $fvs")
+    val derivedClauses: Seq[Clause] = if (fvs.nonEmpty && fvs.size != fvs.head) {
+      Out.lp_debug_info(s"FV Optimization : \t${fvs.mkString(",")}")
+      // gaps in fvs
+      val newFvs = Seq.range(fvs.size, 0, -1)
+      val subst = Subst.fromShiftingSeq(fvs.zip(newFvs))
+      Out.finest(s"New: \t${newFvs.mkString("-")} ... subst: ${subst.pretty}")
+      cls.map(cl => Clause(cl.lits.map(l => l.applyRenamingSubstitution(subst))))
+    } else cls
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

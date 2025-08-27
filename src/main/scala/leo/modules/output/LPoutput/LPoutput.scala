@@ -8,6 +8,8 @@ import leo.modules.{saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.{lpDne, tempLib}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
+import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfConj
+import leo.modules.output.LPoutput.ModularProofEncoding.RenameCnfEncoding.encRenameCnf_conj
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
@@ -143,6 +145,7 @@ object LPoutput {
     if ((cl.role != Role_Conjecture) && needsEnc && (rule != null)) {
       rule match {
 
+        /*
         case leo.modules.calculus.RenameCNF =>
           // first, we check weather the
           // if the conjunction contains only one clause, there is no need for two seperate steps
@@ -174,10 +177,31 @@ object LPoutput {
           } else Seq()
           (stepsConj ++ stepsPickupStep,outputInfo)
 
+         */
+
         case _ =>
           val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols)
 
           rule match {
+            case leo.modules.calculus.CnfConj =>
+              val parent = extractParentInfo1(cl, stepInfo.identicalSteps.toMap) match {
+                case Left(error) => throw new Exception(error)
+                case Right(value) => value
+              }
+              val idx = cl.furtherInfo.cnfConjInfo match {
+                case Some(value) => value
+                case None => throw new Exception("Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
+              }
+              val encProof = encCnfConj(cl, parent, idx, sig)
+              (toProofStep(stepName, encStep, rule.name, encProof, None), outputInfo)
+
+            case leo.modules.calculus.RenameCNF =>
+              val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
+              val stepsCNF = toProofStep(stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
+              val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols,encodingCNF._4,encodingCNF._5)
+              (stepsCNF,outputInfo)
+
+
             case leo.modules.calculus.PolaritySwitch =>
               val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
               (toProofStep(stepName, encStep, "PolaritySwitch", encoding._1, None),outputInfo)

@@ -179,8 +179,10 @@ case class AddInfoSkolem(sko: Term,
 case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
                       renameHappend: Boolean = false,
                       skolemTerms: Seq[AddInfoSkolem] = Seq.empty,
-                      derivedClauses: Seq[Clause]  = Seq.empty,
-                      numberInClause: Int = 0)
+                      derivedClauses: Seq[Clause]  = Seq.empty)
+
+case class AddInfoCnfConj(idxInConj: Int,
+                      numOfClauses: Int)
 
 case class AddInfoPara(withClause: Clause,
                        withIndex: Int,
@@ -196,7 +198,8 @@ case class AddInfoPara(withClause: Clause,
 case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
                         val rwUnderBinder: Boolean = false,
                         unencodableCNF: Boolean = false,
-                        cnfInfo: AddInfoCnf = AddInfoCnf()){
+                        cnfInfo: AddInfoCnf = AddInfoCnf(),
+                        cnfConjInfo: Option[AddInfoCnfConj] = None){
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
   var addInfoBoolExt: Set[(Literal,Seq[Literal])] = Set.empty
   var addInfoSimp: Seq[(Seq[Int],Int)] = Seq.empty

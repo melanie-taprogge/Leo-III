@@ -211,6 +211,7 @@ object Encodings {
     (encodedClause,usedSymbols)
     }
 
+
   final def clause2LP_unquantified(cl: Clause, usedSymbols0: Set[lpStatement], sig: Signature): (Seq[Either[lpOlTypedVar,lpOlTyVar]],lpOlUntypedBinaryConnectiveTerm_multi, Set[lpStatement]) = {
     val freeVarsExist = cl.implicitlyBound.nonEmpty || cl.typeVars.nonEmpty
     var usedSymbols = usedSymbols0
@@ -495,7 +496,7 @@ object Encodings {
     }
 
     def apply_to_set(cls: Seq[Clause], sig: Signature): ( Map[Int, String],Seq[lpClauseInst]) = {
-      val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct
+      val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
       val fullBvarsMap = clauseVars2LP(allImpBoundVars, sig, Set.empty)._2
       val encCls = cls.map(cl => clause2LP0(cl,fullBvarsMap,sig,Set.empty)._1)
       val encVars: Seq[Seq[Either[lpOlTypedVar, lpOlTyVar]]] = cls.map(cl => var2Lp(cl.implicitlyBound,fullBvarsMap,sig).map(Left(_)))
