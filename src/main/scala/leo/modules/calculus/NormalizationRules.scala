@@ -152,8 +152,8 @@ object  StepCNF extends CalculusRule {
       case Impl(lt,rt) if l.polarity => Beta(Literal(lt,false), Literal(rt, true))
       case Impl(lt,rt) if !l.polarity => Alpha(Literal(lt,true), Literal(rt,false))
       case Forall(a@(ty :::> t)) if l.polarity => val newVar = vargen(ty); One(Literal(Term.mkTermApp(a, newVar).betaNormalize, true))
-      case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTerm(ty, vargen.existingVars, vargen.existingTyVars)(sig); One(Literal(Term.mkTermApp(a, sko).betaNormalize, false))
-      case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTerm(ty, vargen.existingVars, vargen.existingTyVars)(sig); One(Literal(Term.mkTermApp(a, sko).betaNormalize, true))
+      case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, vargen.existingVars, vargen.existingTyVars,true)(sig)._1; One(Literal(Term.mkTermApp(a, sko).betaNormalize, false))
+      case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, vargen.existingVars, vargen.existingTyVars,false)(sig)._1; One(Literal(Term.mkTermApp(a, sko).betaNormalize, true))
       case Exists(a@(ty :::> t)) if !l.polarity => val newVar = vargen(ty); One(Literal(Term.mkTermApp(a, newVar).betaNormalize, false))
       case _ => None(l)
     }
@@ -288,26 +288,12 @@ object RenameCNF extends CalculusRule {
         st.rewriteUnderBinderHappened = true
         val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Forall(a@(ty :::> t)) if !l.polarity =>
-        //st.rewriteUnderBinderHappened = true
-        //val v = vargen.next(ty)
-        val boundVar1 = Term.mkBound(ty,1)
-        val contrT = mkTermAbs(ty , t.etaContract)
-        val negA = mkTermAbs(ty, Not(mkTermApp(contrT.substitute(Subst.shift(1)),boundVar1)))
-        //val negA = mkTermAbs(ty, Not(mkTermApp(a,boundVar´1)))
-        //val dfn = leo.modules.HOLSignature.Choice(a)
-        val dfn = leo.modules.HOLSignature.Choice(negA)
-
-        val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs)
-        //val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs)
-        st.skolemTerms = st.skolemTerms :+ AddInfoSkolem(sko,dfn,fvs,true)
+        val (sko, addInfo) = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true)
+        st.skolemTerms = st.skolemTerms :+ addInfo
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD, st)
-      case Exists(a@(ty :::> t)) if l.polarity => // todo: also eta contract t passed to sk info
-        //st.rewriteUnderBinderHappened = true
-        val contrT = mkTermAbs(ty, t.etaContract)
-        val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs)
-        val dfn = leo.modules.HOLSignature.Choice(contrT)
-        st.skolemTerms = st.skolemTerms :+ AddInfoSkolem(sko,dfn,fvs,false)
-        //val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs, Some(a));
+      case Exists(a@(ty :::> t)) if l.polarity =>
+        val (sko, addInfo) = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false)
+        st.skolemTerms = st.skolemTerms :+ addInfo
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Exists(a@(ty :::> t)) if !l.polarity =>
         st.rewriteUnderBinderHappened = true
@@ -408,8 +394,8 @@ object FullCNF extends CalculusRule {
           val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true))
         }
 
-      case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs); apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false))
-      case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTerm(ty, fvs, tyFVs); apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true))
+      case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,true)._1; apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false))
+      case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,false)._1; apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true))
       case Exists(a@(ty :::> t)) if !l.polarity =>
         import leo.modules.HOLSignature.{o, LitTrue, LitFalse}
         if (false /*ty == o*/) {
@@ -959,33 +945,15 @@ object Simp extends CalculusRule {
 
     assert(prefvs.size == fvs.size, "Duplicated free vars with different types")
 
-    if (tyFVs.nonEmpty && tyFVs.size != tyFVs.head) {
-      Out.finest(s"Ty FV Optimization needed")
-      Out.finest(s"Old: \t${tyFVs.mkString("-")}")
-      val newTyFvs = Seq.range(tyFVs.size, 0, -1)
-      val tySubst = Subst.fromShiftingSeq(tyFVs.zip(newTyFvs))
-      Out.finest(s"New: \t${newTyFvs.mkString("-")} ... subst: ${tySubst.pretty}")
-      // Same with term variables
-      if (fvs.nonEmpty && fvs.size != fvs.head) {
-        Out.finest(s"FV Optimization needed")
-        Out.finest(s"Old: \t${fvs.mkString("-")}")
-        // gaps in fvs
-        val newFvs = Seq.range(fvs.size, 0, -1)
-        val subst = Subst.fromShiftingSeq(fvs.zip(newFvs))
-        Out.finest(s"New: \t${newFvs.mkString("-")} ... subst: ${subst.pretty}")
-        newLits.map(_.applyRenamingSubstitution(subst.applyTypeSubst(tySubst), tySubst))
-      } else {
-        newLits.map(_.applyRenamingSubstitution(Subst.id, tySubst))
-      }
-    } else  if (fvs.nonEmpty && fvs.size != fvs.head) {
-      Out.finest(s"FV Optimization needed")
-      Out.finest(s"Old: \t${fvs.mkString("-")}")
-      // gaps in fvs
-      val newFvs = Seq.range(fvs.size, 0, -1)
-      val subst = Subst.fromShiftingSeq(fvs.zip(newFvs))
-      Out.finest(s"New: \t${newFvs.mkString("-")} ... subst: ${subst.pretty}")
-      newLits.map(_.applyRenamingSubstitution(subst))
-    } else newLits
+    // normalize free variables
+    val maybeTySubst = normalizeTyFVs(tyFVs)
+    val maybeSubst = normalizeFVs(fvs)
+    (maybeSubst, maybeTySubst) match {
+      case (Some(s), Some(ts)) => newLits.map(_.applyRenamingSubstitution(s.applyTypeSubst(ts), ts))
+      case (Some(s), None) => newLits.map(_.applyRenamingSubstitution(s))
+      case (None, Some(ts)) => newLits.map(_.applyRenamingSubstitution(Subst.id, ts))
+      case _ => newLits
+    }
   }
 
   final def apply(cl: Clause)(implicit sig: Signature): Clause = Clause(apply(cl.lits)(sig))

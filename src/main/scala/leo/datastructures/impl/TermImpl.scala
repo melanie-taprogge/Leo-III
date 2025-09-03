@@ -160,7 +160,7 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
   override def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = hd match {
     case Atom(key,_) if !symbs.contains(key) => {
       val meta = sig(key)
-      if (meta.hasDefn && !meta._defn.symbols.contains(key)) {
+      if (meta.hasDefn && !meta._defn.symbols.contains(key) && !isPropSet(Signature.PropSkolemConstant, meta.flag)) {
         mkRedex(meta._defn.δ_expand_upTo(symbs)(sig), args.δ_expand_upTo(symbs)(sig))
       } else {
         mkRoot(hd, args.δ_expand_upTo(symbs)(sig))
@@ -173,7 +173,7 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
     case Atom(key, _) if !symbs.contains(key) => {
       var expandedSymbols: Seq[Signature.Key] = Seq.empty
       val meta = sig(key)
-      if (meta.hasDefn) {
+      if (meta.hasDefn && !isPropSet(Signature.PropSkolemConstant, meta.flag)) {
         val (expandedDef, expandedSymbolsDef) = meta._defn.δ_expand_andTrack_upTo(symbs)(sig)
         val (expandedArgs, expandedSymbolsArgs) = args.δ_expand_andTrack_upTo(symbs)(sig)
         (mkRedex(expandedDef, expandedArgs),expandedSymbolsDef ++ expandedSymbolsArgs :+ key)

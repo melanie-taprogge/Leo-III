@@ -250,6 +250,7 @@ object Encodings {
   }
   def var2Lp(scope: Int, typ: Type, bVars: Map[Int, String], sig: Signature, prefix: Boolean ): lpOlTypedVar = {
     val encType = type2LP(typ, sig, prefix)
+    assert(bVars.contains(scope), s"Error in Lambdapi encoding: Trying to encode var of scope $scope that is not in bVars Map ($bVars)")
     (lpOlTypedVar(lpOlConstantTerm(bVars(scope)), encType))
   }
   def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpStatement], supressReduction:Boolean = false, prefix: Boolean = true): (lpOlTerm,Set[lpStatement]) = {

@@ -1,7 +1,7 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature}
+import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
 import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{saturatedUserSignature, symbolsInProof}
@@ -12,6 +12,7 @@ import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfCo
 import leo.modules.output.LPoutput.ModularProofEncoding.RenameCnfEncoding.encRenameCnf_conj
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
+import leo.modules.output.ToTPTP.definitionToTPTP
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
@@ -198,7 +199,7 @@ object LPoutput {
             case leo.modules.calculus.RenameCNF =>
               val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
               val stepsCNF = toProofStep(stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
-              val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols,encodingCNF._4,encodingCNF._5)
+              val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols,encodingCNF._4,Seq())
               (stepsCNF,outputInfo)
 
 
@@ -359,7 +360,7 @@ object LPoutput {
         typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, lpSet).pretty)
       } else {
         if (symbol.hasType) {
-          if (symbol.name.matches("^sk\\d+$")) {
+          if (isPropSet(Signature.PropSkolemConstant, symbol.flag)) {
             val typeDec = type2LP(symbol._ty, sig, true)
             skDecsSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
           }
@@ -371,18 +372,30 @@ object LPoutput {
 
         if (symbol.hasDefn) { // && (! additionalSymbols.contains(key))) {
 
-          val (bVarTys, _) = collectLambdasLP(symbol._defn)
-          val newBVars = makeBVarList(bVarTys, 0)
-          val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, fusebVarListwithMap(newBVars, Map()), sig, Set.empty, false, true)
-          tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
-
           val defTermType = type2LP(symbol._defn.ty, sig, true)
-          val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(s"${abbreviationSignatureFile}." + sName), Seq.empty), definition)
-          val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
-          defSB.append(encodedDef.pretty)
 
-          // furthermore, we need to build a tactic that combines all of our definitions into one
-          definitions += s"${sName}_def"
+          if (isPropSet(Signature.PropSkolemConstant, symbol.flag)) {
+            //todo: maybe generally encode defs with free vars like this?
+            //Extract the lambda terms of the new definition and build a quantified version where the variables are applied to the skolem term
+            val (bVarTys, strippedDef) = collectLambdasLP(symbol._defn)
+            val newBVars = makeBVarList(bVarTys, 0)
+            val encBvars = newBVars.map(v => lpOlTypedVar(lpOlConstantTerm(v._1),type2LP(v._2,sig)) )
+            val appliedSk = lpOlFunctionApp(lpOlConstantTerm(sName),encBvars.map(Left(_)))
+            val (definition, tptpDefinedSymbols0) = term2LP(strippedDef, fusebVarListwithMap(newBVars, Map()), sig, Set.empty, false, true)
+            val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(appliedSk, Seq.empty), definition)
+            val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), encBvars, defAsEq.prf)
+            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
+            skDecsSB.append(encodedDef.pretty)
+          }
+          else {
+            val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, Map(), sig, Set.empty, false, true)
+            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
+            val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(s"${abbreviationSignatureFile}." + sName), Seq.empty), definition)
+            val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
+            defSB.append(encodedDef.pretty)
+            // add to the list of definitions that should later be extended in the corresponding steps
+            definitions += s"${sName}_def"
+          }
         }
       }
     }
@@ -413,8 +426,7 @@ object LPoutput {
 
     var tptpDefinedSymbols: Set[lpStatement] = Set.empty
     var additionalSymbols: Set[Signature.Key] = Set.empty
-
-    if ((sig.allUserConstants intersect symbolsInProof(proof)).map(sig.apply(_).hasDefn).contains(true)) flagSt.defRuleDefined = true
+    if ((sig.allUserConstants intersect symbolsInProof(proof)).filter(key => !isPropSet(Signature.PropSkolemConstant, sig(key).flag)).map(sig.apply(_).hasDefn).contains(true)) flagSt.defRuleDefined = true
 
 
     // encode the clauses representing the steps
@@ -514,7 +526,7 @@ object LPoutput {
     if (skDefinitions.nonEmpty || skDecSB.length != 0) {
       proofFileSB.append("\n\n// SKOLEM TERMS ///////////////////////////////////\n\n")
       proofFileSB.append(skDecSB)
-      proofFileSB.append(skDefinitions.map(_.pretty).mkString(""))
+      proofFileSB.append(skDefinitions.map(defn => s"// ${defn.pretty}").mkString(""))
     }
 
     if (tacticSB.nonEmpty) {

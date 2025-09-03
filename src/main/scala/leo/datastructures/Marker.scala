@@ -172,10 +172,9 @@ abstract sealed class ClauseAnnotation extends Pretty {
   def parents: Seq[_ <: ClauseProxy]
 }
 
-case class AddInfoSkolem(sko: Term,
-                         dfn: Term,
-                         freeVars: FVs,
-                         neg: Boolean)
+case class AddInfoSkolem(sko: Signature.Key,
+                         fVs: Seq[(Int, Type)],
+                         ftVs: Seq[Int])
 case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
                       renameHappend: Boolean = false,
                       skolemTerms: Seq[AddInfoSkolem] = Seq.empty,

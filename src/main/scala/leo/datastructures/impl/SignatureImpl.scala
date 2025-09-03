@@ -196,21 +196,24 @@ class SignatureImpl extends Signature with Function1[Int, Signature.Meta] {
   val skolemVarPrefix = "sk"
   /** Returns a fresh uninterpreted symbol of type `ty`. That symbol will be
     * named `SKi` where i is some positive number. */
-  def freshSkolemConst(ty: Type, prop: Signature.SymbProp = Signature.PropNoProp, term: Option[Term] = None): Key = synchronized {
+  def freshSkolemConst(ty: Type, prop: Signature.SymbProp = Signature.PropNoProp): Key = synchronized {
     assert(ty.typeVars.isEmpty)
     while(exists(skolemVarPrefix + (skolemVarCounter +1).toString)) {
       skolemVarCounter += 1
     }
     skolemVarCounter += 1
-    if (term.isDefined) {
-      Out.lp_debug_info(s"creating skolem term with definition")
-      val dfn = leo.modules.HOLSignature.Choice(term.get)
-      val fV = term.get.freeVars
-      Out.lp_debug_info(s"free Vars: $fV")
-      val maybeQuantDef = mkPolyUnivQuant(fV.toSeq.map(_.ty),dfn)
-      addDefined(skolemVarPrefix + skolemVarCounter.toString, maybeQuantDef, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+    addUninterpreted(skolemVarPrefix + skolemVarCounter.toString, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+  }
+
+  /** Returns a fresh defined symbol of type `ty` and with definition `defn`. That symbol will be
+    * named `SKi` where i is some positive number. */
+  def freshSkolemDefined(defn: Term, ty: Type, prop: Signature.SymbProp = Signature.PropNoProp): Key = synchronized {
+    assert(ty.typeVars.isEmpty)
+    while (exists(skolemVarPrefix + (skolemVarCounter + 1).toString)) {
+      skolemVarCounter += 1
     }
-    else addUninterpreted(skolemVarPrefix + skolemVarCounter.toString, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+    skolemVarCounter += 1
+    addDefined(skolemVarPrefix + skolemVarCounter.toString, defn, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
   }
 
   // Skolem variables start with 'tv'
