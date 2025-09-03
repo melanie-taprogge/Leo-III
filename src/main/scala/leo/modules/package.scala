@@ -119,19 +119,13 @@ package object modules {
 
   def saturatedUserSignature(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): Set[Signature.Key] = {
     // Recursively generate a list of all symbols that that occur in definitions
-
-    // Start with user constants that appear in the proof or are type symbols
     val relevantSymbols = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)
-
-    // Keep track of which symbols we have already processed
     var visited = Set.empty[Signature.Key]
 
     def saturate(sym: Signature.Key): Unit = {
-      // Only explore sym if it is not already visited
       if (!visited.contains(sym)) {
         visited += sym
         val info = sig(sym)
-        // If the symbol has a definition, recursively saturate all symbols in that definition
         if (info.hasDefn) {
           val defnSymbols = info._defn.symbols.toSet intersect sig.allUserConstants
           defnSymbols.foreach(saturate)
@@ -143,22 +137,13 @@ package object modules {
     relevantSymbols.foreach(saturate)
     relevantSymbols ++ visited
   }
-  
+
   def userSignatureToTPTP(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): String = {
     val sb: StringBuilder = new StringBuilder()
     /* start with user symbols that occur in the proof, plus type symbols */
-    val relevantSymbols: Set[Signature.Key] = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)
-    var additionalSymbols: Set[Signature.Key] = Set.empty
-    /* add symbols that occur in definitions only, but only their type */
-    for (symbol <- relevantSymbols) {
-      if (sig(symbol).hasDefn) {
-        val defn = sig(symbol)._defn
-        val symbolsInDefn = defn.symbols.toSet
-        additionalSymbols ++= ((symbolsInDefn diff relevantSymbols) intersect sig.allUserConstants)
-      }
-    }
-    val allRelevantSymbols = relevantSymbols union additionalSymbols
-    val (userTypes, otherSymbols) = allRelevantSymbols.partition(key => sig(key).hasKind)
+    val relevantSymbols: Set[Signature.Key] = saturatedUserSignature(symbolsInProof)
+
+    val (userTypes, otherSymbols) = relevantSymbols.partition(key => sig(key).hasKind)
     // first print all user types (sorts)
     userTypes.foreach { key =>
       sb.append(ToTPTP(key))
@@ -169,9 +154,9 @@ package object modules {
       sb.append(ToTPTP(key, typeOnly = true))
       sb.append("\n")
     }
-    // then print definitions (except for additional symbols)
+    // then print definitions
     otherSymbols.foreach { key =>
-      if (sig(key).hasDefn && !additionalSymbols.contains(key)) {
+      if (sig(key).hasDefn) {
         sb.append(ToTPTP.definitionToTPTP(key))
         sb.append("\n")
       }
