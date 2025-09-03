@@ -143,8 +143,9 @@ package object modules {
     relevantSymbols.foreach(saturate)
     relevantSymbols ++ visited
   }
-
-  def userSignature(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): (Set[Signature.Key],Set[Signature.Key]) ={
+  
+  def userSignatureToTPTP(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): String = {
+    val sb: StringBuilder = new StringBuilder()
     /* start with user symbols that occur in the proof, plus type symbols */
     val relevantSymbols: Set[Signature.Key] = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)
     var additionalSymbols: Set[Signature.Key] = Set.empty
@@ -156,14 +157,6 @@ package object modules {
         additionalSymbols ++= ((symbolsInDefn diff relevantSymbols) intersect sig.allUserConstants)
       }
     }
-    (relevantSymbols, additionalSymbols)
-  }
-
-  def userSignatureToTPTP(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): String = {
-
-    val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof)
-
-    val sb: StringBuilder = new StringBuilder()
     val allRelevantSymbols = relevantSymbols union additionalSymbols
     val (userTypes, otherSymbols) = allRelevantSymbols.partition(key => sig(key).hasKind)
     // first print all user types (sorts)
@@ -185,6 +178,7 @@ package object modules {
     }
     sb.dropRight(1).toString()
   }
+
 
   /////////////////////////////////////////////////////////////
   /// Proof printing and associated methods
