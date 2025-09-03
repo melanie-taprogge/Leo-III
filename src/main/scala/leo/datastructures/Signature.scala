@@ -168,11 +168,8 @@ trait Signature {
   // Creating of fresh variables
   ///////////////////////////////
 
-  /** Create fresh uninterpreted symbol of type `ty` */
-  def freshSkolemConst(ty: Type, prop: Signature.SymbProp = Signature.PropNoProp): Key
-
-  /** Create fresh symbol of type `ty` defined using Choice given a term `defn` */
-  def freshSkolemDefined(defn: Term, ty: Type, prop: Signature.SymbProp = Signature.PropNoProp): Key
+  /** Create fresh defined or uninterpreted symbol of type `ty` */
+  def freshSkolemConst(ty: Type, dfn: Option[Term] = None, prop: Signature.SymbProp = Signature.PropNoProp): Key
   /** Create fresh base type symbol */
   def freshSkolemTypeConst(k: Kind): Key
 }

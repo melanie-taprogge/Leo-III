@@ -190,7 +190,7 @@ package object calculus {
         s"fvs: ${fvs.map(fv => s"(${fv._1},${fv._2.pretty(sig)})").mkString(",")},\n" +
         s"tyFvs: ${tyFvs.toString()},\n" +
         s"normalized funTy: ${funTy.pretty(sig)}")
-    val skFunc = Term.mkAtom(sig.freshSkolemConst(ty,Signature.PropNoProp))
+    val skFunc = Term.mkAtom(sig.freshSkolemConst(ty))
     val intermediate = Term.mkTypeApp(skFunc, tyFvs.map(Type.mkVarType))
     val result = Term.mkTermApp(intermediate, fvs.map {case (i,t) => Term.mkBound(t,i)})
     assert(Term.wellTyped(result), s"skTerm Result not well-typed: ${result.pretty(sig)}\n" +
@@ -242,7 +242,7 @@ package object calculus {
     }
 
     // return the fresh Skolem symbol with context variables applied
-    val skKey = sig.freshSkolemDefined(substTerm, skTy, Signature.PropNoProp)
+    val skKey = sig.freshSkolemConst(skTy, Some(substTerm), Signature.PropNoProp)
     val skFunc = Term.mkAtom(skKey)
     val typeApps = Term.mkTypeApp(skFunc, tyFvs.map(Type.mkVarType))
     val termApps = Term.mkTermApp(typeApps, fvs.map { case (i, ty) => mkBound(ty, i) })

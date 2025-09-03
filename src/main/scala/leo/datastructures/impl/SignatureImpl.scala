@@ -194,26 +194,25 @@ class SignatureImpl extends Signature with Function1[Int, Signature.Meta] {
   // Skolem variables start with 'sk'
   var skolemVarCounter = 0
   val skolemVarPrefix = "sk"
-  /** Returns a fresh uninterpreted symbol of type `ty`. That symbol will be
-    * named `SKi` where i is some positive number. */
-  def freshSkolemConst(ty: Type, prop: Signature.SymbProp = Signature.PropNoProp): Key = synchronized {
-    assert(ty.typeVars.isEmpty)
-    while(exists(skolemVarPrefix + (skolemVarCounter +1).toString)) {
-      skolemVarCounter += 1
-    }
-    skolemVarCounter += 1
-    addUninterpreted(skolemVarPrefix + skolemVarCounter.toString, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
-  }
 
-  /** Returns a fresh defined symbol of type `ty` and with definition `defn`. That symbol will be
-    * named `SKi` where i is some positive number. */
-  def freshSkolemDefined(defn: Term, ty: Type, prop: Signature.SymbProp = Signature.PropNoProp): Key = synchronized {
+  /** Returns a fresh Skolem symbol of type `ty`.
+    *
+    * - If `dfn` is `None`, the symbol is introduced as an uninterpreted constant.
+    * - If `dfn` is `Some(term)`, the symbol is introduced as a defined symbol with
+    * definition `term`.
+    *
+    * The symbol will be named `SKi`, where `i` is a fresh positive number.
+    */
+  def freshSkolemConst(ty: Type, dfn: Option[Term] = None, prop: Signature.SymbProp = Signature.PropNoProp): Key = synchronized {
     assert(ty.typeVars.isEmpty)
     while (exists(skolemVarPrefix + (skolemVarCounter + 1).toString)) {
       skolemVarCounter += 1
     }
     skolemVarCounter += 1
-    addDefined(skolemVarPrefix + skolemVarCounter.toString, defn, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+    dfn match {
+      case Some(dfn0) => addDefined(skolemVarPrefix + skolemVarCounter.toString, dfn0, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+      case _ => addUninterpreted(skolemVarPrefix + skolemVarCounter.toString, ty, prop | Signature.PropSkolemConstant | Signature.PropStatus)
+    }
   }
 
   // Skolem variables start with 'tv'
