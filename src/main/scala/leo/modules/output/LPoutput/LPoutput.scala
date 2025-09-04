@@ -12,13 +12,10 @@ import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfCo
 import leo.modules.output.LPoutput.ModularProofEncoding.RenameCnfEncoding.encRenameCnf_conj
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
-import leo.modules.output.ToTPTP.definitionToTPTP
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
-import scala.collection.immutable.HashMap
 import scala.collection.mutable
-import scala.util.matching.Regex
 
 /**
   * Generation of the various files making up the Lambdapi encoding

@@ -8,7 +8,7 @@ import leo.modules.HOLSignature
 import leo.modules.HOLSignature._
 import leo.modules.output._
 import leo.modules.output.LPoutput.lpDatastructures._
-import leo.modules.output.ToTPTP.{collectChoice, collectForallTys}
+import leo.modules.output.ToTHF.{collectChoice, collectForallTys}
 import leo.modules.output.logger.Out
 
 import scala.collection.mutable
@@ -96,7 +96,7 @@ object Encodings {
   def type2LP (ty: Type, sig: Signature, prefix: Boolean = true):(lpOlType)={
     ty match {
       case BaseType(id) =>
-        val baseType = tptpEscapeExpression(sig(id).name)
+        val baseType = sig(id).name
         if (tptpDefinedTypeMap.keySet.contains(baseType)){
           (tptpDefinedTypeMap(baseType))
         }else{
@@ -110,7 +110,7 @@ object Encodings {
           encArgs = encArgs :+ encArg
         }
         throw new Exception(s"attempting to encode composed Type, this was never tested! \ninput was ${ty.pretty}\noutput would be ${lpOlMonoComposedType(lpConstantTerm(lpEscapeName(sig(id).name,sig)),encArgs).pretty}")
-        (lpOlMonoComposedType(lpConstantTerm(tptpEscapeExpression(sig(id).name)),encArgs))
+        (lpOlMonoComposedType(lpConstantTerm(sig(id).name),encArgs))
       case BoundType(scope) =>
         val tyName = "T" + intToName(scope-1)
         lpOlUserDefinedType(tyName)
