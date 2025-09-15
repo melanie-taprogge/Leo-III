@@ -1,6 +1,7 @@
 package leo.modules.output.LPoutput
 
 import leo.datastructures.{Int0, termArgs}
+import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
 
 /**
   *
@@ -15,36 +16,36 @@ object lpDatastructures {
 
   val monomorphic = true
 
+  final case class PrettyConfig(sigPrefix: Boolean = true, formulaPrefix: Boolean = true)
+
   abstract class lpStatement {
-    def pretty: String
+    def pretty (implicit prefix : PrettyConfig = PrettyConfig(false,false)): String
   }
 
   abstract class lpKeyword extends lpStatement
 
   case object lpOpaque extends lpKeyword {
-    override def pretty: String = "opaque"
+    override def pretty (implicit prefix : PrettyConfig): String = "opaque"
   }
 
   abstract class lpTerm extends lpStatement
 
-  abstract class lpConstants {
-    def pretty: String
-  }
+  abstract class lpConstants extends  lpTerm
 
   case object lpLambda extends lpConstants {
-    override def pretty: String = "λ"
+    override def pretty (implicit prefix : PrettyConfig): String = "λ"
   }
 
   case object lpPi extends lpConstants {
-    override def pretty: String = "Π"
+    override def pretty (implicit prefix : PrettyConfig): String = "Π"
   }
 
   case object lpArrow extends lpConstants {
-    override def pretty: String = "→"
+    override def pretty (implicit prefix : PrettyConfig): String = "→"
   }
 
   case object lpWildcard extends lpTerm {
-    override def pretty: String = "_"
+    override def pretty (implicit prefix : PrettyConfig): String = "_"
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -52,7 +53,7 @@ object lpDatastructures {
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 
   case class lpDeclaration(name: lpStatement, variables: Seq[lpTerm], typing: lpType, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpStatement{
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
 
       val typedImpArgs = implicitArgs.map {
         case lpTypedVar(term, ty) => s"[${term.pretty} : ${ty.pretty}]"
@@ -72,7 +73,7 @@ object lpDatastructures {
   }
 
   case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], maybeTyping: Option[lpMlType], proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier: Seq[lpKeyword]= Seq.empty) extends lpStatement {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
 
       val proofEnc = proof match {
         case _ : lpTerm =>
@@ -101,7 +102,7 @@ object lpDatastructures {
   }
 
   case class lpRule(symbol: lpTerm, variableIdentifier: Seq[lpOlUntypedVar], lambdaTerm: lpTerm) extends lpStatement {
-    override def pretty: String = s"rule ${symbol.pretty} ${variableIdentifier.map(var0 => var0.pretty).mkString(" ")} ↪ ${lambdaTerm.pretty};\n"
+    override def pretty (implicit prefix : PrettyConfig): String = s"rule ${symbol.pretty} ${variableIdentifier.map(var0 => var0.pretty).mkString(" ")} ↪ ${lambdaTerm.pretty};\n"
   }
   abstract class lpDefinedRules extends lpStatement {
 
@@ -123,7 +124,7 @@ object lpDatastructures {
     def term: lpTerm
     def rwLeft: Boolean
 
-    def pretty = term.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = term.pretty
   }
 
 
@@ -137,13 +138,14 @@ object lpDatastructures {
   }
 
   abstract class lpMlType extends lpType {
-    def pretty: String
   }
 
   case class lpMlDependType(vars: Seq[lpVariable], body: lpMlType) extends lpMlType {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val decVars = vars.map {
-        case v: lpTypedVar => v.tyDec
+        case v: lpTypedVar =>
+          val tyDec: String = s"(${v.name.pretty} : ${v.ty.lift2Meta.pretty})"
+          tyDec
         case v => v.pretty
       }
       val quantification = if (vars.nonEmpty) s"${lpPi.pretty} ${decVars.mkString(s", ${lpPi.pretty} ")}, " else ""
@@ -154,7 +156,7 @@ object lpDatastructures {
   }
 
   case class lpMlFunctionType(objects :Seq[lpMlType]) extends lpMlType {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       s"(${objects.map(ty => ty.pretty).mkString(s" ${lpArrow.pretty} ")})"
     }
 
@@ -163,7 +165,7 @@ object lpDatastructures {
   }
 
   case class lpClause(impBoundVars: Seq[Either[lpOlTypedVar, lpOlTyVar]], lits: Seq[lpOlTerm]) extends lpMlType {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val metaVars = impBoundVars.map{
         case Left(tyVar) => tyVar.asMlVar
         case Right(termVar) => termVar.asMlVar
@@ -182,28 +184,30 @@ object lpDatastructures {
   abstract class lpVariable extends lpTerm
 
   case class lpTypedVar(name: lpTerm, ty: lpType) extends lpVariable {
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
 
-    def tyDec: String = s"(${name.pretty} : ${ty.lift2Meta.pretty})"
+    //def tyDec: String = s"(${name.pretty()} : ${ty.lift2Meta.pretty})"
 
     def untyped: lpUntypedVar = lpUntypedVar(name)
   }
 
   case class lpUntypedVar(name: lpTerm) extends lpVariable {
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   case class lpConstantTerm(name: String) extends lpTerm {
-    override def pretty: String = name
+    override def pretty (implicit prefix : PrettyConfig): String = name
   }
 
   case class lpLambdaTerm(vars: Seq[lpVariable], body: lpTerm) extends lpTerm {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       if (vars.isEmpty){
         s"${body.pretty}"
       }else{
         val decVars = vars.map {
-          case v: lpTypedVar => v.tyDec
+          case v: lpTypedVar =>
+            val tyDec: String = s"(${v.name.pretty} : ${v.ty.lift2Meta.pretty})"
+            tyDec
           case v: lpOlTypedVar => v.tyDec
           case v: lpOlTyVar =>
             v.tyDec
@@ -215,7 +219,7 @@ object lpDatastructures {
   }
 
   case class lpFunctionApp(f: lpTerm, args: Seq[lpTerm]= Seq.empty, implicitArgs: Seq[lpTerm]= Seq.empty) extends lpTerm {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val gap1 = if(implicitArgs.isEmpty) "" else " "
       val gap2 = if(args.isEmpty) "" else " "
       s"(${f.pretty}$gap1${implicitArgs.map(arg => s"[${arg.pretty}]").mkString(" ")}$gap2${args.map(_.pretty).mkString(" ")})"
@@ -235,40 +239,40 @@ object lpDatastructures {
   abstract class lpOlTypeConstants extends lpType
 
   case object lpOlTypeConstructor extends lpOlTypeConstants {
-    override def pretty: String = "⤳"
-    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpOlTypeConstructor.pretty} to meta level")
+    override def pretty (implicit prefix : PrettyConfig): String = "⤳"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpOlTypeConstructor.pretty(PrettyConfig(false,false))} to meta level")
   }
 
   case object lpSet extends lpMlType {
-    override def pretty: String = "Set"
+    override def pretty (implicit prefix : PrettyConfig): String = "Set"
     override def lift2Meta: lpMlType = lpSet
 
     //override def lift2Poly: lpOlPolyType = throw new Exception(s"attempting to lift ${lpSet.pretty} to poly")
   }
 
   case object lpScheme extends lpOlTypeConstants {
-    override def pretty: String = "PolySet"
-    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpScheme.pretty} to meta level")
+    override def pretty (implicit prefix : PrettyConfig): String = "PolySet"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpScheme.pretty(PrettyConfig(false,false))} to meta level")
   }
 
   case object lpPrf extends lpOlTypeConstants {
-    override def pretty: String = "π"
-    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpPrf.pretty} to meta level")
+    override def pretty (implicit prefix : PrettyConfig): String = "π"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpPrf.pretty(PrettyConfig(false,false))} to meta level")
   }
 
   case object lpSet2Schme extends lpOlTypeConstants {
-    override def pretty: String = "mono"
-    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpScheme.pretty} to meta level")
+    override def pretty (implicit prefix : PrettyConfig): String = "mono"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpScheme.pretty(PrettyConfig(false,false))} to meta level")
   }
 
   case object lpEl extends lpMlType {
-    override def pretty: String = "τ"
-    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpEl.pretty} to meta level")
+    override def pretty (implicit prefix : PrettyConfig): String = "τ"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpEl.pretty(PrettyConfig(false,false))} to meta level")
   }
 
   case object lpEls extends lpMlType {
-    override def pretty: String = "τ"
-    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpEls.pretty} to meta level")
+    override def pretty (implicit prefix : PrettyConfig): String = "τ"
+    override def lift2Meta: lpMlType = throw new Exception(s"attempting to lift ${lpEls.pretty(PrettyConfig(false,false))} to meta level")
   }
 
   abstract class lpOlType extends lpType {
@@ -280,7 +284,7 @@ object lpDatastructures {
   abstract class lpOlMonoType extends lpOlType
 
   case class lpliftedObjectType(ty: lpOlType) extends lpMlType {
-    def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       ty match {
         case _ :lpOlMonoType => s"${lpEl.pretty} ${ty.pretty}"
         case _ :lpOlPolyType => s"${lpEls.pretty} ${ty.pretty}"
@@ -292,7 +296,7 @@ object lpDatastructures {
   }
 
   case class lpliftedMonoType(ty: lpOlMonoType) extends lpOlPolyType {
-    def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       if (monomorphic) s"${ty.pretty}"
       else s"${lpSet2Schme.pretty} ${ty.pretty}"
     }
@@ -308,13 +312,13 @@ object lpDatastructures {
   abstract class lpOlSimpleType extends lpOlMonoType
 
   case class lpOlUserDefinedType(t: String) extends lpOlSimpleType{
-    def pretty: String = t
+    override def pretty(implicit prefix: PrettyConfig): String = t
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType(t))
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOlUserDefinedType(t))
   }
 
   case class lpOlUserDefinedPolyType(t: String) extends lpOlPolyType {
-    def pretty: String = t
+    override def pretty (implicit prefix : PrettyConfig): String = t
 
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedPolyType(t))
 
@@ -322,7 +326,7 @@ object lpDatastructures {
   }
 
   case class lpOlUserDefinedMonoType(t: String) extends lpOlMonoType {
-    def pretty: String = t
+    override def pretty (implicit prefix : PrettyConfig): String = t
 
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType(t))
 
@@ -330,30 +334,34 @@ object lpDatastructures {
   }
 
   case object lpOtype extends lpOlSimpleType {
-    def pretty: String = "o"
+    override def pretty (implicit prefix : PrettyConfig): String = "o"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType("o"))
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOtype)
   }
 
   case object lpItype extends lpOlSimpleType {
-    def pretty: String = "ι"
+    override def pretty (implicit prefix : PrettyConfig): String = "ι"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlUserDefinedType("ι"))
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpItype)
   }
 
-  val tptpDefinedTypeMap: Map[String, lpOlMonoType] = Map(
+  val lpDefOlTypes: Map[String, lpOlMonoType] = Map(
     "$o" -> lpOtype,
-    "$i" -> lpItype,
-    "$int" -> lpIntType)
+    "$i" -> lpItype
+  )
+
+  val tptpDefinedTypeMap: Map[String, lpOlMonoType] = Map(
+    "$int" -> lpIntType
+  )
 
   case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlMonoType {
-    def pretty: String = s"(${args.map(t => t.pretty).mkString(s" ${lpOlTypeConstructor.pretty} ")})"
+    override def pretty (implicit prefix : PrettyConfig): String = s"(${args.map(t => t.pretty).mkString(s" ${lpOlTypeConstructor.pretty} ")})"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlFunctionType(args))
     override def lift2Poly: lpOlPolyType = (lpliftedMonoType(lpOlFunctionType(args)))
   }
 
   case class lpOlMonoComposedType(name: lpConstantTerm, args: Seq[lpType]) extends lpOlMonoType { //todo ?
-    def pretty: String = s"(${name.pretty} ${args.map(arg => arg.pretty).mkString(" ")})"
+    override def pretty (implicit prefix : PrettyConfig): String = s"(${name.pretty} ${args.map(arg => arg.pretty).mkString(" ")})"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlMonoComposedType(name, args))
 
     override def lift2Poly: lpOlPolyType = {
@@ -370,7 +378,7 @@ object lpDatastructures {
   }
 
   case class liftedProp(t: lpOlTerm) extends lpMlType {
-    override def pretty: String = s"${lpPrf.pretty} ${t.pretty}"
+    override def pretty (implicit prefix : PrettyConfig): String = s"${lpPrf.pretty} ${t.pretty}"
 
     // change nothing when encoding as meta type
     override def lift2Meta: lpMlType = liftedProp(t)
@@ -378,14 +386,17 @@ object lpDatastructures {
 
   ///////////// TPTP dedined symbols
   case class lpInt(n: Int0) extends lpOlTerm {
-    override def pretty: String = s"int_$n"
+    override def pretty (implicit prefix : PrettyConfig): String = {
+      val baseName = s"int_$n"
+      if (prefix.sigPrefix) s"$abbreviationSignatureFile.$baseName" else baseName
+    }
 
     override def prf: lpMlType = throw new Exception(s"trying to provide proof of an integer in LP encoding")
   }
 
   case object lpIntType extends lpOlMonoType {
-    override def pretty: String = s"tptp_int"
-
+    val baseName = "tptp_int"
+    override def pretty (implicit prefix : PrettyConfig): String = if (prefix.sigPrefix) s"${abbreviationSignatureFile}.$baseName" else baseName
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpIntType)
     override def lift2Meta: lpMlType = lpliftedObjectType(lpIntType)
   }
@@ -393,7 +404,7 @@ object lpDatastructures {
 
   case class lpTptpOperator(name: String, ty: lpOlType, tyVars: Seq[lpOlType]) extends lpOlTerm{
 
-    override def pretty: String = name
+    override def pretty (implicit prefix : PrettyConfig): String = name
     def dec : lpDeclaration = lpDeclaration(lpConstantTerm(name),tyVars,ty.lift2Meta)
 
     override def prf: lpMlType = throw new Exception(s"trying to provide proof of an integer operator in LP encoding")
@@ -406,13 +417,13 @@ object lpDatastructures {
   abstract class lpOlUnappliedConnective(val base: lpOlConnective) extends lpOlTerm {
     def unapplied: lpOlUnappliedConnective = this
 
-    override def pretty: String = s"(${base.pretty})"
+    override def pretty (implicit prefix : PrettyConfig): String = s"(${base.pretty})"
 
     override def prf: lpMlType = throw new Exception("trying to output proof for unapplied connective")
   }
 
   abstract class lpOlConnective extends lpTerm {
-    def pretty: String
+    //override def pretty (implicit prefix : PrettyConfig): String
 
     def firstArgImp: Boolean
 
@@ -422,35 +433,35 @@ object lpDatastructures {
 
   abstract class lpOlUnaryConnective extends lpOlConnective
 
-  final case object lpNot extends lpOlUnaryConnective {override def pretty: String = "¬"; override def firstArgImp: Boolean = false}
+  final case object lpNot extends lpOlUnaryConnective {override def pretty (implicit prefix : PrettyConfig): String = "¬"; override def firstArgImp: Boolean = false}
 
   abstract class lpOlUntypedBinaryConnective extends lpOlConnective
 
   abstract class lpOlTypedBinaryConnective extends lpOlConnective
 
-  final case object lpOr extends lpOlUntypedBinaryConnective {override def pretty: String = "∨"; override def firstArgImp: Boolean = false}
+  final case object lpOr extends lpOlUntypedBinaryConnective {override def pretty (implicit prefix : PrettyConfig): String = "∨"; override def firstArgImp: Boolean = false}
 
-  final case object lpAnd extends lpOlUntypedBinaryConnective {override def pretty: String = "∧"; override def firstArgImp: Boolean = false}
+  final case object lpAnd extends lpOlUntypedBinaryConnective {override def pretty (implicit prefix : PrettyConfig): String = "∧"; override def firstArgImp: Boolean = false}
 
-  final case object lpImp extends lpOlUntypedBinaryConnective {override def pretty: String = "⇒"; override def firstArgImp: Boolean = false}
+  final case object lpImp extends lpOlUntypedBinaryConnective {override def pretty (implicit prefix : PrettyConfig): String = "⇒"; override def firstArgImp: Boolean = false}
 
-  final case object lpEq extends lpOlTypedBinaryConnective {override def pretty: String = "="; override def firstArgImp: Boolean = true}
+  final case object lpEq extends lpOlTypedBinaryConnective {override def pretty (implicit prefix : PrettyConfig): String = "="; override def firstArgImp: Boolean = true}
 
-  final case object lpInEq extends lpOlTypedBinaryConnective {override def pretty: String = "≠"; override def firstArgImp: Boolean = true}
+  final case object lpInEq extends lpOlTypedBinaryConnective {override def pretty (implicit prefix : PrettyConfig): String = "≠"; override def firstArgImp: Boolean = true}
 
   abstract class lpOlBinder extends lpOlConnective
 
-  final case object lpOlExists extends lpOlBinder {override def pretty: String = "∃"; override def firstArgImp: Boolean = true}
+  final case object lpOlExists extends lpOlBinder {override def pretty (implicit prefix : PrettyConfig): String = "∃"; override def firstArgImp: Boolean = true}
 
-  final case object lpOlForAll extends lpOlBinder {override def pretty: String = "∀"; override def firstArgImp: Boolean = true}
+  final case object lpOlForAll extends lpOlBinder {override def pretty (implicit prefix : PrettyConfig): String = "∀"; override def firstArgImp: Boolean = true}
 
-  final case object lpChoice extends lpOlBinder {override def pretty: String = "ε"; override def firstArgImp: Boolean = false}
+  final case object lpChoice extends lpOlBinder {override def pretty (implicit prefix : PrettyConfig): String = "ε"; override def firstArgImp: Boolean = false}
 
 
   ///////////// NATS
 
   case class lpNum(n: Int) extends lpOlTerm {
-    override def pretty: String = n.toString
+    override def pretty (implicit prefix : PrettyConfig): String = n.toString
 
     override def prf: liftedProp = throw new Exception(s"attempting to lift number encoding to meta level")
   }
@@ -458,22 +469,24 @@ object lpDatastructures {
   ///////////// LISTS
 
   case object lpListConst extends lpTerm {
-    override def pretty: String = "⸬"
+    override def pretty (implicit prefix : PrettyConfig): String = "⸬"
   }
 
   case object lpListLast extends lpTerm {
-    override def pretty: String = "□"
+    override def pretty (implicit prefix : PrettyConfig): String = "□"
   }
 
   case class lpList(els : Seq[lpOlTerm]) extends lpOlTerm {
 
-    val listEnd = els match {
-      case Seq() =>
-        lpListLast.pretty
-      case _ =>
-        f" ${lpListConst.pretty} ${lpListLast.pretty}"
+    override def pretty (implicit prefix : PrettyConfig): String ={
+      val listEnd = els match {
+        case Seq() =>
+          lpListLast.pretty
+        case _ =>
+          f" ${lpListConst.pretty} ${lpListLast.pretty}"
+      }
+      s"(${els.map(el => el.pretty).mkString(f" ${lpListConst.pretty} ")}${listEnd})"
     }
-    override def pretty: String = s"(${els.map(el => el.pretty).mkString(f" ${lpListConst.pretty} ")}${listEnd})"
 
     override def prf: liftedProp = throw new Exception(s"attempting to lift list encoding to meta level")
   }
@@ -481,37 +494,37 @@ object lpDatastructures {
   ///////////// CONSTANTS
 
   case object lpOlWildcard extends lpOlTerm {
-    override def pretty: String = "_"
+    override def pretty (implicit prefix : PrettyConfig): String = "_"
 
     override def prf: liftedProp = liftedProp(lpOlWildcard)
   }
 
   case object lpOlTop extends lpOlTerm {
-    override def pretty: String = "⊤"
+    override def pretty (implicit prefix : PrettyConfig): String = "⊤"
     override def prf: liftedProp = liftedProp(lpOlTop)
   }
 
   case object lpOlTop_i extends lpOlTerm {
-    override def pretty: String = "⊤ᵢ"
+    override def pretty (implicit prefix : PrettyConfig): String = "⊤ᵢ"
 
     override def prf: liftedProp = throw new Exception("trying to print prf for ⊤ᵢ")
   }
 
   case object lpOlBot extends lpOlTerm {
-    override def pretty: String = "⊥"
+    override def pretty (implicit prefix : PrettyConfig): String = "⊥"
     override def prf: liftedProp = liftedProp(lpOlBot)
   }
 
   case object lpElWitness extends lpOlTerm {
-    override def pretty: String = "el"
+    override def pretty (implicit prefix : PrettyConfig): String = "el"
 
-    override def prf: liftedProp = throw new Exception(s"trying to lift ${lpElWitness.pretty} to meta")
+    override def prf: liftedProp = throw new Exception(s"trying to lift ${lpElWitness.pretty(PrettyConfig(false,false))} to meta")
   }
 
   /*case class lpWitness(ty: lpType) extends lpOlTerm {
 
     if (! ty.isInstanceOf[lpOlType]) {throw new Exception(s"trying to create a witness of meta-level type ${ty.pretty}")}
-    override def pretty: String = s"(${lpElWitness.pretty} ${ty.pretty})"
+    override def pretty (implicit prefix : PrettyConfig): String = s"(${lpElWitness.pretty} ${ty.pretty})"
     override def prf: liftedProp =
       if (ty == lpOtype) liftedProp(lpWitness(ty))
       else throw new Exception(s"trying to encode ${lpWitness(ty).pretty} as a proof")
@@ -519,24 +532,24 @@ object lpDatastructures {
 
    */
   case class lpWitness(ty: lpOlType) extends lpOlTerm {
-    override def pretty: String =
+    override def pretty (implicit prefix : PrettyConfig): String =
       s"(${lpElWitness.pretty} ${ty.pretty})"
 
     override def prf: liftedProp = {
       if (ty == lpOtype) liftedProp(lpWitness(ty))
-      else throw new Exception(s"trying to encode ${lpWitness(ty).pretty} as a proof")
+      else throw new Exception(s"trying to encode ${lpWitness(ty).pretty(PrettyConfig(false,false))} as a proof")
     }
   }
   object lpWitness {
     def fromAnyType(ty: lpType): lpWitness = ty match {
       case t: lpOlType => lpWitness(t)
       case lpliftedObjectType(t0) => lpWitness(t0)
-      case _ => throw new Exception(s"trying to generate witness term for a type that is not an encoded HOL type: ${ty.pretty}")
+      case _ => throw new Exception(s"trying to generate witness term for a type that is not an encoded HOL type: ${ty.pretty(PrettyConfig(false,false))}")
     }
   }
 
   case object lpOlNothing extends lpOlTerm {
-    override def pretty: String = ""
+    override def pretty (implicit prefix : PrettyConfig): String = ""
 
     override def prf: liftedProp = liftedProp(lpOlNothing)
   }
@@ -545,23 +558,23 @@ object lpDatastructures {
     "$false" -> lpOlBot,
     "$true" -> lpOlTop)
 
-  case class lpOlConstantTerm(a : String) extends lpOlTerm{
-    override def pretty: String = a
-    override def prf: liftedProp = liftedProp(lpOlConstantTerm(a))
+  case class lpOlConstantTerm(name : String) extends lpOlTerm{
+    override def pretty (implicit prefix : PrettyConfig): String = name
+    override def prf: liftedProp = liftedProp(lpOlConstantTerm(name))
   }
 
 
   ///////////// VARIABLES
 
   case class lpRuleVariable(v: lpOlConstantTerm) extends lpVariable {
-    override def pretty: String = s"(${v.pretty})"
+    override def pretty (implicit prefix : PrettyConfig): String = s"(${v.pretty})"
   }
 
   case class lpOlTypedVar(name: lpOlConstantTerm, ty: lpOlType) extends lpOlTerm {
 
-    def tyDec: String = s"(${name.pretty}: ${ty.lift2Meta.pretty})"
-    override def pretty: String = name.pretty
-    def asMlVar: lpTypedVar = lpTypedVar(lpConstantTerm(name.pretty),ty.lift2Meta)
+    def tyDec (implicit prefix : PrettyConfig): String = s"(${name.pretty}: ${ty.lift2Meta.pretty})"
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
+    def asMlVar: lpTypedVar = lpTypedVar(lpConstantTerm(name.name),ty.lift2Meta)
 
     /*
     def lift2Meta: lpTypedVar = {
@@ -581,8 +594,8 @@ object lpDatastructures {
 
   case class lpOlTyVar(name:String) extends lpOlMonoType {
 
-    def tyDec: String = s"($name: ${lpSet.pretty})"
-    override def pretty: String = name
+    def tyDec (implicit prefix : PrettyConfig): String = s"($name: ${lpSet.pretty})"
+    override def pretty (implicit prefix : PrettyConfig): String = name
     
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlTyVar(name:String))
 
@@ -592,9 +605,9 @@ object lpDatastructures {
   }
 
   case class lpOlUntypedVar(name: lpTerm) extends lpOlTerm {
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
 
-    def lift2Meta: lpUntypedVar = lpUntypedVar(lpConstantTerm(name.pretty))
+    def lift2Meta (implicit prefix : PrettyConfig): lpUntypedVar = lpUntypedVar(lpConstantTerm(name.pretty))
 
     override def prf: liftedProp = liftedProp(lpOlUntypedVar(name))
   }
@@ -602,7 +615,7 @@ object lpDatastructures {
   ///////////// TERMS
 
   case class lpOlLambdaTerm(vars: Seq[Either[lpOlTypedVar,lpOlTyVar]], body: lpOlTerm) extends lpOlTerm {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val decVars = vars.map{
         case Left(tyVar) => tyVar.tyDec
         case Right(termVar) => termVar.tyDec
@@ -612,7 +625,7 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlLambdaTerm(vars, body))
   }
   case class lpOlFunctionApp(f: lpOlTerm, args: Seq[Either[lpOlTerm,lpOlType]], implicitArgs: Seq[Either[lpOlTerm,lpOlType]] = Seq.empty) extends lpOlTerm{
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val prettyArgs = args.map(arg => arg match {
         case Left(term) => term.pretty
         case Right(ty) => ty.pretty
@@ -641,17 +654,17 @@ object lpDatastructures {
   abstract class lpOlConnectiveTerm extends lpOlTerm
 
   case class lpOlUnaryConnectiveTerm(connective: lpOlUnaryConnective, body: lpOlTerm) extends lpOlConnectiveTerm{
-    override def pretty: String = s"(${connective.pretty} ${body.pretty})"
+    override def pretty (implicit prefix : PrettyConfig): String = s"(${connective.pretty} ${body.pretty})"
     override def prf: liftedProp = liftedProp(lpOlUnaryConnectiveTerm(connective, body))
   }
 
   case class lpOlUntypedBinaryConnectiveTerm(connective: lpOlUntypedBinaryConnective, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
-    override def pretty: String = s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
+    override def pretty (implicit prefix : PrettyConfig): String = s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
     override def prf: liftedProp = liftedProp(lpOlUntypedBinaryConnectiveTerm(connective, lhs, rhs))
   }
 
   case class lpOlUntypedBinaryConnectiveTerm_multi(connective: lpOlUntypedBinaryConnective, args: Seq[lpOlTerm]) extends lpOlConnectiveTerm {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val term = s"${args.map(arg => arg.pretty).mkString(s" ${connective.pretty} ")}"
       if (args.length == 1) term else s"($term)"
     }
@@ -659,7 +672,7 @@ object lpDatastructures {
   }
 
   case class lpOlTypedBinaryConnectiveTerm(connective: lpOlTypedBinaryConnective, ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       if (monomorphic) {
         //if (connective == lpInEq) lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,ty, lhs, rhs)).pretty
         //else s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
@@ -677,7 +690,7 @@ object lpDatastructures {
   }
 
   case class lpOlMonoQuantifiedTerm(quantifier: lpOlBinder, variable: lpOlTypedVar, body: lpOlTerm, explicitlyType:Boolean = false) extends lpOlTerm {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       // if partially applied, the variable is a function
       if (explicitlyType) {
         val ty0 = variable.ty match {
@@ -705,7 +718,7 @@ object lpDatastructures {
       }
     }
 
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       quantEachVar(quantifier, variables, body).pretty
     }
 
@@ -725,7 +738,7 @@ object lpDatastructures {
 
     def toProofScrips : lpProofScript
 
-    private[lpDatastructures] def openCurlyBracket : String
+    private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig) : String
 
   }
 
@@ -736,8 +749,8 @@ object lpDatastructures {
 
     override def toProofScrips: lpProofScript = throw new Exception(s"Error: trying to convert the single comment `$comment` to a proof script")
 
-    override def pretty: String = s"$tabs// $comment"
-    override private[lpDatastructures] def openCurlyBracket : String = s"$tabs{// $comment"
+    override def pretty (implicit prefix : PrettyConfig): String = s"$tabs// $comment"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{// $comment"
   }
 
   case class lpProofScriptStringProof(proof: String, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
@@ -748,9 +761,9 @@ object lpDatastructures {
 
     override def toProofScrips: lpProofScript = throw new Exception(s"Error: trying to convert the single comment `$proof` to a proof script")
 
-    override def pretty: String = s"$tabs$proof"
+    override def pretty (implicit prefix : PrettyConfig): String = s"$tabs$proof"
 
-    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{$proof"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{$proof"
   }
 
   case class lpProofScriptAdmit(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
@@ -761,9 +774,9 @@ object lpDatastructures {
 
     override def toProofScrips: lpProofScript = throw new Exception(s"Error: trying to convert the single comment `admit` to a proof script")
 
-    override def pretty: String = s"${tabs}admit"
+    override def pretty (implicit prefix : PrettyConfig): String = s"${tabs}admit"
 
-    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{admit"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{admit"
   }
 
   case class lpSimplify(symbolsToUnfold: Set[lpConstantTerm], tab: Int = 0)  extends lpProofScriptStep(tab: Int) {
@@ -772,9 +785,9 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpSimplify(symbolsToUnfold, tab)))
 
     val tabs = "\t" * tab
-    override def pretty: String = s"${tabs}simplify ${symbolsToUnfold.map(sym => sym.pretty).mkString(" ")}"
+    override def pretty (implicit prefix : PrettyConfig): String = s"${tabs}simplify ${symbolsToUnfold.map(sym => sym.pretty).mkString(" ")}"
 
-    override def openCurlyBracket: String = s"${tabs}{simplify ${symbolsToUnfold.map(sym => sym.pretty).mkString(" ")}"
+    override def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{simplify ${symbolsToUnfold.map(sym => sym.pretty).mkString(" ")}"
   }
 
   case class lpProofScript(steps: Seq[lpProofScriptStep], tab: Int = 0) extends lpProofScriptStep(tab: Int) {
@@ -782,17 +795,17 @@ object lpDatastructures {
 
     def addTab(i: Int): lpProofScript = lpProofScript(steps, tab + i)
 
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       s"${steps.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
     }
 
-    override private[lpDatastructures] def openCurlyBracket: String = {
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = {
       if (steps.length == 1) s"${steps.head.addTab(tab).openCurlyBracket}"
       else if (steps.length == 0) "there shoudl be nothing here" //throw new Exception(s"trying to give curly brackets to empty list")
       else s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
     }
 
-    def prettyCurlyBrackets: String = {
+    def prettyCurlyBrackets (implicit prefix : PrettyConfig): String = {
       if (steps.length == 1) s"${steps.head.addTab(tab).openCurlyBracket}}"
       else if (steps.length == 0) "there shoudl be nothing here" //throw new Exception(s"trying to give curly brackets to empty list")
       else s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}}"
@@ -804,7 +817,7 @@ object lpDatastructures {
 
   case class lpRefine(t: lpTerm, subproofs: Seq[lpProofScript] = Seq.empty, tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpRefine = lpRefine(t, subproofs, tab + i)
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs = "\t"*tab
       //s"${tabs}have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}"
       s"${tabs}refine ${t.pretty}${subproofs.map(prf => s"\n${prf.addTab(tab+1).prettyCurlyBrackets}").mkString("")}"
@@ -812,7 +825,7 @@ object lpDatastructures {
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket: String = {
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = {
       // s"$tabs{${lpRefine(t).pretty}" (old version)
       // s"${tabs}{have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}" (haveStep for reference)
       s"${tabs}{refine ${t.pretty}${subproofs.map(prf => s"\n${prf.addTab(tab+1).prettyCurlyBrackets}").mkString("")}"
@@ -825,13 +838,13 @@ object lpDatastructures {
   case class lpHave(name: String, ty: lpMlType, proofScript: lpProofScript,tab: Int = 0) extends lpProofScriptStep(tab: Int) {
 
     def addTab(i : Int): lpHave = lpHave(name,ty, proofScript, tab + i)
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t"*tab
       s"${tabs}have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}"
     }
 
     val tabs = "\t" * tab
-    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}" //s"$tabs{${lpHave(name,ty, proofScript).pretty}"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}" //s"$tabs{${lpHave(name,ty, proofScript).pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpHave(name,ty, proofScript, tab)))
   }
@@ -840,20 +853,20 @@ object lpDatastructures {
 
     def addTab(i: Int): lpEval = lpEval(tacticTerm, tab + i)
 
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t" * tab
       s"${tabs}eval ${tacticTerm.pretty}"
     }
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{eval ${tacticTerm.pretty}"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{eval ${tacticTerm.pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm: lpTerm, tab)))
   }
 
   case class lpRewritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       s".[${patternVar.pretty} in ${pattern.pretty}]"
     }
   }
@@ -869,11 +882,11 @@ object lpDatastructures {
           val patternStr = if (rewritePattern0.isDefined) s"\"${rewritePattern0.get}\"" else s"\"\""
           val sideStr = if (rwRhs) s"\"left\"" else s"\"\""
           lpOlFunctionApp(lpOlConstantTerm(asOlTerm),Seq(Left(lpOlConstantTerm(sideStr)), Left(lpOlConstantTerm(patternStr)),Left(t)))
-        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${rewriteTerm.pretty} to $asOlTerm")
+        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${rewriteTerm.pretty(PrettyConfig(false,false))} to $asOlTerm")
       }
     }
 
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t" * tab
       val maybeLeft: String = if(rwRhs) " left " else ""
       val rewritePattern = if (rewritePattern0.isDefined) s"${rewritePattern0.get.pretty} " else ""
@@ -881,20 +894,20 @@ object lpDatastructures {
     }
 
     val tabs = "\t" * tab
-    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm, rwRhs).pretty}"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm, rwRhs).pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab)))
   }
 
   case class lpReflexivity(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
     def addTab(i : Int): lpReflexivity = lpReflexivity(tab + i)
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t" * tab
       s"${tabs}reflexivity"
     }
 
     val tabs = "\t" * tab
-    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpReflexivity()}"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{${lpReflexivity()}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpReflexivity(tab)))
   }
@@ -903,11 +916,11 @@ object lpDatastructures {
     def addTab(i : Int): lpAssume = lpAssume(vars, tab + i)
 
     val tabs: String = "\t" * tab
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       s"${tabs}assume ${vars.map(var0 => var0.pretty).mkString(" ")}"
     }
 
-    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{${lpAssume(vars).pretty}"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{${lpAssume(vars).pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpAssume(vars, tab)))
   }
@@ -917,15 +930,15 @@ object lpDatastructures {
 
     val tabs: String = "\t" * tab
 
-    def pretty0: String = {
+    def pretty0 (implicit prefix : PrettyConfig): String = {
       s"set ${name} ≔ ${dfn.pretty}"
     }
 
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       s"${tabs}${lpSetTac(name, dfn, tab).pretty0}"
     }
 
-    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{${lpSetTac(name, dfn, tab).pretty0}"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{${lpSetTac(name, dfn, tab).pretty0}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpSetTac(name, dfn, tab)))
   }
@@ -933,14 +946,14 @@ object lpDatastructures {
   case class lpTacSimplify(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
     def addTab(i: Int): lpTacSimplify = lpTacSimplify(tab + i)
 
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t" * tab
       s"${tabs}simplify"
     }
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket: String = s"${tabs}{simplify"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{simplify"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpTacSimplify(tab)))
   }
@@ -953,18 +966,18 @@ object lpDatastructures {
     val olTermApp = {
       stepToRepeat match {
         case t: lpOlTerm => lpOlFunctionApp(lpOlConstantTerm(asOlTerm), Seq(Left(t)))
-        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${stepToRepeat.pretty} to $asOlTerm")
+        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${stepToRepeat.pretty(PrettyConfig(false,false))} to $asOlTerm")
       }
     }
 
-    override def pretty: String = {
+    override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t" * tab
       s"${tabs}repeat ${stepToRepeat.pretty}"
     }
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket: String = s"$tabs{repeat ${stepToRepeat.pretty}"
+    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{repeat ${stepToRepeat.pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRepeat(stepToRepeat, tab)))
   }

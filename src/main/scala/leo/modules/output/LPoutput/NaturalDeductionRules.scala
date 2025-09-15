@@ -38,7 +38,7 @@ object NaturalDeductionRules {
 
     // todo: encode properly
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptCommentLine("    assume T x y h1 p h2;\n    have H : Prf (y = x)\n        {have H_2: Prf(x = x)\n            {assume p2 h3;\n            refine h3};\n        refine (h1 (λ z, z = x)) H_2};\n    refine H p h2")))
-    override def pretty: String = s"${lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(T)).pretty}builtin \"eqind\" ≔ ${name.pretty};\n" //todo: pass linking to builtin differently
+    override def pretty (implicit prefix : PrettyConfig): String = s"${lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(T)).pretty}builtin \"eqind\" ≔ ${name.pretty};\n" //todo: pass linking to builtin differently
 
     def instanciate(T0: lpOlPolyType, x0: lpOlTerm, y0: lpOlTerm, prfXeqY0: Option[lpTerm], p0: Option[lpOlTerm], prfPy0: Option[lpTerm]): lpFunctionApp = {
       val prfXeqY = prfXeqY0 match {
@@ -85,7 +85,7 @@ object NaturalDeductionRules {
     override def ty: lpMlType = lpMlFunctionType(Seq(x.prf,lpOlUntypedBinaryConnectiveTerm(lpOr,x,y).prf))
     override def dec: lpDeclaration = lpDeclaration(name, Seq(x,y), ty)
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptCommentLine("    assume x y h1 b h2 h3;\n    refine h2 h1")))
-    override def pretty: String = lpDefinition(name, Seq(x,y), Some(ty), proof).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(x,y), Some(ty), proof).pretty
 
     def instanciate(x0: lpOlTerm, y0: lpOlTerm, PrfX: Option[lpTerm]): lpFunctionApp = {
       val arg = PrfX match {
@@ -110,7 +110,7 @@ object NaturalDeductionRules {
 
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptCommentLine("    assume x y h1 b h2 h3;\n    refine h3 h1")))
 
-    override def pretty: String = lpDefinition(name, Seq(x, y), Some(ty), proof).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(x, y), Some(ty), proof).pretty
 
     def instanciate(x0: lpOlTerm, y0: lpOlTerm, PrfY: Option[lpTerm]): lpFunctionApp = {
       val arg = PrfY match {
@@ -136,7 +136,7 @@ object NaturalDeductionRules {
 
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptCommentLine("    assume x y z h1 h2 h3;\n    refine h3 z h1 h2")))
 
-    override def pretty: String = lpDefinition(name, Seq(x, y, z), Some(ty), proof).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(x, y, z), Some(ty), proof).pretty
 
     def instanciate(x0: lpOlTerm, y0: lpOlTerm, z0: lpOlTerm, PrfXZ: Option[lpTerm] = None, PrfYZ: Option[lpTerm] = None, PrfXorY: Option[lpTerm] = None): lpFunctionApp = {
       var args: Seq[lpTerm] = Seq(x0, y0, z0)

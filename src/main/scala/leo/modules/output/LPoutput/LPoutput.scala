@@ -143,42 +143,9 @@ object LPoutput {
     if ((cl.role != Role_Conjecture) && needsEnc && (rule != null)) {
       rule match {
 
-        /*
-        case leo.modules.calculus.RenameCNF =>
-          // first, we check weather the
-          // if the conjunction contains only one clause, there is no need for two seperate steps
-          val encode2steps = cl.furtherInfo.cnfInfo.derivedClauses.length > 1
-          val (con_ref,stepsConj,updateMap,addSymbols,skDefs) : (lpConstantTerm,Seq[lpProofScriptStep], Map[lpConstantTerm, lpConstantTerm], Set[Signature.Key],Seq[lpDeclaration]) =
-            if (!stepInfo.clausifiedSteps.keySet.contains(parentInLpEncID.head)){
-              val cnf_stepName = if (encode2steps) {
-                val unPrefix = s"${parentInLpEncID.head.name.stripPrefix("F.")}"
-                // If the name is a lp-Safe name, we have to insert "_cnf" into the brackets
-                val pattern: Regex = raw"""\{\|(.+?)\|\}|(.+)""".r
-                unPrefix match {
-                  case pattern(inner, null) =>
-                    s"{|${inner}_cnf|}"
-                  case pattern(null, plain) =>
-                    s"${plain}_cnf"
-                  case _ =>
-                    s"${unPrefix}_cnf"
-                }
-              } else stepName
-              val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
-              val stepsCNF = toProofStep(cnf_stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
-              (lpConstantTerm(cnf_stepName),stepsCNF,Map(parentInLpEncID.head -> lpConstantTerm(cnf_stepName)),encodingCNF._4,encodingCNF._5)
-            }else (stepInfo.clausifiedSteps(parentInLpEncID.head),Seq(),Map.empty,Set.empty,Seq.empty)
-          val outputInfo = new lpProofStepInfo(updateMap,newIdenticalSteps,newTptpDefinedSymbols,addSymbols,skDefs)
-          // the encoding of the step where we pick one of the clauses in the conjunction
-          val stepsPickupStep : Seq[lpProofScriptStep] = if (encode2steps) {
-            val encPickStep = encRenameCnf_cl(cl,con_ref,cl.furtherInfo.cnfInfo,sig)
-            toProofStep(stepName,encStep,"RenameCNF_select",encPickStep,None)
-          } else Seq()
-          (stepsConj ++ stepsPickupStep,outputInfo)
-
-         */
-
         case _ =>
           val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols)
+          Out.lp_debug_info(s"new symbols: ${newTptpDefinedSymbols.map(_.pretty)}")
 
           rule match {
             case leo.modules.calculus.CnfConj =>
@@ -439,7 +406,7 @@ object LPoutput {
 
     val problemEncSB: mutable.StringBuilder = new StringBuilder()
 
-    var conjecture: lpOlTerm = lpOlNothing
+    var conjecture: lpOlTerm = lpOlBot // default Bot, as Leo omits conjecture from proof in this case todo: should we change that?!
 
     compressedProof foreach { step =>
       val stepId = step.id
@@ -465,7 +432,7 @@ object LPoutput {
         val axName0 = if (tptpName == "introduced(axiom_of_choice)") "axiom_of_choice" else s"${tptpName.dropRight(1).split(",", 2)(1)}"
         val axName = if (gdv_mode) axName0 else axName0 + s"_p$axCounter"
         val safeAxName = lpEscapeName(axName,sig,false)
-        problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty)
+        problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty(PrettyConfig(true,false)))
         identicalSteps += (stepId -> lpConstantTerm(s"${abbreviationFormulaeFile}.$safeAxName"))
         axCounter = axCounter + 1
       } else {
@@ -494,6 +461,7 @@ object LPoutput {
 
     // Generate declarations of symbols that are implicit in TPTP but not mapped to a Lambdapi encoding
     if (tptpDefinedSymbols.nonEmpty) {
+      Out.lp_debug_info(s"adding the following TPTPT defined symbols: ${tptpDefinedSymbols.map(_.pretty).mkString(", ")}")
       var declareInts = false
       val tptpSymbolsSB: mutable.StringBuilder = new StringBuilder()
       tptpDefinedSymbols foreach { tptpSymbol =>
@@ -567,7 +535,7 @@ object LPoutput {
     }
     proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
     val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
-    proofFileSB.append(completeProof.pretty)
+    proofFileSB.append(completeProof.pretty(PrettyConfig(true,false)))
 
     (proofFileSB,signatureFileSB,formulaeFileSB)
   }

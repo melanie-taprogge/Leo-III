@@ -2233,7 +2233,7 @@ object ModularProofEncoding {
           subsMap.getOrElse(name, lpOlConstantTerm(name))
         case lpOlTypedVar(name, ty) =>
           // when we encounter the typed var that was quantified in the body, we want to replace it!
-          subsMap.getOrElse(name.a, t)
+          subsMap.getOrElse(name.name, t)
         //case lpOlTyVar(name) =>
           // when we encounter the typed var that was quantified in the body, we want to replace it!
           //subsMap.getOrElse(name, t)
