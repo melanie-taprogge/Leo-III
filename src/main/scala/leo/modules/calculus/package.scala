@@ -1,6 +1,6 @@
 package leo.modules
 
-import leo.datastructures.{AddInfoSkolem, Clause, Kind, Literal, Signature, Subst, Term, Type, mkPolyLambdaAbs}
+import leo.datastructures.{AddInfoSkolem, Clause, Kind, Literal, Signature, Subst, Term, Type, mkPolyTermLambdaAbs, mkPolyTypeLambdaAbs}
 import leo.Out
 import leo.modules.HOLSignature.Not
 import leo.modules.output.SuccessSZS
@@ -232,17 +232,20 @@ package object calculus {
     }
 
     // Abstract over the free variables
-    val abstracted = mkPolyLambdaAbs(fvs.map(_._2),substTerm0)
+    val abstracted0 = mkPolyTermLambdaAbs(fvs.map(_._2),substTerm0)
 
     // Close potential gaps in the free type-variables
     val maybeTySubst = normalizeTyFVs(tyFvs)
     val substTerm = maybeTySubst match {
-      case Some(tySubst) => abstracted.substitute(Subst.id, tySubst)
-      case _ => abstracted
+      case Some(tySubst) => abstracted0.substitute(Subst.id, tySubst)
+      case _ => abstracted0
     }
 
+    // Abstract over the free type-variables
+    val abstracted = mkPolyTypeLambdaAbs(tyFvs.length, substTerm)
+
     // return the fresh Skolem symbol with context variables applied
-    val skKey = sig.freshSkolemConst(skTy, Some(substTerm), Signature.PropNoProp)
+    val skKey = sig.freshSkolemConst(skTy, Some(abstracted), Signature.PropNoProp)
     val skFunc = Term.mkAtom(skKey)
     val typeApps = Term.mkTypeApp(skFunc, tyFvs.map(Type.mkVarType))
     val termApps = Term.mkTermApp(typeApps, fvs.map { case (i, ty) => mkBound(ty, i) })
