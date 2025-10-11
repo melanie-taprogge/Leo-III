@@ -58,7 +58,7 @@ object lpInferenceRuleEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y, z, v), ty, Seq(T))
 
-    override def pretty: String = lpDefinition(name, Seq(x, y, z, v), Some(ty), proof, Seq(T)).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(x, y, z, v), Some(ty), proof, Seq(T)).pretty
 
     def instanciate(x0: lpOlTerm, y0: lpOlTerm, z0: lpOlTerm, v0: lpOlTerm, T0: lpOlPolyType): lpFunctionApp = {
       lpFunctionApp(name, Seq(x0, y0, z0, v0), Seq(T0))
@@ -108,7 +108,7 @@ object lpInferenceRuleEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(f,g,x), ty, Seq(T,S))
 
-    override def pretty: String = lpDefinition(name, Seq(f,g,x), Some(ty), proof, Seq(T,S)).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(f,g,x), Some(ty), proof, Seq(T,S)).pretty
 
     def instanciate(TS0:Option[(lpOlPolyType,lpOlPolyType)],f:lpOlTerm,g:lpOlTerm,x:lpOlTerm):lpFunctionApp ={
       val ImpArgs = TS0 match {
@@ -175,7 +175,7 @@ object lpInferenceRuleEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(x,y), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(x,y), Some(ty), proof).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(x,y), Some(ty), proof).pretty
 
     def instanciate(x0: lpOlTerm, y0: lpOlTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(x0,y0))
@@ -203,7 +203,7 @@ object lpInferenceRuleEncoding {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(a,b), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(a,b), Some(ty), proof).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(a,b), Some(ty), proof).pretty
 
     def instanciate(a: lpOlTerm, b: lpOlTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(a,b))
@@ -249,7 +249,7 @@ object lpInferenceRuleEncoding {
       }
     override def dec: lpDeclaration = lpDeclaration(name, Seq(x, y), ty, Seq(a))
 
-    override def pretty: String = lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(a)).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(a)).pretty
 
     def instanciate(a : lpOlType, x: lpOlTerm, y: lpOlTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(x, y), Seq(a))
@@ -275,7 +275,7 @@ object lpInferenceRuleEncoding {
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume σ c h1 h2;\n\n    have H1: (Π x: τ nat, π ((λ x1, (eval x1 c) ∧ (∈ eqn x1 (indexes c))) x) → π (∃(λ y ,(eval y c) ∧ (∈ eqn y σ))))\n        {assume x0 h3;\n        refine (∃ᵢ [nat] [λ y ,(eval y c) ∧ (∈ eqn y σ)] x0) (∧ᵢ (∧ₑ₁ h3) (preserves_contents_el x0 σ c h1 (∧ₑ₂ h3)))};\n    \n    have H2: π (∃(λ y ,(eval y c) ∧ (∈ eqn y σ)))\n        {refine ∃ₑ (disj_imp_lit c h2) H1};\n\n    refine  lit_imp_disj c σ H2;")))
     override def dec: lpDeclaration = lpDeclaration(name, Seq(σ, c), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(σ, c), Some(ty), proof).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(σ, c), Some(ty), proof).pretty
     def instanciate(σ: Seq[Int], c: Seq[lpOlTerm], before: lpTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(lpList(σ.map(indx => lpNum(indx))), lpList(c), lpOlTop_i, before))
     }
@@ -287,7 +287,7 @@ object lpInferenceRuleEncoding {
 
     override def proof: lpProofScript = throw new Exception(s"trying to print proof of meta deletion")
     override def dec: lpDeclaration = throw new Exception(s"trying to print dec of meta deletion")
-    override def pretty: String = throw new Exception(s"trying to pretty type of meta deletion")
+    override def pretty (implicit prefix : PrettyConfig): String = throw new Exception(s"trying to pretty type of meta deletion")
 
     def instanciate(c: Seq[lpOlTerm], indxList: Seq[Int], before: lpTerm): lpFunctionApp = {
       val outputIndx = indxList.distinct
@@ -306,7 +306,7 @@ object lpInferenceRuleEncoding {
 
     override def dec: lpDeclaration = throw new Exception(s"trying to access declaration of Lambdapi-Meta theorem transform")
 
-    override def pretty: String = throw new Exception(s"trying to access pretty of Lambdapi-Meta theorem transform")
+    override def pretty (implicit prefix : PrettyConfig): String = throw new Exception(s"trying to access pretty of Lambdapi-Meta theorem transform")
 
     def instanciate(c: Seq[lpOlTerm], n: Int, rule: lpTerm, before: lpTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(lpList(c), lpNum(n), rule, before))
@@ -323,7 +323,7 @@ object lpInferenceRuleEncoding {
 
     override def dec: lpDeclaration = throw new Exception(s"trying to access declaration of Lambdapi-Meta theorem transform")
 
-    override def pretty: String = throw new Exception(s"trying to access pretty of Lambdapi-Meta theorem transform")
+    override def pretty (implicit prefix : PrettyConfig): String = throw new Exception(s"trying to access pretty of Lambdapi-Meta theorem transform")
 
     def instanciate(c: Seq[lpOlTerm], n: Int, before: lpTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(lpNum(n), lpList(c), lpOlTop_i, before))

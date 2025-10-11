@@ -18,7 +18,7 @@ object AccessoryRules {
 
   /** Encoding of rule (T : Set) (x : τ T): π((x = y) = (y = x)) */
   object lpStd_eq_sym extends lpTerm {
-    override def pretty: String = "eq_sym"
+    override def pretty (implicit prefix : PrettyConfig): String = "eq_sym"
     def inst(ty: lpOlType, lhsRhs: Option[(lpOlTerm, lpOlTerm)] = None): lpFunctionApp = {
       val allArgs = if (lhsRhs.isDefined) Seq(ty, lhsRhs.get._1, lhsRhs.get._2) else Seq(ty)
       lpFunctionApp(lpStd_eq_sym, Seq(), allArgs)
@@ -187,7 +187,7 @@ object AccessoryRules {
     var rewriteSteps: Seq[lpRewrite] = Seq.empty
     val transformations: mutable.HashMap[lpOlTerm, (lpOlTerm, lpOlTerm, lpOlTerm)] = mutable.HashMap.empty
 
-    Out.lp_debug_info(s"processing the literals ${orderedLits.map(_.pretty).mkString(", ")}")
+    Out.lp_debug_info(s"processing the literals ${orderedLits.map(_.pretty(PrettyConfig(false,false))).mkString(", ")}")
 
     orderedLits foreach { lit =>
 
@@ -555,7 +555,7 @@ object AccessoryRules {
 
     override def proof: lpProofScript = lpProofScript(Seq(lpProofScriptStringProof("assume T x y;\n    have H1: π(x = y) → π(y = x)\n        {assume h;\n        symmetry;\n        refine h};\n    have H2: π(y = x) → π(x = y)\n        {assume h;\n        symmetry;\n        refine h};\n    refine propExt (x = y) (y = x) H1 H2")))
 
-    override def pretty: String = lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(T)).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(x, y), Some(ty), proof, Seq(T)).pretty
 
     def instanciate(ty: lpOlType, x0: Option[lpOlTerm] = None, y0: Option[lpOlTerm] = None): lpFunctionApp = {
       val x = x0 match {
@@ -676,6 +676,6 @@ object AccessoryRules {
 
     override def dec: lpDeclaration = lpDeclaration(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), ty)
 
-    override def pretty: String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
+    override def pretty (implicit prefix : PrettyConfig): String = lpDefinition(name, Seq(lpUntypedVar(lpConstantTerm(patternVarName))), Some(ty), proof).pretty
   }
 }

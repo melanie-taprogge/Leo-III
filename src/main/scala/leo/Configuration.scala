@@ -93,8 +93,8 @@ object Configuration extends DefaultConfiguration {
 
   final def cleanup(): Unit = {
     leo.Out.debug(s"Cleaning up temporary files ...")
-    import leo.modules.external.ExternalProver
-    ExternalProver.cleanup()
+    import leo.modules.external.TPTPProvers
+    TPTPProvers.cleanup()
     leo.Out.debug(s"Clean-up finished!")
   }
 
@@ -103,7 +103,7 @@ object Configuration extends DefaultConfiguration {
   //////////////////////////
   def isInit: Boolean = configMap != null
 
-  final val VERSION: String = "1.7.16"
+  final val VERSION: String = "1.7.20"
   final val LEODIR_NAME: String = "leo3"
   final lazy val LEODIR: Path = {
     val dir = Files.createTempDirectory(LEODIR_NAME)

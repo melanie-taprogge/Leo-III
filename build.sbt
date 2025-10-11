@@ -1,8 +1,8 @@
 lazy val leo = (project in file("."))
   .settings(
-    name := "Leo III",
+    name := "Leo-III",
     description := "A Higher-Order Theorem Prover.",
-    version := "1.7.17",
+    version := "1.7.19",
     organization := "org.leo",
     scalaVersion := "2.13.15",
     licenses += "BSD-3-Clause" -> url("https://opensource.org/licenses/BSD-3-Clause"),
@@ -26,11 +26,11 @@ lazy val leo = (project in file("."))
       "-Xmx2g"
     ),
     //resolvers += "Sonatype S01 OSS Snapshots" at "https://s01.oss.sonatype.org/content/repositories/snapshots",
-    libraryDependencies += "io.github.leoprover" %% "scala-tptp-parser" % "1.7.1",
+    libraryDependencies += "io.github.leoprover" %% "scala-tptp-parser" % "1.7.3",
     libraryDependencies ++= Seq("org.scalatest" %% "scalatest" % "3.2.19" % "test"),
     
-    nativeImageOptions += s"-H:ReflectionConfigurationFiles=${target.value / "native-image-configs" / "reflect-config.json"}",
-    nativeImageOptions += s"-H:ConfigurationFileDirectories=${target.value / "native-image-configs" }",
+    nativeImageOptions += s"-H:ReflectionConfigurationFiles=${baseDirectory.value / "contrib" / "native-image-configs" / "reflect-config.json"}",
+    nativeImageOptions += s"-H:ConfigurationFileDirectories=${baseDirectory.value / "contrib" / "native-image-configs" }",
     nativeImageOptions +="-H:+JNI",
     //nativeImageOptions +="--static",
     //nativeImageOptions +="--libc=musl",

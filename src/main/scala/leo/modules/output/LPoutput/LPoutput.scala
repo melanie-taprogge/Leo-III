@@ -1,21 +1,21 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature}
+import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
 import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.{lpDne, tempLib}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
+import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfConj
+import leo.modules.output.LPoutput.ModularProofEncoding.RenameCnfEncoding.encRenameCnf_conj
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
-import scala.collection.immutable.HashMap
 import scala.collection.mutable
-import scala.util.matching.Regex
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -143,41 +143,30 @@ object LPoutput {
     if ((cl.role != Role_Conjecture) && needsEnc && (rule != null)) {
       rule match {
 
-        case leo.modules.calculus.RenameCNF =>
-          // first, we check weather the
-          // if the conjunction contains only one clause, there is no need for two seperate steps
-          val encode2steps = cl.furtherInfo.cnfInfo.derivedClauses.length > 1
-          val (con_ref,stepsConj,updateMap,addSymbols,skDefs) : (lpConstantTerm,Seq[lpProofScriptStep], Map[lpConstantTerm, lpConstantTerm], Set[Signature.Key],Seq[lpDeclaration]) =
-            if (!stepInfo.clausifiedSteps.keySet.contains(parentInLpEncID.head)){
-              val cnf_stepName = if (encode2steps) {
-                val unPrefix = s"${parentInLpEncID.head.name.stripPrefix("F.")}"
-                // If the name is a lp-Safe name, we have to insert "_cnf" into the brackets
-                val pattern: Regex = raw"""\{\|(.+?)\|\}|(.+)""".r
-                unPrefix match {
-                  case pattern(inner, null) =>
-                    s"{|${inner}_cnf|}"
-                  case pattern(null, plain) =>
-                    s"${plain}_cnf"
-                  case _ =>
-                    s"${unPrefix}_cnf"
-                }
-              } else stepName
-              val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
-              val stepsCNF = toProofStep(cnf_stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
-              (lpConstantTerm(cnf_stepName),stepsCNF,Map(parentInLpEncID.head -> lpConstantTerm(cnf_stepName)),encodingCNF._4,encodingCNF._5)
-            }else (stepInfo.clausifiedSteps(parentInLpEncID.head),Seq(),Map.empty,Set.empty,Seq.empty)
-          val outputInfo = new lpProofStepInfo(updateMap,newIdenticalSteps,newTptpDefinedSymbols,addSymbols,skDefs)
-          // the encoding of the step where we pick one of the clauses in the conjunction
-          val stepsPickupStep : Seq[lpProofScriptStep] = if (encode2steps) {
-            val encPickStep = encRenameCnf_cl(cl,con_ref,cl.furtherInfo.cnfInfo,sig)
-            toProofStep(stepName,encStep,"RenameCNF_select",encPickStep,None)
-          } else Seq()
-          (stepsConj ++ stepsPickupStep,outputInfo)
-
         case _ =>
           val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols)
+          Out.lp_debug_info(s"new symbols: ${newTptpDefinedSymbols.map(_.pretty)}")
 
           rule match {
+            case leo.modules.calculus.CnfConj =>
+              val parent = extractParentInfo1(cl, stepInfo.identicalSteps.toMap) match {
+                case Left(error) => throw new Exception(error)
+                case Right(value) => value
+              }
+              val idx = cl.furtherInfo.cnfConjInfo match {
+                case Some(value) => value
+                case None => throw new Exception("Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
+              }
+              val encProof = encCnfConj(cl, parent, idx, sig)
+              (toProofStep(stepName, encStep, rule.name, encProof, None), outputInfo)
+
+            case leo.modules.calculus.RenameCNF =>
+              val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig)
+              val stepsCNF = toProofStep(stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
+              val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols,encodingCNF._4,Seq())
+              (stepsCNF,outputInfo)
+
+
             case leo.modules.calculus.PolaritySwitch =>
               val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
               (toProofStep(stepName, encStep, "PolaritySwitch", encoding._1, None),outputInfo)
@@ -335,7 +324,7 @@ object LPoutput {
         typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, lpSet).pretty)
       } else {
         if (symbol.hasType) {
-          if (symbol.name.matches("^sk\\d+$")) {
+          if (isPropSet(Signature.PropSkolemConstant, symbol.flag)) {
             val typeDec = type2LP(symbol._ty, sig, true)
             skDecsSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
           }
@@ -347,18 +336,30 @@ object LPoutput {
 
         if (symbol.hasDefn) { // && (! additionalSymbols.contains(key))) {
 
-          val (bVarTys, _) = collectLambdasLP(symbol._defn)
-          val newBVars = makeBVarList(bVarTys, 0)
-          val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, fusebVarListwithMap(newBVars, Map()), sig, Set.empty, false, true)
-          tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
-
           val defTermType = type2LP(symbol._defn.ty, sig, true)
-          val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(s"${abbreviationSignatureFile}." + sName), Seq.empty), definition)
-          val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
-          defSB.append(encodedDef.pretty)
 
-          // furthermore, we need to build a tactic that combines all of our definitions into one
-          definitions += s"${sName}_def"
+          if (isPropSet(Signature.PropSkolemConstant, symbol.flag)) {
+            //todo: maybe generally encode defs with free vars like this?
+            //Extract the lambda terms of the new definition and build a quantified version where the variables are applied to the skolem term
+            val (bVarTys, strippedDef) = collectLambdasLP(symbol._defn)
+            val newBVars = makeBVarList(bVarTys, 0)
+            val encBvars = newBVars.map(v => lpOlTypedVar(lpOlConstantTerm(v._1),type2LP(v._2,sig)) )
+            val appliedSk = lpOlFunctionApp(lpOlConstantTerm(sName),encBvars.map(Left(_)))
+            val (definition, tptpDefinedSymbols0) = term2LP(strippedDef, fusebVarListwithMap(newBVars, Map()), sig, Set.empty, false, true)
+            val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(appliedSk, Seq.empty), definition)
+            val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), encBvars, defAsEq.prf)
+            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
+            skDecsSB.append(encodedDef.pretty)
+          }
+          else {
+            val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, Map(), sig, Set.empty, false, true)
+            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
+            val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(s"${abbreviationSignatureFile}." + sName), Seq.empty), definition)
+            val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
+            defSB.append(encodedDef.pretty)
+            // add to the list of definitions that should later be extended in the corresponding steps
+            definitions += s"${sName}_def"
+          }
         }
       }
     }
@@ -389,8 +390,7 @@ object LPoutput {
 
     var tptpDefinedSymbols: Set[lpStatement] = Set.empty
     var additionalSymbols: Set[Signature.Key] = Set.empty
-
-    if ((sig.allUserConstants intersect symbolsInProof(proof)).map(sig.apply(_).hasDefn).contains(true)) flagSt.defRuleDefined = true
+    if ((sig.allUserConstants intersect symbolsInProof(proof)).filter(key => !isPropSet(Signature.PropSkolemConstant, sig(key).flag)).map(sig.apply(_).hasDefn).contains(true)) flagSt.defRuleDefined = true
 
 
     // encode the clauses representing the steps
@@ -406,7 +406,7 @@ object LPoutput {
 
     val problemEncSB: mutable.StringBuilder = new StringBuilder()
 
-    var conjecture: lpOlTerm = lpOlNothing
+    var conjecture: lpOlTerm = lpOlBot // default Bot, as Leo omits conjecture from proof in this case todo: should we change that?!
 
     compressedProof foreach { step =>
       val stepId = step.id
@@ -432,7 +432,7 @@ object LPoutput {
         val axName0 = if (tptpName == "introduced(axiom_of_choice)") "axiom_of_choice" else s"${tptpName.dropRight(1).split(",", 2)(1)}"
         val axName = if (gdv_mode) axName0 else axName0 + s"_p$axCounter"
         val safeAxName = lpEscapeName(axName,sig,false)
-        problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty)
+        problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty(PrettyConfig(true,false)))
         identicalSteps += (stepId -> lpConstantTerm(s"${abbreviationFormulaeFile}.$safeAxName"))
         axCounter = axCounter + 1
       } else {
@@ -461,6 +461,7 @@ object LPoutput {
 
     // Generate declarations of symbols that are implicit in TPTP but not mapped to a Lambdapi encoding
     if (tptpDefinedSymbols.nonEmpty) {
+      Out.lp_debug_info(s"adding the following TPTPT defined symbols: ${tptpDefinedSymbols.map(_.pretty).mkString(", ")}")
       var declareInts = false
       val tptpSymbolsSB: mutable.StringBuilder = new StringBuilder()
       tptpDefinedSymbols foreach { tptpSymbol =>
@@ -490,7 +491,7 @@ object LPoutput {
     if (skDefinitions.nonEmpty || skDecSB.length != 0) {
       proofFileSB.append("\n\n// SKOLEM TERMS ///////////////////////////////////\n\n")
       proofFileSB.append(skDecSB)
-      proofFileSB.append(skDefinitions.map(_.pretty).mkString(""))
+      proofFileSB.append(skDefinitions.map(defn => s"// ${defn.pretty}").mkString(""))
     }
 
     if (tacticSB.nonEmpty) {
@@ -534,7 +535,7 @@ object LPoutput {
     }
     proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
     val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
-    proofFileSB.append(completeProof.pretty)
+    proofFileSB.append(completeProof.pretty(PrettyConfig(true,false)))
 
     (proofFileSB,signatureFileSB,formulaeFileSB)
   }

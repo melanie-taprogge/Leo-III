@@ -44,7 +44,7 @@ object SimplificationEncoding {
   /** Rule (x : τ T): π ((x ∨ x) = x) */
   case object lpSimp_or_idem extends simplificationRules {
    override def name: lpConstantTerm = lpConstantTerm("∨_idem")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // Disjunction/Conjunction with ⊤ / ⊥
@@ -53,14 +53,14 @@ object SimplificationEncoding {
   /** Rule (x : τ T): π ((x ∨ ⊥) = x) */
   case object lpSimp_orBot extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("∨⊥")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig) : String = name.pretty
   }
 
   /** Rule (x : τ T): π ((⊥ ∨ x) = x) */
   case object lpSimp_botOr extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("⊥∨")
 
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // Negation of ⊤ and ⊥
@@ -69,7 +69,7 @@ object SimplificationEncoding {
   /** Rule π (¬ ⊤ = ⊥) */
   case object lpSimp_negTop extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("¬⊤")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   //Equalities
@@ -82,7 +82,7 @@ object SimplificationEncoding {
       val args = if (term.isDefined) Seq(ty, term.get) else Seq(ty)
       lpFunctionApp(name, args)
     }
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 21
@@ -93,49 +93,49 @@ object SimplificationEncoding {
     def instanciate(ty: lpOlType, term: Option[lpOlTerm]):lpFunctionApp ={
       val args = if (term.isDefined) Seq(ty, term.get) else Seq(ty)
       lpFunctionApp(name, args)}
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 22
   /** Rule (x : τ o): π ((x = ⊤) = x) */
   case object lpSimp_eqTop extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("=⊤")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 23
   /** Rule (x : τ o): π ((⊤ = x) = x) */
   case object lpSimp_topEq extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("⊤=")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 24
   /** Rule (x : τ o): π (¬(x = ⊤) = ¬ x) */
   case object lpSimp_negEqTop extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("¬=⊤")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 26
   /** Rule (x : τ o): π ((x = ⊥) = ¬ x) */
   case object lpSimp_eqBot extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("=⊥")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 27
   /** Rule (x : τ o): π ((⊥ = x) = ¬ x) */
   case object lpSimp_botEq extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("⊥=")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 28
   /** Rule (x : τ o): π (¬ (x = ⊥) = x) */
   case object lpSimp_negEqBot extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("¬=⊥")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   //Equalities with negations
@@ -144,14 +144,14 @@ object SimplificationEncoding {
   /** Rule (x : τ o): π ((¬ x = ⊤) = ¬ x) */
   case object lpSimp_notEqTop extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("neg=⊤")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 32
   /** Rule (x : τ o): π (¬(¬ x = ⊤) = x) */
   case object lpSimp_negNotEqTop extends simplificationRules {
     override def name: lpConstantTerm = lpConstantTerm("¬neg=⊤")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // 36
@@ -159,7 +159,7 @@ object SimplificationEncoding {
   case object lpSimp_negNotEqBot extends simplificationRules {
     // π (¬(¬ x = ⊥) = ¬ x)
     override def name: lpConstantTerm = lpConstantTerm("¬neg=⊥")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
   // Simplifications reflecting Classical Principles
@@ -168,7 +168,7 @@ object SimplificationEncoding {
   case object lpSimp_dne extends simplificationRules {
     // x: (π (x = (¬ ¬ x)))
     override def name: lpConstantTerm = lpConstantTerm("¬¬ₑ_eq")
-    override def pretty: String = name.pretty
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
     def instanciate(a: lpOlTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(a))
     }

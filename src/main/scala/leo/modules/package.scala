@@ -4,7 +4,7 @@ import java.io.{PrintWriter, StringWriter}
 
 import leo.datastructures._
 import leo.modules.calculus.CalculusRule
-import leo.modules.output.{DataformSZS, Output, StatusSZS, ToTPTP}
+import leo.modules.output.{DataformSZS, Output, StatusSZS, ToTHF}
 import leo.modules.proof_object.CompressProof
 
 import scala.annotation.elidable
@@ -111,7 +111,7 @@ package object modules {
     val sb: StringBuilder = new StringBuilder()
     sig.allUserConstants.foreach { key =>
       val name = sig.apply(key).name
-      sb.append(ToTPTP(key)(sig))
+      sb.append(ToTHF(key)(sig))
       sb.append("\n")
     }
     sb.dropRight(1).toString()
@@ -119,19 +119,13 @@ package object modules {
 
   def saturatedUserSignature(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): Set[Signature.Key] = {
     // Recursively generate a list of all symbols that that occur in definitions
-
-    // Start with user constants that appear in the proof or are type symbols
     val relevantSymbols = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)
-
-    // Keep track of which symbols we have already processed
     var visited = Set.empty[Signature.Key]
 
     def saturate(sym: Signature.Key): Unit = {
-      // Only explore sym if it is not already visited
       if (!visited.contains(sym)) {
         visited += sym
         val info = sig(sym)
-        // If the symbol has a definition, recursively saturate all symbols in that definition
         if (info.hasDefn) {
           val defnSymbols = info._defn.symbols.toSet intersect sig.allUserConstants
           defnSymbols.foreach(saturate)
@@ -144,48 +138,32 @@ package object modules {
     relevantSymbols ++ visited
   }
 
-  def userSignature(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): (Set[Signature.Key],Set[Signature.Key]) ={
-    /* start with user symbols that occur in the proof, plus type symbols */
-    val relevantSymbols: Set[Signature.Key] = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)
-    var additionalSymbols: Set[Signature.Key] = Set.empty
-    /* add symbols that occur in definitions only, but only their type */
-    for (symbol <- relevantSymbols) {
-      if (sig(symbol).hasDefn) {
-        val defn = sig(symbol)._defn
-        val symbolsInDefn = defn.symbols.toSet
-        additionalSymbols ++= ((symbolsInDefn diff relevantSymbols) intersect sig.allUserConstants)
-      }
-    }
-    (relevantSymbols, additionalSymbols)
-  }
-
   def userSignatureToTPTP(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): String = {
-
-    val (relevantSymbols, additionalSymbols) = userSignature(symbolsInProof)
-
     val sb: StringBuilder = new StringBuilder()
-    val allRelevantSymbols = relevantSymbols union additionalSymbols
-    val (userTypes, otherSymbols) = allRelevantSymbols.partition(key => sig(key).hasKind)
+    /* start with user symbols that occur in the proof, plus type symbols */
+    val relevantSymbols: Set[Signature.Key] = saturatedUserSignature(symbolsInProof)
+
+    val (userTypes, otherSymbols) = relevantSymbols.partition(key => sig(key).hasKind)
     // first print all user types (sorts)
     userTypes.foreach { key =>
-      sb.append(ToTPTP(key))
+      sb.append(ToTHF(key))
       sb.append("\n")
     }
     // then print all type declarations
     otherSymbols.foreach { key =>
-      sb.append(ToTPTP(key, typeOnly = true))
+      sb.append(ToTHF(key, typeOnly = true))
       sb.append("\n")
     }
-
-    // then print definitions (except for additional symbols)
+    // then print definitions
     otherSymbols.foreach { key =>
-      if (sig(key).hasDefn && !additionalSymbols.contains(key)) {
-        sb.append(ToTPTP.definitionToTPTP(key))
+      if (sig(key).hasDefn) {
+        sb.append(ToTHF.definitionToTPTP(key))
         sb.append("\n")
       }
     }
     sb.dropRight(1).toString()
   }
+
 
   /////////////////////////////////////////////////////////////
   /// Proof printing and associated methods
@@ -246,7 +224,7 @@ package object modules {
 
   private def mkTPTP(cl : ClauseProxy)(sig: Signature) : String = {
     try{
-      ToTPTP.withAnnotation(cl)(sig)
+      ToTHF.withAnnotation(cl)(sig)
     } catch {
       case e : Throwable => leo.Out.warn(s"Could not translate: ${cl.pretty}.\n Error: ${e.toString}"); cl.pretty
     }

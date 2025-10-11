@@ -160,7 +160,7 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
   override def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = hd match {
     case Atom(key,_) if !symbs.contains(key) => {
       val meta = sig(key)
-      if (meta.hasDefn && !meta._defn.symbols.contains(key)) {
+      if (meta.hasDefn && !meta._defn.symbols.contains(key) && !isPropSet(Signature.PropSkolemConstant, meta.flag)) {
         mkRedex(meta._defn.δ_expand_upTo(symbs)(sig), args.δ_expand_upTo(symbs)(sig))
       } else {
         mkRoot(hd, args.δ_expand_upTo(symbs)(sig))
@@ -173,7 +173,7 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
     case Atom(key, _) if !symbs.contains(key) => {
       var expandedSymbols: Seq[Signature.Key] = Seq.empty
       val meta = sig(key)
-      if (meta.hasDefn) {
+      if (meta.hasDefn && !isPropSet(Signature.PropSkolemConstant, meta.flag)) {
         val (expandedDef, expandedSymbolsDef) = meta._defn.δ_expand_andTrack_upTo(symbs)(sig)
         val (expandedArgs, expandedSymbolsArgs) = args.δ_expand_andTrack_upTo(symbs)(sig)
         (mkRedex(expandedDef, expandedArgs),expandedSymbolsDef ++ expandedSymbolsArgs :+ key)
@@ -1422,6 +1422,7 @@ object TermImpl extends TermBank {
       case other       => Redex(other, mkSpine(args.toVector))
     }
     override final def mkTermAbs(t: Type, body: Term): Term = TermAbstr(t, body)
+    override final def mkTermAbs(ts: Seq[Type], body: Term): Term = ts.foldRight(body){case (ty, acc) => mkTermAbs(ty, acc)}
 
     override final def mkTypeApp(func: Term, arg: Type): Term = mkTypeApp(func, Vector(arg))
     override final def mkTypeApp(func: Term, args: Seq[Type]): Term = if (args.isEmpty)
@@ -1459,6 +1460,7 @@ object TermImpl extends TermBank {
       case other       => mkRedex(other, mkSpine(args.toVector))
     }
   override final def mkTermAbs(typ: Type, body: Term): TermImpl = mkTermAbstr(typ, body)
+  override final def mkTermAbs(typs: Seq[Type], body: Term): TermImpl = typs.foldRight(body.asInstanceOf[TermImpl]) {case (ty,acc) => mkTermAbstr(ty, acc) }
 
   override final def mkTypeApp(func: Term, arg: Type): TermImpl = mkTypeApp(func, Vector(arg))
   override final def mkTypeApp(func: Term, args: Seq[Type]): TermImpl  = if (args.isEmpty) func.asInstanceOf[TermImpl] else func match {
