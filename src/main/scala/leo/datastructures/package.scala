@@ -1,7 +1,6 @@
 package leo
 
 import leo.datastructures.Term.mkTypeAbs
-
 import scala.annotation.tailrec
 
 
@@ -644,7 +643,7 @@ package object datastructures {
 
   /** Given a number of type bindings and a term `term`, return the nested lambda abstraction
     * {{{Λty_kind.Λty_kind....Λty_kind. term}}}
-    * Caution: Only use at outermost scope */
+    * Caution: Only use at outermost scope*/
   final def mkPolyTypeLambdaAbs(bindings: Int, term: Term): Term = {
     (0 until bindings).foldLeft(term)((t, _) => mkTypeAbs(t))
   }

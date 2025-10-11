@@ -179,7 +179,7 @@ package object calculus {
     } else None
   }
 
-  final def skTerm(goalTy: Type, fvs: Seq[(Int, Type)], tyFvs: Seq[Int], term: Option[Term] = None)(implicit sig: Signature): Term = {
+  final def skTerm(goalTy: Type, fvs: Seq[(Int, Type)], tyFvs: Seq[Int])(implicit sig: Signature): Term = {
     val funTy = normalizeType(Type.mkFunType(fvs.map(_._2), goalTy), tyFvs)
     val ty = mkPolyTyAbstractionType(tyFvs.size,funTy)
     assert(ty.typeVars.isEmpty,
@@ -212,7 +212,7 @@ package object calculus {
     import leo.datastructures.Term._
     import leo.modules.HOLSignature.{Choice}
 
-    val (goalTy, body0)  = a match {
+    val (goalTy, body0) = a match {
       case ty0 :::> body => (ty0, body)
       case _ => throw new IllegalArgumentException("Expected λ-abstraction for quantified body")
     }
@@ -232,7 +232,7 @@ package object calculus {
     }
 
     // Abstract over the free variables
-    val abstracted0 = mkPolyTermLambdaAbs(fvs.map(_._2),substTerm0)
+    val abstracted0 = mkPolyTermLambdaAbs(fvs.map(_._2), substTerm0)
 
     // Close potential gaps in the free type-variables
     val maybeTySubst = normalizeTyFVs(tyFvs)

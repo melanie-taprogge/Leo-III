@@ -106,12 +106,12 @@ object ToTHF {
         }
 
         val appliedCname = {
-        val typeApps = if (tyNames.nonEmpty) " @ " + tyNames.mkString(" @ ") else ""
-        val termApps = if (termNames.nonEmpty) " @ " + termNames.mkString(" @ ") else ""
-        s"$symbolName$typeApps$termApps"
-      }
+          val typeApps = if (tyNames.nonEmpty) " @ " + tyNames.mkString(" @ ") else ""
+          val termApps = if (termNames.nonEmpty) " @ " + termNames.mkString(" @ ") else ""
+          s"$symbolName$typeApps$termApps"
+        }
         s"thf(${escapeTPTPName(name)}, definition, $quantification ($appliedCname = (${toTPTP0(constant._defn, tyNames.length, bVars)(sig)})))."
-      }else{
+      } else {
         s"thf(${escapeTPTPName(name)}, definition, $symbolName = (${toTPTP0(constant._defn, 0)(sig)}) )."
       }
     } else ""

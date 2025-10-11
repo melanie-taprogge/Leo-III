@@ -226,8 +226,8 @@ object RenameCNF extends CalculusRule {
     while(it.hasNext){
       val nl = it.next()
       apply(vargen, cashExtracts, nl, THRESHHOLD) match {
-        case Seq(Seq(lit)) => acc = acc.map {normLits => normLits :+ lit }
-        case norms => acc = multiply(acc, norms)
+        case Seq(Seq(lit)) => acc = acc.map{normLits => normLits :+ lit}
+        case norms =>  acc = multiply(acc, norms)
       }
     }
     acc
@@ -367,8 +367,8 @@ object FullCNF extends CalculusRule {
     while(it.hasNext){
       val nl = it.next()
       apply(vargen, nl) match {
-        case Seq(Seq(lit)) => acc = acc.map {normLits => normLits :+ lit }
-        case norms => acc = multiply(acc, norms)
+        case Seq(Seq(lit)) => acc = acc.map{normLits => normLits :+ lit}
+        case norms =>  acc = multiply(acc, norms)
       }
     }
     acc
@@ -393,7 +393,6 @@ object FullCNF extends CalculusRule {
         } else {
           val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true))
         }
-
       case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,true)._1; apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false))
       case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,false)._1; apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true))
       case Exists(a@(ty :::> t)) if !l.polarity =>
@@ -527,7 +526,6 @@ object ReplaceLeibnizEq extends CalculusRule {
         if (args.size == 1) {
           val (headType, headIndex) = Bound.unapply(head).get
           val arg = args.head
-          if (!(arg.looseBounds contains headIndex)) {
             if (lit.polarity) {
               flexHeadSet = flexHeadSet + headIndex
             } else {
@@ -541,7 +539,6 @@ object ReplaceLeibnizEq extends CalculusRule {
               }
 
             }
-          }
 
         }
       }
