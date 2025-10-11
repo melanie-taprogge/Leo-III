@@ -739,7 +739,7 @@ object ModularProofEncoding {
       *         - First using the (equational) withLit.
       *         - Then using UF (u = v).
       *           (iii) Close by disjunction introduction
-      *           B) Case UF is FALSE (¬(u = v) holds):
+      *  B) Case UF is FALSE (¬(u = v) holds):
       *           Assume ¬(u = v) and close the goal by disjunction introduction with the assumed negated constraint.
       *
       * Notes:

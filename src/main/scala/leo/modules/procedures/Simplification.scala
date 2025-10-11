@@ -262,7 +262,9 @@ object Simplification extends Function1[Term, Term] {
                 simpBody match {
                   // - ∀x. s -> s if x not free in s
                   // - ∃x. s -> s if x not free in s
-                  case _ :::> absBody if !absBody.looseBounds.contains(1) => absBody.lift(-1)
+                  case _ :::> absBody if !absBody.looseBounds.contains(1) =>
+                    if (absBody.hasBinder) st.rewriteUnderBinderHappened = true
+                    absBody.lift(-1)
                   case _ => mkApp(f, Seq(Right(simpBody.ty._funDomainType), Left(simpBody)))
                 }
               case Exists.key =>
@@ -272,7 +274,9 @@ object Simplification extends Function1[Term, Term] {
                 simpBody match {
                   // - ∀x. s -> s if x not free in s
                   // - ∃x. s -> s if x not free in s
-                  case _ :::> absBody if !absBody.looseBounds.contains(1) => absBody.lift(-1)
+                  case _ :::> absBody if !absBody.looseBounds.contains(1) =>
+                    if (absBody.hasBinder) st.rewriteUnderBinderHappened = true
+                    absBody.lift(-1)
                   case _ => mkApp(f, Seq(Right(simpBody.ty._funDomainType), Left(simpBody)))
                 }
               case TyForall.key =>
