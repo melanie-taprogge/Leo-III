@@ -865,6 +865,10 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm: lpTerm, tab)))
   }
 
+  abstract class lpUserTactic extends lpOlTerm {
+    override def prf: lpMlType = throw new Exception(s"Error in LP encoding: Trying to generate proof for user tactic")
+  }
+
   case class lpRewritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
     override def pretty (implicit prefix : PrettyConfig): String = {
       s".[${patternVar.pretty} in ${pattern.pretty}]"
@@ -914,6 +918,16 @@ object lpDatastructures {
 
   case class lpAssume(vars: Seq[lpTerm], tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpAssume = lpAssume(vars, tab + i)
+
+    val asOlTerm = "#assume"
+
+    def olTermApp = {
+      lazy val processedVars: Seq[String] = vars.map {
+        case lpOlTypedVar(n,t) => n.pretty
+        case other => throw new Exception(s"Error in LP encoding: Attempting to instanciate $asOlTerm with ${other}")
+      }
+      lpOlFunctionApp(lpOlConstantTerm(asOlTerm), Seq(Left(lpOlConstantTerm(s"\"${processedVars.mkString(" ")}\""))))
+    }
 
     val tabs: String = "\t" * tab
     override def pretty (implicit prefix : PrettyConfig): String = {
