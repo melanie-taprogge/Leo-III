@@ -16,12 +16,7 @@ Some of the encodings rely on features added after the latest stable releases of
 - [Lambdapi](https://github.com/Deducteam/lambdapi)
 - [Lambdapi Standard Library](https://github.com/Deducteam/lambdapi-stdlib)
 
-Furthermore, the [library for Leo-III encodings in Lambdapi](https://github.com/melanie-taprogge/Leo-III-lambdapi-lib) is required and can be installed by following the instructions provided in its GitHub repository.
-
-
-**References:**  
-- This project is described in a paper currently submitted for publication: *"Towards the Verification of Higher-Order Logic Automated Reasoning"* by Taprogge, Blanqui, and Steen.
-- It originates from the work presented in the Master's thesis available [here](https://inria.hal.science/hal-04733263v1).
+Furthermore, the [library for Leo-III encodings in Lambdapi](https://anonymous.4open.science/r/Leo-III-lambdapi-lib-CB15) is required and can be installed by following the instructions provided in its GitHub repository.
 
 
 <details>
