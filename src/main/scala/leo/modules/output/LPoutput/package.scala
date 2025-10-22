@@ -119,7 +119,7 @@ package object LPoutput {
   }
 
   final def lpEscapeName(str: String, sig: Signature, prefix: Boolean = true): String = {
-    val prefixStr = if (prefix) s"${abbreviationSignatureFile}." else ""
+    val prefixStr = if (prefix) s"${abbreviationSignatureFile}" else ""
     if (partiallyAlliedTPTPmap.keySet.contains(str)) {
       throw new Exception(s"trying to escape name for parially applied connective $str, this should not happen")
     } //throw new Exception(s"found illegal $str")

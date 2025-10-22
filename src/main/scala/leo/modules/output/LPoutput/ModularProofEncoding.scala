@@ -11,10 +11,11 @@ import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.calculus.Simp.normalize
-import leo.modules.output.LPoutput.CNFEncoding.{allBoolRuleApplicationStep, allBoolRulesTermName, cnfTac, cnfTacQuantifiers, lpMoveExists, lpMoveUniv, lpSkolemizeExists, lpSkolemizeUniv, onlyBoolRulesTermName, singleStepQuant}
+import leo.modules.output.LPoutput.CNFEncoding.{allBoolRuleApplicationStep, allBoolRulesTermName, cnfTac, cnfTacQuantifiers, cnfTacSkolem, lpMoveExists, lpMoveUniv, lpSkolemProcess, lpSkolemizeExists, lpSkolemizeUniv, onlyBoolRulesTermName, singleStepQuant}
 import leo.modules.output.LPoutput.CommonProofSteps.ScriptBuilders.assumeClauseVars
 import leo.modules.output.LPoutput.LPSignature.{lpEm, lpLorElimMulti, lpLorIntro1, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim, lpTheorems}
-import leo.modules.output.LPoutput.LPoutput.ParentInfo
+import leo.modules.output.LPoutput.LPoutput.{ParentInfo, abbreviationFormulaeFile}
+import leo.modules.saturatedUserSignature
 
 import scala.collection.immutable.{AbstractSeq, LinearSeq}
 import scala.collection.mutable
@@ -145,6 +146,12 @@ object ModularProofEncoding {
 
     // todo: test if we also need to handle <=> and <~> specifically
 
+    // cosntruct the tactic applying all the occuring definitions val sName = lpEscapeName(symbol.name, sig, false)
+    val allSymbols = saturatedUserSignature(Clause.symbols(parent.cl).distinct)(sig)
+    val keysWithDefn = allSymbols.filter(k => sig(k).hasDefn).toList
+    val allDefs = keysWithDefn.map(key => s"${lpEscapeName(sig.apply(key).name, sig, false)}_def") //todo: have a unified name generation method for def file generation and this
+
+
     if(!additionalInfoSimp){
 
       val (encParent,encChild, _, _) =  initialEncUnclausified(parent.cl, child.cl, sig)
@@ -158,11 +165,14 @@ object ModularProofEncoding {
       //Out.lp_debug_info(s"Contains <= ? ${parent.cl.lits.flatMap(symbols(_)).contains(sig("<=").key)}")
 
       val (defExpStep, appliedParent) : (Seq[lpProofScriptStep],lpTerm) =
-        if (defRuleDefined){
+        if (allDefs.nonEmpty){
           val haveStepName = "defExpStep"
           val assumptionName = lpConstantTerm("h")
           val applyParentToStep = lpFunctionApp(lpConstantTerm(haveStepName),Seq(parentNameLpEnc))
-          val applyDefExp = Seq(lpEval(lpOlConstantTerm(applyAllDefsTacName)))
+          //val applyDefExp = Seq(lpEval(lpOlConstantTerm(applyAllDefsTacName)))
+          val allDefsInRW = allDefs.map(defName => lpRewrite(None, lpOlConstantTerm(s"${abbreviationFormulaeFile}" + defName)).olUsrTac)
+          val applyAllDefsTact: lpProofScriptStep = lpRepeat(allDefsInRW.reduceRight((r1: lpProofScriptStep, r2: lpProofScriptStep) => lpTacBinaryConnectiveTerm(lpOrElseTac, r1, r2))).asUserTac
+          val applyDefExp = Seq(lpEval(applyAllDefsTact))
           val (assumeStep, refineStepHave): (lpAssume, lpRefine) = {
             (lpAssume(Seq(assumptionName)), lpRefine(assumptionName))
           }
@@ -284,12 +294,12 @@ object ModularProofEncoding {
 
         val clauseStepName = "Clausification"
 
-        val (allSteps_clausification0): (Seq[lpProofScriptStep]) = if (cnfInfo.skolemTerms.exists(_.isRight)) {
+        val (allSteps_clausification0): (Seq[lpProofScriptStep]) = if (cnfInfo.addInfoQuants.exists(_.isRight)) {
 
           // if we have skolemisazions after assumes, we have to split the step up in order to use the assumed variables to instanciate the sk defs
           val assumeFollwedBySk: Boolean = {
             var seenRight = false
-            cnfInfo.skolemTerms.exists {
+            cnfInfo.addInfoQuants.exists {
               case Right(_) => seenRight = true; false // keep scanning
               case Left(_) => seenRight // true => stop (found Right before this Left)
             }
@@ -300,23 +310,26 @@ object ModularProofEncoding {
           // if we do not need to generate individual steps for all the quantifier applications, juts have a single tactic for doing everything
           val (instCNFTac, orderedVars): (Seq[lpProofScriptStep], Seq[lpOlTypedVar]) = if (!assumeFollwedBySk) {
             // cosntruct list in lp
-            val (ruleInstances, orderedVars0) = generateRuleInst(cnfInfo.skolemTerms, allBvars, bV, sig)
+            val (ruleInstances, orderedVars0) = generateRuleInst(cnfInfo.addInfoQuants, allBvars, bV, sig)
             Out.lp_debug_info(s"ordered vars: ${orderedVars0.map(_.pretty)}")
 
             val setQuantList = lpSetTac(quantiferTacticsName, lpList(ruleInstances))
             //(Some(lpConstantTerm(quantiferTacticsName)), Seq(setSkList))
             //lpEval(lpFunctionApp(cnfTacQuantifiers,Seq(varsListName.getOrElse(lpListLast),skDefsListName.getOrElse(lpListLast))))
             Out.lp_debug_info(s"the following tactic is produced: ${setQuantList.pretty}")
-            (setQuantList +: Seq(lpEval(lpFunctionApp(cnfTacQuantifiers, Seq(lpConstantTerm(quantiferTacticsName))))), orderedVars0)
+            // version defining a named list and then applying it
+            //(setQuantList +: Seq(lpEval(lpFunctionApp(cnfTacQuantifiers, Seq(lpConstantTerm(quantiferTacticsName))))), orderedVars0)
+            // version directly applying it
+            (Seq(lpEval(lpFunctionApp(cnfTacQuantifiers, Seq(lpList(ruleInstances))))), orderedVars0)
           } else {
 
             // if we have leading double negations, the first thing we need to do is eliminate them
 
             // we need to split up the list: one part has the initial quantifiers, the other has the ones applied throughout clausification
-            val lastUQIdx = cnfInfo.skolemTerms.lastIndexWhere(_.isRight)
+            val lastUQIdx = cnfInfo.addInfoQuants.lastIndexWhere(_.isRight)
             val (upToLastUnivQuant, rest) =
-              if (lastUQIdx < 0) (Seq.empty[Either[AddInfoSkolem, AddInfoUnivQuant]], cnfInfo.skolemTerms)
-              else cnfInfo.skolemTerms.splitAt(lastUQIdx + 1)
+              if (lastUQIdx < 0) (Seq.empty[Either[AddInfoSkolem, AddInfoUnivQuant]], cnfInfo.addInfoQuants)
+              else cnfInfo.addInfoQuants.splitAt(lastUQIdx + 1)
             // now we handle the leading quantifiers individually:
             val (leadingQuants, orderedVars): (Seq[lpProofScriptStep], Seq[lpOlTypedVar]) = if (upToLastUnivQuant.nonEmpty) {
               val (ruleInstances, orderedVars0) = generateRuleInst(upToLastUnivQuant, allBvars, bV, sig)
@@ -356,11 +369,10 @@ object ModularProofEncoding {
           // In this case, only boolean identities were applied in clausification
           assert(encParent.vars.length <= allMetaVars.length, "LP encoding: Clausification unexpectedly increased number of free vars")
 
-          assert(cnfInfo.skolemTerms.forall(_.isLeft), "LP encoding: Clausification unexpectedly increased number of free vars")
-          val skolems = cnfInfo.skolemTerms.collect { case Left(s) => s }
+          assert(cnfInfo.addInfoQuants.forall(_.isLeft), "LP encoding: Clausification unexpectedly increased number of free vars")
+          val skolems = cnfInfo.addInfoQuants.collect { case Left(s) => s }
 
           // We verify the application via a have-step proving equality via a dedicated lambdapi tactic
-          val setVarListName: Option[lpConstantTerm] = None
           val setVarList: Seq[lpSetTac] = Seq()
 
           // Build the list of all skolem defs in the order they occoured in the proof
@@ -380,15 +392,18 @@ object ModularProofEncoding {
 
           Out.lp_debug_info(s"new skolem definitions in child: ${skolems.map(skInfo => sig(skInfo.sko).name)}")
 
-          val (skListName, setSkList): (Option[lpConstantTerm], Seq[lpSetTac]) = if (rewriteForSkolems.nonEmpty) {
+          val skList: Option[lpList] = if (rewriteForSkolems.nonEmpty) {
             val allSkDefsListName = s"allSkDefinitions"
             val setSkList = lpSetTac(allSkDefsListName, lpList(rewriteForSkolems.toSeq))
-            (Some(lpConstantTerm(allSkDefsListName)), Seq(setSkList))
-          } else (None, Seq())
+            val skList0 = lpList(rewriteForSkolems.toSeq)
+            (Some(skList0))
+          } else None
 
 
-          val instCNFTac = cnfTac(setVarListName, skListName)
-          val clausStep: lpHave = lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, (setSkList ++ setVarList) :+ instCNFTac)
+          //val instCNFTac = cnfTac(None, skList)
+          val instSkTac = if (skList.nonEmpty) lpEval(lpFunctionApp(lpFunctionApp(cnfTacSkolem,Seq(lpSkolemProcess)),Seq(skList.getOrElse(lpListLast)))) else lpEval(onlyBoolRulesTermName)
+
+          val clausStep: lpHave = lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, (setVarList) :+ instSkTac)
           lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, Seq(allBoolRuleApplicationStep))
 
           // we can then refine with the implication derived from this equality and the parent-step

@@ -245,7 +245,7 @@ object RenameCNF extends CalculusRule {
       val (l, cnfInfo) = apply_rwUnderBinder(vargen, cashExtracts, nl, THRESHHOLD)
       if (cnfInfo.rewriteUnderBinder) unencodableRewrite = true
       if (cnfInfo.renameHappend) renameHappened = true
-      accSko = accSko ++ cnfInfo.skolemTerms
+      accSko = accSko ++ cnfInfo.addInfoQuants
       litRes = litRes :+ l
       l match {
         case Seq(Seq(lit)) =>

@@ -181,7 +181,7 @@ case class AddInfoUnivQuant(corrChildVar: (Int, Type),
                             univQuant: Boolean)
 case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
                       renameHappend: Boolean = false,
-                      skolemTerms: Seq[Either[AddInfoSkolem,AddInfoUnivQuant]] = Seq.empty,
+                      addInfoQuants: Seq[Either[AddInfoSkolem,AddInfoUnivQuant]] = Seq.empty,
                       derivedClauses: Seq[Clause]  = Seq.empty)
 
 case class AddInfoCnfConj(idxInConj: Int,

@@ -6,7 +6,7 @@ import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{lpDne, tempLib}
+import leo.modules.output.LPoutput.LPSignature.{lpDne, tempLib, tempLibDeps}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
 import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfConj
 import leo.modules.output.LPoutput.ModularProofEncoding.RenameCnfEncoding.encRenameCnf_conj
@@ -25,6 +25,8 @@ import scala.collection.mutable
 
 object LPoutput {
 
+  val outputSingleFile = false
+
   val permlibFile = "MetaTheorems"
   val multiNDFile = "Multi_ND"
   val calcRuleLibFile = "EPrules"
@@ -32,16 +34,19 @@ object LPoutput {
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
   val nameSignatureFile = "Signature"
-  val abbreviationSignatureFile = "S"
+  val abbreviationSignatureFileNoDot = "S"
+  val abbreviationSignatureFile = if (outputSingleFile) "" else abbreviationSignatureFileNoDot + "."
   val nameFormulaeFile = "Formulae"
-  val abbreviationFormulaeFile = "F"
+  val abbreviationFormulaeFileNoDot = "F"
+  val abbreviationFormulaeFile = if (outputSingleFile) "" else abbreviationFormulaeFileNoDot + "."
 
-  val nameTempFile = "UserTactics"
+  val nameTempFile = "UserTactic"
+  val customUserTacFile = false
 
-  val applyAllDefsTacName = "applyAllDefinitions"
+  val applyAllDefsTacName0 = "applyAllDefinitions"
 
-  val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
-  val multiNdLibStr: String = f"${nameLeoIIILPlib}.${multiNDFile}"
+  val permLibStr: String = f"Stdlib.${permlibFile}"
+  val multiNdLibStr: String = ""//f"${nameLeoIIILPlib}.${multiNDFile}"
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
 
@@ -200,7 +205,7 @@ object LPoutput {
             case leo.modules.calculus.DefExpSimp =>
               //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
               // todo: eta expansion
-              val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, st.defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName, parentInLpEncID.head, sig)
+              val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, st.defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName0, parentInLpEncID.head, sig)
               if (!cantENcode.isDefined) st.etaExpFlag = true
               (toProofStep(stepName, encStep, "DefExpand", lpProofScript(proofSteps), cantENcode),outputInfo)
 
@@ -267,11 +272,13 @@ object LPoutput {
 
     // Write the package file
     val pkgFilePath = outputFolderPath.resolve(pkgFileName)
-    Files.write(
-      pkgFilePath,
-      pkgFileContent.getBytes(StandardCharsets.UTF_8),
-      StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
-    )
+    if (!outputSingleFile){
+      Files.write(
+        pkgFilePath,
+        pkgFileContent.getBytes(StandardCharsets.UTF_8),
+        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+      )
+    }
 
     // Create the makefile
     val makefileContent = s"""|.POSIX:
@@ -298,13 +305,15 @@ object LPoutput {
 
 
     // Write the Makefile using Files.write
-    val makefilePath = outputFolderPath.resolve("Makefile")
-    Files.write(
-      makefilePath,
-      makefileContent.getBytes(StandardCharsets.UTF_8),
-      StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
-    )
-    Out.lp_debug_info(s"Makefile written to: ${makefilePath.toAbsolutePath}")
+    if (!outputSingleFile){
+      val makefilePath = outputFolderPath.resolve("Makefile")
+      Files.write(
+        makefilePath,
+        makefileContent.getBytes(StandardCharsets.UTF_8),
+        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING
+      )
+      Out.lp_debug_info(s"Makefile written to: ${makefilePath.toAbsolutePath}")
+    }
   }
 
   def generateObjectDeclaartions(signatureSymbols: Set[Signature.Key], st: lpProofObject, sig:Signature) = {
@@ -325,7 +334,7 @@ object LPoutput {
       } else {
         if (symbol.hasType) {
           if (isPropSet(Signature.PropSkolemConstant, symbol.flag)) {
-            val typeDec = type2LP(symbol._ty, sig, true)
+            val typeDec = type2LP(symbol._ty, sig, !outputSingleFile)
             skDecsSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
           }
           else {
@@ -336,7 +345,7 @@ object LPoutput {
 
         if (symbol.hasDefn) { // && (! additionalSymbols.contains(key))) {
 
-          val defTermType = type2LP(symbol._defn.ty, sig, true)
+          val defTermType = type2LP(symbol._defn.ty, sig, !outputSingleFile)
 
           if (isPropSet(Signature.PropSkolemConstant, symbol.flag)) {
             //todo: maybe generally encode defs with free vars like this?
@@ -345,18 +354,20 @@ object LPoutput {
             val newBVars = makeBVarList(bVarTys, 0)
             val encBvars = newBVars.map(v => lpOlTypedVar(lpOlConstantTerm(v._1),type2LP(v._2,sig)) )
             val appliedSk = lpOlFunctionApp(lpOlConstantTerm(sName),encBvars.map(Left(_)))
-            val (definition, tptpDefinedSymbols0) = term2LP(strippedDef, fusebVarListwithMap(newBVars, Map()), sig, Set.empty, false, true)
+            val (definition, tptpDefinedSymbols0) = term2LP(strippedDef, fusebVarListwithMap(newBVars, Map()), sig, Set.empty, false, !outputSingleFile)
             val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(appliedSk, Seq.empty), definition)
             val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), encBvars, defAsEq.prf)
             tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
             skDecsSB.append(encodedDef.pretty)
           }
           else {
-            val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, Map(), sig, Set.empty, false, true)
+            val (definition, tptpDefinedSymbols0) = term2LP(symbol._defn, Map(), sig, Set.empty, false, !outputSingleFile)
             tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
-            val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(s"${abbreviationSignatureFile}." + sName), Seq.empty), definition)
+            val maybePrefixedName = if (outputSingleFile) sName else s"${abbreviationSignatureFile}" + sName
+            val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(maybePrefixedName), Seq.empty), definition)
             val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
             defSB.append(encodedDef.pretty)
+            Out.lp_debug_info(s"new Def: ${encodedDef.pretty}")
             // add to the list of definitions that should later be extended in the corresponding steps
             definitions += s"${sName}_def"
           }
@@ -364,14 +375,18 @@ object LPoutput {
       }
     }
 
-    if (definitions.nonEmpty) {
+    if (definitions.nonEmpty) { // false &&
       // define a tactic rewriting with all of the definitions
-      val allDefsListName = "allDefinitions"
-      val decAllDefs = lpDefinition(lpConstantTerm(allDefsListName), Seq(), None, lpList(definitions.map(defName => lpRewrite(None, lpOlConstantTerm(s"${abbreviationFormulaeFile}." + defName)).olTermApp).toSeq))
-      val applyAllDefsTact = lpDefinition(lpConstantTerm(applyAllDefsTacName), Seq(), None, lpRepeat(applyAnyStep(lpOlConstantTerm(allDefsListName))).olTermApp)
-      tacticSB.append(decAllDefs.pretty)
-      tacticSB.append(applyAllDefsTact.pretty)
-    }
+      //val allDefsListName = "allDefinitions"
+      //val decAllDefs = lpDefinition(lpConstantTerm(allDefsListName), Seq(), None, lpList(definitions.map(defName => lpRewrite(None, lpOlConstantTerm(s"${abbreviationFormulaeFile}" + defName)).olTermApp).toSeq))
+      //val applyAllDefsTact = lpDefinition(lpConstantTerm(applyAllDefsTacName), Seq(), None, lpRepeat(applyAnyStep(lpOlConstantTerm(allDefsListName))).olTermApp)
+      //tacticSB.append(decAllDefs.pretty)
+      //tacticSB.append(applyAllDefsTact.pretty)
+
+      // construct tactic instead?
+      //val allDefsInRW = definitions.map(defName => lpRewrite(None, lpOlConstantTerm(s"${abbreviationFormulaeFile}" + defName)).olUsrTac)
+      //val applyAllDefsTact : lpProofScriptStep = lpRepeat(allDefsInRW.reduceRight((r1 : lpProofScriptStep,r2: lpProofScriptStep) => lpTacBinaryConnectiveTerm(lpOrElseTac,r1,r2))).asUserTac
+    }  // todo: this is hackey, instead introdcue a boolean for predefined tactics in scirpt
 
     (tptpDefinedSymbols, typeDecSB, skDecsSB, defSB, tacticSB)
   }
@@ -432,8 +447,8 @@ object LPoutput {
         val axName0 = if (tptpName == "introduced(axiom_of_choice)") "axiom_of_choice" else s"${tptpName.dropRight(1).split(",", 2)(1)}"
         val axName = if (gdv_mode) axName0 else axName0 + s"_p$axCounter"
         val safeAxName = lpEscapeName(axName,sig,false)
-        problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty(PrettyConfig(true,false)))
-        identicalSteps += (stepId -> lpConstantTerm(s"${abbreviationFormulaeFile}.$safeAxName"))
+        problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty(PrettyConfig(!outputSingleFile,false)))
+        identicalSteps += (stepId -> lpConstantTerm(s"${abbreviationFormulaeFile}$safeAxName"))
         axCounter = axCounter + 1
       } else {
         val infoForStep = new lpProofStepInfo(clausifiedSteps.toMap, identicalSteps, tptpDefinedSymbols)
@@ -535,70 +550,94 @@ object LPoutput {
     }
     proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
     val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
-    proofFileSB.append(completeProof.pretty(PrettyConfig(true,false)))
+    proofFileSB.append(completeProof.pretty(PrettyConfig(!outputSingleFile,false)))
 
     (proofFileSB,signatureFileSB,formulaeFileSB)
   }
 
   def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String):Unit={
 
-    val lpOutputPath = Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)
+    val lpOutputPath = if (outputSingleFile) Paths.get(lpOutputPath0) else Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)
     val (proofFileSB,signatureFileSB,formulaeFileSB) = extractNecessaryFormulas(state, false)
 
-    val tempLibStr: String = s"${nameLpOutputFolder}.${nameTempFile}"
+    val tempLibStr: String = if (customUserTacFile) s"${nameLpOutputFolder}.${nameTempFile}" else s"${nameLeoIIILPlib}.${leoSimpTacticFile}"
 
 
     // create a folder for the lambdapi package
     // Create the output directory if it doesn't exist
-    if (!Files.exists(lpOutputPath)) {
-      Files.createDirectory(lpOutputPath)
-      println(s"Folder '$nameLpOutputFolder' created.")
-    } else {
-      println(s"Folder '$nameLpOutputFolder' already exists, overwriting files.")
+    if (!outputSingleFile){
+      if (!Files.exists(lpOutputPath)) {
+        Files.createDirectory(lpOutputPath)
+        println(s"Folder '$nameLpOutputFolder' created.")
+      } else {
+        println(s"Folder '$nameLpOutputFolder' already exists, overwriting files.")
+      }
     }
 
     // write the files
     Out.info("Writing the Lambdapi files")
 
     // todo: only require what we need
-    val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.Epsilon",tempLibStr,calcRuleLibStr,permLibStr,multiNdLibStr)
+    lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List",s"${nameLeoIIILPlib}.Epsilon",calcRuleLibStr,permLibStr,multiNdLibStr)
     //val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\n"
-    val reqString = reqList.map(s => s"require open $s;\n").mkString("")
+    lazy val reqString = reqList.map(s => s"require open $s;\n").mkString("")
     var additions = ""
+    val singleProof: mutable.StringBuilder = new StringBuilder()
+
+    if (!outputSingleFile) {
+      if (customUserTacFile){
+        val tempFilePath = lpOutputPath.resolve(s"$nameTempFile.lp")
+        val wholeTempLib = tempLibDeps + tempLib
+        Files.write(tempFilePath, wholeTempLib.getBytes(StandardCharsets.UTF_8))
+      }
+    } //else singleProof.append(tempLib)
+    additions = additions + s"require open $tempLibStr;\n"
 
     if (signatureFileSB.length != 0) {
-      val signatureFilePath = lpOutputPath.resolve(s"$nameSignatureFile.lp")
-      signatureFileSB.insert(0, reqString)
-      Files.write(signatureFilePath, signatureFileSB.toString.getBytes(StandardCharsets.UTF_8))
-      additions = s"require ${nameLpOutputFolder}.$nameSignatureFile as $abbreviationSignatureFile; \n"
+      if (!outputSingleFile){
+        val signatureFilePath = lpOutputPath.resolve(s"$nameSignatureFile.lp")
+        signatureFileSB.insert(0, reqString)
+        Files.write(signatureFilePath, signatureFileSB.toString.getBytes(StandardCharsets.UTF_8))
+        additions = additions + s"require ${nameLpOutputFolder}.$nameSignatureFile as $abbreviationSignatureFileNoDot; \n"
+      } else{
+        singleProof.append(signatureFileSB)
+      }
     }
 
-    if (formulaeFileSB.length != 0) {
-      val formulaeFilePath = lpOutputPath.resolve(s"$nameFormulaeFile.lp")
-      formulaeFileSB.insert(0, reqString + additions + "\n\n")
-      Files.write(formulaeFilePath, formulaeFileSB.toString.getBytes(StandardCharsets.UTF_8))
-      additions = additions + s"require ${nameLpOutputFolder}.$nameFormulaeFile as $abbreviationFormulaeFile;\n"
+    if (formulaeFileSB.length != 0){
+      if (!outputSingleFile){
+        val formulaeFilePath = lpOutputPath.resolve(s"$nameFormulaeFile.lp")
+        formulaeFileSB.insert(0, reqString + additions + "\n\n")
+        Files.write(formulaeFilePath, formulaeFileSB.toString.getBytes(StandardCharsets.UTF_8))
+        additions = additions + s"require ${nameLpOutputFolder}.$nameFormulaeFile as $abbreviationFormulaeFileNoDot;\n"
+      }
+      singleProof.append(formulaeFileSB)
     }
 
-    val proofFilePath = lpOutputPath.resolve(s"$nameProofFile.lp")
-    proofFileSB.insert(0, reqString + additions + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
-    Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
+    val proofFilePath = if (!outputSingleFile) lpOutputPath.resolve(s"$nameProofFile.lp") else lpOutputPath.resolve(s"$nameLpOutputFolder.lp")
+    if (!outputSingleFile){
+      proofFileSB.insert(0, reqString + additions + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
+    } else {
+      val wholeProof = singleProof.append(proofFileSB)
+      wholeProof.insert(0, reqString + additions + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      Files.write(proofFilePath, wholeProof.toString.getBytes(StandardCharsets.UTF_8))
+    }
 
-    val tempFilePath = lpOutputPath.resolve(s"$nameTempFile.lp")
-    Files.write(tempFilePath, tempLib.getBytes(StandardCharsets.UTF_8))
-
-    // create the Makefile and the pkg file
-    val pkgFileName = "lambdapi.pkg"
-    createLambdapiFiles(lpOutputPath, nameLpOutputFolder, pkgFileName, nameProofFile)
+    if (!outputSingleFile){
+      // create the Makefile and the pkg file
+      val pkgFileName = "lambdapi.pkg"
+      createLambdapiFiles(lpOutputPath, nameLpOutputFolder, pkgFileName, nameProofFile)
+    }
   }
 
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
-    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $multiNdLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
+    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List ${nameLeoIIILPlib}.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $multiNdLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
     val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
     proofFileSB.insert(0, reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
-    val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile." + conjName), Seq.empty,lpConstantTerm(nameProofFile))
+    val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile" + conjName), Seq.empty,lpConstantTerm(nameProofFile))
     proofFileSB.append("\n")
     proofFileSB.append(finalRule.pretty)
     proofFileSB.toString()
