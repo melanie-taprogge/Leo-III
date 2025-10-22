@@ -9,7 +9,7 @@ import leo.modules.output.LPoutput.Encodings._
 import leo.modules.output.LPoutput.LPSignature.{lpDne, tempLib, tempLibDeps}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
 import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfConj
-import leo.modules.output.LPoutput.ModularProofEncoding.RenameCnfEncoding.encRenameCnf_conj
+import leo.modules.output.LPoutput.ModularProofEncoding.RwCnfEncoding.encRenameCnf_conj
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 

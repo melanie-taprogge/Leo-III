@@ -196,108 +196,134 @@ object ModularProofEncoding {
     }
   }
 
-  def SkolemRwTac (skInto: AddInfoSkolem, bV: Map[Int, String], sig:Signature, quantified: Boolean = true) = {
-    if (skInto.ftVs.nonEmpty) throw new Exception(s"Error in Lambdapi encoding: found free ty vars in skolem definition. Polymorphism not yet encoded")
-    val skName = lpOlConstantTerm(s"${sig(skInto.sko).name}_def")
-    val varsToApply = var2Lp(skInto.fVs, bV, sig, true).map(Left(_))
-    val appliedNAme = if (quantified) lpOlFunctionApp(skName, varsToApply) else skName
-    lpRewrite(None, appliedNAme, true).olTermApp
-  }
+  object RwCnfEncoding {
 
-  def leadingDoubleNegation(cl : Clause): Boolean ={
-    if (cl.lits.length == 1){
-      asTerm(cl.lits.head) match {
-        case Not(Not(_)) => true
-        case _ => false
-      }
-    }else false
-  }
+    /**
+      * RWCnf — Outline of the encoded proof
+      *
+      *
+      * Steps:
+      * 0) ...
+      *
+      */
 
-  // generate rule instances for quantifier handling
-  def generateRuleInst (quantifierInfo:  Seq[Either[AddInfoSkolem, AddInfoUnivQuant]], allBvars: Seq[(Int, Type)], bV: Map[Int, String], sig:Signature): (Seq[lpOlFunctionApp],Seq[lpOlTypedVar]) = {
-    var orderedVars : Seq[lpOlTypedVar] = Seq.empty
-    val ruleInstances: Seq[lpOlFunctionApp] = quantifierInfo.map {
-      case Left(sko) =>
-        // construct the information lambdapi needs in order to process this skolem
-        val neededProcedure = if (sko.univQuant) lpSkolemizeUniv else lpSkolemizeExists
-        val skoRW = Left(SkolemRwTac(sko, bV, sig, true))
-        lpOlFunctionApp(neededProcedure, Seq(skoRW))
-      case Right(uq) =>
-        val neededProcedure = if (uq.univQuant) lpMoveUniv else lpMoveExists
-        val corVar = var2Lp(uq.corrChildVar._1, uq.corrChildVar._2, bV, sig, true)
-        orderedVars = orderedVars :+ corVar
-        assert(allBvars.contains(uq.corrChildVar), "Error in LP encoding: Generalized universal quantifier but used variable is not in child")
-        val univTactic = Left(lpAssume(Seq(corVar)).olTermApp)
-        lpOlFunctionApp(neededProcedure, Seq(univTactic))
+
+    def SkolemRwTac(skInto: AddInfoSkolem, bV: Map[Int, String], sig: Signature, quantified: Boolean = true) = {
+      // Build the list of all skolem defs in the order they occoured in the proof
+      // We need to apply the free variables to the skolem def rules. This is important in particular in cases where variables are free but do not appear in the autal definition RHS,
+      // Lambdapi can therefore not infer how they need to be instanciated. As we close Gaps in naming, we can not simply use the free variables as they appear in the def but need to
+      // track the variables during clausification to correctly reference the child vars...
+      if (skInto.ftVs.nonEmpty) throw new Exception(s"Error in Lambdapi encoding: found free ty vars in skolem definition. Polymorphism not yet encoded")
+      val skName = lpOlConstantTerm(s"${sig(skInto.sko).name}_def")
+      val varsToApply = var2Lp(skInto.fVs, bV, sig, true).map(Left(_))
+      val appliedNAme = if (quantified) lpOlFunctionApp(skName, varsToApply) else skName
+      lpRewrite(None, appliedNAme, true).olTermApp
     }
-    (ruleInstances, orderedVars)
-  }
-  object RenameCnfEncoding {
 
-    def generateSkList(skDefinitions: Set[lpDeclaration], allSkDefsListName: String): lpSetTac = {
-      val allSkDefsList = skDefinitions.map(sk => sk.name.pretty)
-      //lpDefinition(lpConstantTerm(allSkDefsListName), Seq(), None, lpList(allSkDefsList.map(defName => lpRewrite(None, lpOlConstantTerm(defName), true).olTermApp).toSeq))
-      lpSetTac(allSkDefsListName, lpList(allSkDefsList.map(defName => lpRewrite(None, lpOlConstantTerm(defName), true).olTermApp).toSeq))
+    def leadingDoubleNegation(cl: Clause): Boolean = {
+      if (cl.lits.length == 1) {
+        asTerm(cl.lits.head) match {
+          case Not(Not(_)) => true
+          case _ => false
+        }
+      } else false
+    }
+
+    // generate rule instances for quantifier handling
+    def generateRuleInst(quantifierInfo: Seq[Either[AddInfoSkolem, AddInfoUnivQuant]], allBvars: Seq[(Int, Type)], bV: Map[Int, String], sig: Signature): (Seq[lpOlFunctionApp], Seq[lpOlTypedVar]) = {
+      var orderedVars: Seq[lpOlTypedVar] = Seq.empty
+      val ruleInstances: Seq[lpOlFunctionApp] = quantifierInfo.map {
+        case Left(sko) =>
+          // construct the information lambdapi needs in order to process this skolem
+          val neededProcedure = if (sko.univQuant) lpSkolemizeUniv else lpSkolemizeExists
+          val skoRW = Left(SkolemRwTac(sko, bV, sig, true))
+          lpOlFunctionApp(neededProcedure, Seq(skoRW))
+        case Right(uq) =>
+          val neededProcedure = if (uq.univQuant) lpMoveUniv else lpMoveExists
+          val corVar = var2Lp(uq.corrChildVar._1, uq.corrChildVar._2, bV, sig, true)
+          orderedVars = orderedVars :+ corVar
+          assert(allBvars.contains(uq.corrChildVar), "Error in LP encoding: Generalized universal quantifier but used variable is not in child")
+          val univTactic = Left(lpAssume(Seq(corVar)).olTermApp)
+          lpOlFunctionApp(neededProcedure, Seq(univTactic))
+      }
+      (ruleInstances, orderedVars)
+    }
+
+    final case class rwCnfCtxt(allBvars: Seq[(Int, Type)], bV: Map[Int, String], allMetaVars: Seq[lpTypedVar], encParent: lpClauseInst, conj: lpOlUntypedBinaryConnectiveTerm_multi)
+
+    private def checkRwCNFEncodable(parent: ClauseProxy, cnfInfo: AddInfoCnf, allBvars: Seq[(Int, Type)]): Option[String] = {
+      if (cnfInfo.renameHappend) Some("Renaming not encoded yet")
+      else if (cnfInfo.rewriteUnderBinder) Some("Clausification involving Binders not encoded")
+      else if (parent.cl.implicitlyBound.nonEmpty && (parent.cl.implicitlyBound.length != allBvars.length)) Some("Fresh variables in re-clausification")
+      else if (parent.cl.lits.length > 1) Some("Re-clausification of clause longer than one currently not encoded")
+      else None
+    }
+
+    private def generateRwCnfCtxt(parent: ClauseProxy, cnfInfo: AddInfoCnf, sig: Signature): Either[String, rwCnfCtxt] = {
+
+      // do the necessary encodings and checks to ensure admissable input data
+
+      // encodings
+      val encParent = lpClauseInst(parent.cl, sig)
+      val (bV, encChildClauses) = lpClauseInst.apply_to_set(cnfInfo.derivedClauses, sig)
+      val allBvars = cnfInfo.derivedClauses.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
+      val allMetaVars = var2Lp(allBvars, bV, sig).map(_.asMlVar)
+      // Construct the conjunction of all derived clauses
+      val conj = lpOlUntypedBinaryConnectiveTerm_multi(lpAnd, encChildClauses.map(_.term))
+
+      Right(rwCnfCtxt(allBvars, bV, allMetaVars, encParent, conj))
     }
 
     def encRenameCnf_conj(parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, cnfInfo: AddInfoCnf, sig: Signature): (lpProofScript, Option[String], lpMlType, Set[Signature.Key]) = {
 
-      // Encode the set of all derived clauses when applying RenameCNF to a given formula
-
-      val encParent = lpClauseInst(parent.cl, sig)
-
       Out.lp_debug_info(s"Verifying clausification of ${parentNameLpEnc.name}")
 
-      // initial setup
-      var cantEncode: Option[String] = if (cnfInfo.renameHappend) Some("Renaming not encoded yet") else None
-      val (bV, encChildClauses) = lpClauseInst.apply_to_set(cnfInfo.derivedClauses, sig)
-      //val allMetaVars = encChildClauses.flatMap(_.metaVars).distinct
-      val allBvars = cnfInfo.derivedClauses.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
-      val allMetaVars = var2Lp(allBvars,bV,sig).map(_.asMlVar)
-      Out.lp_debug_info(s"cnfBvars =  ${bV}")
+      ///////////////////////////////////////////////////////////////////////////////////////
+      //// 0. Set up: encode everything etc. -> extra funct.
 
-      // Construct the conjunction of all derived clauses
-      val conj = lpOlUntypedBinaryConnectiveTerm_multi(lpAnd, encChildClauses.map(_.term))
+      val ctxt = generateRwCnfCtxt(parent, cnfInfo, sig) match {
+        case Left(error) => throw new Exception(error)
+        case Right(value) => value
+      }
+      val rwCnfCtxt(allBvars, bV, allMetaVars, encParent, conj) = ctxt
+
+      // Some additional information necessary to construct the proof-step and insert all necessary declarations of Skolem-Terms
+      val maybeQuanrifiedConj: lpMlType = if (allMetaVars.isEmpty) conj.prf else lpMlDependType(allMetaVars, conj.prf)
+      val allSymbols = cnfInfo.derivedClauses.flatMap(Clause.symbols(_)).toSet
 
       ///////////////////////////////////////////////////////////////////////////////////////
       //// 1. Assume any free variables
       val assumeStep: Seq[lpProofScriptStep] = if (allMetaVars.nonEmpty) Seq(lpAssume(allMetaVars)) else Seq() //todo: change this if we also have fresh vars in re-clausification steps?
 
-      // if we already have free variables (because we are re-clausifying after rule application), we need to assume them first:
-      val allSteps_clausification : Seq[lpProofScriptStep] = if (cnfInfo.rewriteUnderBinder) {
+      //////////////////////////////////////////////////////////////////////////////////////
+      //// Test if we for any reason can not encode
+      val cantEncode = checkRwCNFEncodable(parent, cnfInfo, allBvars)
+      if (cantEncode.isDefined) {
+        Out.lp_debug_info(s"Can not encode CNF: ${cantEncode.get}")
+        (lpProofScript(Seq.empty), cantEncode, maybeQuanrifiedConj, allSymbols)
+      }
+      else {
 
-        // todo
-        Out.lp_debug_info("Can not encode CNF since it requires rewriting under binder")
-        cantEncode = Some("Clausification involving Binders not encoded")
-
-        Seq()
-
-      } else if (parent.cl.implicitlyBound.nonEmpty && (parent.cl.implicitlyBound.length != allBvars.length)) {
-        Out.lp_debug_info("Can not encode CNF since new variables were added to context during re-clausification")
-        cantEncode = Some("Fresh variables in re-clausification")
-        Seq()
-      }else if (parent.cl.lits.length > 1){
-        Out.lp_debug_info("Re-clausification of clause longer than one currently not encoded")
-        cantEncode = Some("Re-clausification of clause longer than one currently not encoded")
-        Seq()
-      } else {
-        val initialAssume : Seq[lpProofScriptStep] = if (parent.cl.implicitlyBound.nonEmpty) {// tdodo: assert that we do not have univ. quantifiers, maybe contain with the other case that requries this?
+        /*
+        // not currently needed as we do not handle cases with added quantifiers
+        val initialAssume: Seq[lpProofScriptStep] = if (parent.cl.implicitlyBound.nonEmpty) { // tdodo: assert that we do not have univ. quantifiers, maybe contain with the other case that requries this?
           val parentVars = parent.cl.implicitlyBound
           val encParentVars = var2Lp(parentVars, bV, sig).map(_.asMlVar)
           Seq(lpAssume(encParentVars))
         } else Seq()
+         */
 
         ///////////////////////////////////////////////////////////////////////////////////////
         //// 2. Proof the conjunction in a sub-step using a Lambdapi tactic and
         //// 3. Refine with the (instantiated) parent
 
-
         val clauseStepName = "Clausification"
 
+        // check if we have universal quantifiers, if so they gotta be at outer scope or they'd have triggered "rw under binder"
         val (allSteps_clausification0): (Seq[lpProofScriptStep]) = if (cnfInfo.addInfoQuants.exists(_.isRight)) {
 
           // if we have skolemisazions after assumes, we have to split the step up in order to use the assumed variables to instanciate the sk defs
-          val assumeFollwedBySk: Boolean = {
+          val uniQuantFollwedBySk: Boolean = {
             var seenRight = false
             cnfInfo.addInfoQuants.exists {
               case Right(_) => seenRight = true; false // keep scanning
@@ -305,26 +331,16 @@ object ModularProofEncoding {
             }
           }
 
-
-          val quantiferTacticsName = s"quantifierTactics"
-          // if we do not need to generate individual steps for all the quantifier applications, juts have a single tactic for doing everything
-          val (instCNFTac, orderedVars): (Seq[lpProofScriptStep], Seq[lpOlTypedVar]) = if (!assumeFollwedBySk) {
-            // cosntruct list in lp
+          // here, we generate the tactic we need to instanciate and the free vars generated by the universal quantifiers
+          val (instCNFTac, orderedVars): (Seq[lpProofScriptStep], Seq[lpOlTypedVar]) = if (!uniQuantFollwedBySk) {
+            // if we have no universal quantifiers followed by existential ones:
+            // Compose the eval tactic for handling the quantifiers
             val (ruleInstances, orderedVars0) = generateRuleInst(cnfInfo.addInfoQuants, allBvars, bV, sig)
             Out.lp_debug_info(s"ordered vars: ${orderedVars0.map(_.pretty)}")
-
-            val setQuantList = lpSetTac(quantiferTacticsName, lpList(ruleInstances))
-            //(Some(lpConstantTerm(quantiferTacticsName)), Seq(setSkList))
-            //lpEval(lpFunctionApp(cnfTacQuantifiers,Seq(varsListName.getOrElse(lpListLast),skDefsListName.getOrElse(lpListLast))))
-            Out.lp_debug_info(s"the following tactic is produced: ${setQuantList.pretty}")
-            // version defining a named list and then applying it
-            //(setQuantList +: Seq(lpEval(lpFunctionApp(cnfTacQuantifiers, Seq(lpConstantTerm(quantiferTacticsName))))), orderedVars0)
-            // version directly applying it
             (Seq(lpEval(lpFunctionApp(cnfTacQuantifiers, Seq(lpList(ruleInstances))))), orderedVars0)
+
           } else {
-
-            // if we have leading double negations, the first thing we need to do is eliminate them
-
+            // handle the initial part of the list containing the universal quantifiers seperatley from the second part
             // we need to split up the list: one part has the initial quantifiers, the other has the ones applied throughout clausification
             val lastUQIdx = cnfInfo.addInfoQuants.lastIndexWhere(_.isRight)
             val (upToLastUnivQuant, rest) =
@@ -337,90 +353,59 @@ object ModularProofEncoding {
             } else (Seq(), Seq())
             // and produce a tactic for the remaining ones (or if all quantifiers are leading, we just apply boolean terms)
             val (nestedSkolems): Seq[lpProofScriptStep] = if (rest.nonEmpty) {
+              // todo: make this a def and also use for the upper case
               val (ruleInstances, orderedVars0) = generateRuleInst(rest, allBvars, bV, sig)
               assert(orderedVars0.isEmpty, "Error in LP encoidng: expected instances of skolemisazion but found quantifier generalisazion")
               Seq(lpEval(lpFunctionApp(cnfTacQuantifiers, Seq(lpList(ruleInstances)))))
             } else Seq(lpEval(onlyBoolRulesTermName))
             (leadingQuants ++ nestedSkolems, orderedVars)
-          }
+          } // todo: have general handling of these cases unified with the case where we do not have universal quantifiers
 
 
+          // construct the have-step including universal quantifiers todo: unify with other cases
           val quantifiedConj = lpOlBoundTerm(lpOlForAll, orderedVars, conj)
           val clausStep: lpHave = lpEqHaveStepConstructor(clauseStepName, Seq.empty, encParent.term, quantifiedConj, lpOtype, instCNFTac)
-
           val instClausStep = lpFunctionApp(lpFunctionApp(lpTheorems.eqImp, Seq(lpConstantTerm(clauseStepName))), Seq(parentNameLpEnc))
 
-          // if we have more variables than just one, we may have to reorder
+          // if we have more variables than just one, we may have to reorder. Then we assume the variables and apply them in the correct order
           val (maybeAssumeStep, maybeAppliedStep) = if (orderedVars.length > 1) {
             (assumeStep, lpFunctionApp(instClausStep, orderedVars))
           } else (Seq(), instClausStep)
 
           // we can then refine with the implication derived from this equality and the parent-step
           val refineStep = lpRefine(maybeAppliedStep)
-
-
           val resscript = (Seq(clausStep) ++ maybeAssumeStep :+ refineStep)
-
-          Out.lp_debug_info(s"final script is \n${lpProofScript(resscript).pretty}")
-
-
           resscript
-        } else {
-          // In this case, only boolean identities were applied in clausification
-          assert(encParent.vars.length <= allMetaVars.length, "LP encoding: Clausification unexpectedly increased number of free vars")
 
-          assert(cnfInfo.addInfoQuants.forall(_.isLeft), "LP encoding: Clausification unexpectedly increased number of free vars")
+        } else {
+          // Case of no universal quantifiers (the old stuff)
+          assert(encParent.vars.length <= allMetaVars.length, "LP encoding: Clausification unexpectedly increased number of free vars")
+          assert(cnfInfo.addInfoQuants.forall(_.isLeft), "LP encoding: Unexpected universal quantifer genealisazion when skolemisazion was expected")
           val skolems = cnfInfo.addInfoQuants.collect { case Left(s) => s }
 
-          // We verify the application via a have-step proving equality via a dedicated lambdapi tactic
-          val setVarList: Seq[lpSetTac] = Seq()
-
-          // Build the list of all skolem defs in the order they occoured in the proof
-          // We need to apply the free variables to the skolem def rules. This is important in particular in cases where variables are free but do not appear in the autal definition RHS,
-          // Lambdapi can therefore not infer how they need to be instanciated. As we close Gaps in naming, we can not simply use the free variables as they appear in the def but need to
-          // track the variables during clausification to correctly reference the child vars...
-          /*
-        val rewriteForSkolems = skolems.map { skInto =>
-          if (skInto.ftVs.nonEmpty) throw new Exception(s"Error in Lambdapi encoding: found free ty vars in skolem definition. Polymorphism not yet encoded")
-          val skName = lpOlConstantTerm(s"${sig(skInto.sko).name}_def")
-          val varsToApply = var2Lp(skInto.fVs,bV,sig).map(Left(_))
-          val appName = lpOlFunctionApp(skName, varsToApply)
-          lpRewrite(None, appName, true).olTermApp
-        }
-         */
+          // todo: use call to "generateRuleInst" instead of the following lines?
           val rewriteForSkolems = skolems.map { skInto => SkolemRwTac(skInto, bV, sig) }
 
           Out.lp_debug_info(s"new skolem definitions in child: ${skolems.map(skInfo => sig(skInfo.sko).name)}")
 
           val skList: Option[lpList] = if (rewriteForSkolems.nonEmpty) {
-            val allSkDefsListName = s"allSkDefinitions"
-            val setSkList = lpSetTac(allSkDefsListName, lpList(rewriteForSkolems.toSeq))
-            val skList0 = lpList(rewriteForSkolems.toSeq)
+            val skList0 = lpList(rewriteForSkolems)
             (Some(skList0))
           } else None
 
+          val instSkTac = if (skList.nonEmpty) lpEval(lpFunctionApp(lpFunctionApp(cnfTacSkolem, Seq(lpSkolemProcess)), Seq(skList.getOrElse(lpListLast)))) else lpEval(onlyBoolRulesTermName)
 
-          //val instCNFTac = cnfTac(None, skList)
-          val instSkTac = if (skList.nonEmpty) lpEval(lpFunctionApp(lpFunctionApp(cnfTacSkolem,Seq(lpSkolemProcess)),Seq(skList.getOrElse(lpListLast)))) else lpEval(onlyBoolRulesTermName)
-
-          val clausStep: lpHave = lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, (setVarList) :+ instSkTac)
+          val clausStep: lpHave = lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, Seq(instSkTac))
           lpEqHaveStepConstructor(clauseStepName, encParent.metaVars, encParent.term, conj, lpOtype, Seq(allBoolRuleApplicationStep))
 
           // we can then refine with the implication derived from this equality and the parent-step
           val refineStep = lpRefine(lpFunctionApp(lpFunctionApp(lpTheorems.eqImp, Seq(lpFunctionApp(lpConstantTerm(clauseStepName), allMetaVars))), Seq(lpFunctionApp(parentNameLpEnc, allMetaVars))))
           ((Seq(clausStep)) ++ assumeStep) :+ refineStep
         }
-        //initialAssume ++
-        allSteps_clausification0
+
+        (lpProofScript(allSteps_clausification0), cantEncode, maybeQuanrifiedConj, allSymbols)
       }
-
-      // Some additional information necessary to construct the proof-step and insert all necessary declarations of Skolem-Terms
-      val maybeQuanrifiedConj: lpMlType = if (allMetaVars.isEmpty) conj.prf else lpMlDependType(allMetaVars, conj.prf)
-      val allSymbols = cnfInfo.derivedClauses.flatMap(Clause.symbols(_)).toSet
-
-      (lpProofScript(allSteps_clausification), cantEncode, maybeQuanrifiedConj, allSymbols)
     }
-
   }
 
   object CnfConjEncoding {
