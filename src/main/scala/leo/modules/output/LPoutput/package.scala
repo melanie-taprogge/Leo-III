@@ -119,7 +119,7 @@ package object LPoutput {
   }
 
   final def lpEscapeName(str: String, sig: Signature, prefix: Boolean = true): String = {
-    val prefixStr = if (prefix) s"${abbreviationSignatureFile}." else ""
+    val prefixStr = if (prefix) s"${abbreviationSignatureFile}" else ""
     if (partiallyAlliedTPTPmap.keySet.contains(str)) {
       throw new Exception(s"trying to escape name for parially applied connective $str, this should not happen")
     } //throw new Exception(s"found illegal $str")
@@ -747,6 +747,21 @@ package object LPoutput {
       Out.finest(s"New: \t${newFvs.mkString("-")} ... subst: ${subst.pretty}")
       cls.map(cl => Clause(cl.lits.map(l => l.applyRenamingSubstitution(subst))))
     } else cls
+  }
+
+  def extendBvarMap(bV: Map[Int, String], extBy: Int): Map[Int, String] = {
+    // ensure that the current map is formed as expected
+    val startK = bV.size
+    assert(bV.keySet == (1 to startK).toSet, s"Error in LP encoding: Trying to extend bVars map, but current map is mal-formed (Key set: ${bV.keySet}, expected ${(1 to startK).toSet})")
+    if (extBy == 0) return bV
+
+    val used = bV.values.toSet
+
+    // find fresh candidate names produced by intToName, skipping those already used
+    val freshNames = Iterator.from(startK).map(intToName).filterNot(used.contains).take(extBy).toVector
+    val newBindings = freshNames.zipWithIndex.map { case (nm, i) => (startK + 1 + i) -> nm }
+
+    bV ++ newBindings
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////

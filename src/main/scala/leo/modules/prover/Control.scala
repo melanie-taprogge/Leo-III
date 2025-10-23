@@ -179,7 +179,7 @@ package inferenceControl {
       if (CnfConj.canApply(cnfresult0)) {
         // conjunction of all derived clauses
         val (conjCl, cnfresult) = CnfConj(cnfresult0)
-        val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder, cnfInfo.renameHappend, cnfInfo.skolemTerms, cnfresult0))
+        val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder, cnfInfo.renameHappend, cnfInfo.addInfoQuants, cnfresult0))
         val conjResult = AnnotatedClause(conjCl, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties), furtherInfo)
         // individual clauses of the conjunction
         val result = cnfresult.map { (cIdx) =>
@@ -196,7 +196,7 @@ package inferenceControl {
           Set(cl)
         } else {
           // CNF resulted in only one clause
-          val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder, cnfInfo.renameHappend, cnfInfo.skolemTerms, cnfresult0))
+          val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder, cnfInfo.renameHappend, cnfInfo.addInfoQuants, cnfresult0))
           val result = AnnotatedClause(cnfresult0.head, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties), furtherInfo)
           Out.trace(s"CNF result:\n\t${result.pretty(s.signature)}")
           Set(result)

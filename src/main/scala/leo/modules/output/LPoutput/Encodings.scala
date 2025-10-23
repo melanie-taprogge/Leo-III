@@ -105,7 +105,7 @@ object Encodings {
           tptpDefinedTypeMap(baseType)
         }else{
           //val lpSafeName = lpEscapeName(sig(id).name, sig, false)
-          //val prefixedSafeName = if (prefix) s"${abbreviationSignatureFile}.$lpSafeName" else lpSafeName
+          //val prefixedSafeName = if (prefix) s"${abbreviationSignatureFile}$lpSafeName" else lpSafeName
           //(lpOlUserDefinedType(prefixedSafeName))
           val lpSafeName = lpEscapeName(sig(id).name,sig,prefix)
           (lpOlUserDefinedType(lpSafeName))
@@ -175,7 +175,7 @@ object Encodings {
     }
     (boundVars, resultBindingMap, usedSymbols)
   }
-  def clause2LP0(cl: Clause, bVarMap: Map[Int, String],sig: Signature, usedSymbols0: Set[lpStatement]): (lpOlUntypedBinaryConnectiveTerm_multi,Set[lpStatement]) = {
+  def clause2LP0(cl: Clause, bVarMap: Map[Int, String],sig: Signature, usedSymbols0: Set[lpStatement], prefix: Boolean = true): (lpOlUntypedBinaryConnectiveTerm_multi,Set[lpStatement]) = {
     //val encodedClause = new StringBuilder
     var encodedClause: lpOlUntypedBinaryConnectiveTerm_multi = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,Seq(lpOlNothing))
     var usedSymbols = usedSymbols0
@@ -192,9 +192,9 @@ object Encodings {
         var encLit: lpOlTerm = lpOlBot
         if (lit.equational) {
           val (left, right) = (lit.left, lit.right)
-          val (lefEnc, usedSymbolsL) = term2LP(left, bVarMap, sig, usedSymbols)
-          val (rigEnc, usedSymbolsR) = term2LP(right, bVarMap, sig, usedSymbolsL)
-          val encTyTl = type2LP(left.ty,sig)
+          val (lefEnc, usedSymbolsL) = term2LP(left, bVarMap, sig, usedSymbols,false,prefix)
+          val (rigEnc, usedSymbolsR) = term2LP(right, bVarMap, sig, usedSymbolsL,false,prefix)
+          val encTyTl = type2LP(left.ty,sig,prefix)
           usedSymbols = usedSymbolsR
           if (lit.polarity) {
             encLit = lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl,lefEnc,rigEnc)
@@ -202,7 +202,7 @@ object Encodings {
             encLit = lpOlUnaryConnectiveTerm(lpNot,lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl,lefEnc,rigEnc))
           }
         } else {
-          val (termEnc, usedSymbolsUpdated) = term2LP(lit.left, bVarMap, sig, usedSymbols)
+          val (termEnc, usedSymbolsUpdated) = term2LP(lit.left, bVarMap, sig, usedSymbols,false,prefix)
           usedSymbols = usedSymbolsUpdated
           if (lit.polarity){
             encLit = termEnc
@@ -291,7 +291,7 @@ object Encodings {
         val usedSymbolsQuant = usedSymbolsUpdated
         var quantifiedVars: Seq[lpOlTypedVar]= Seq.empty
         newBVars foreach { s_ty =>
-          val encType = type2LP(s_ty._2, sig)
+          val encType = type2LP(s_ty._2, sig, prefix)
           quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType)
         }
         (lpOlBoundTerm(lpOlForAll,quantifiedVars,encBody), usedSymbolsQuant)
@@ -303,7 +303,7 @@ object Encodings {
         val usedSymbolsQuant = usedSymbolsUpdated
         var quantifiedVars: Seq[lpOlTypedVar] = Seq.empty
         newBVars foreach { s_ty =>
-          val encType = type2LP(s_ty._2, sig)
+          val encType = type2LP(s_ty._2, sig, prefix)
           quantifiedVars = quantifiedVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1), encType)
         }
         (lpOlBoundTerm(lpOlExists, quantifiedVars, encBody), usedSymbolsQuant)
@@ -314,7 +314,7 @@ object Encodings {
         val (encBody, usedSymbolsUpdated) = term2LP(body, fusebVarListwithMap(newBVars, bVars), sig, usedSymbols, supressReduction,prefix)
         var boundVars: Seq[lpOlTypedVar] = Seq.empty
         newBVars foreach { s_ty =>
-          val encType = type2LP(s_ty._2, sig)
+          val encType = type2LP(s_ty._2, sig, prefix)
           boundVars = boundVars :+ lpOlTypedVar(lpOlConstantTerm(s_ty._1), encType)
         }
         (lpOlBoundTerm(lpChoice, boundVars, encBody), usedSymbolsUpdated)
@@ -331,13 +331,13 @@ object Encodings {
       case tl === tr =>
         val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction,prefix)
         val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction,prefix)
-        val encTyTl = type2LP(tl.ty,sig)
+        val encTyTl = type2LP(tl.ty,sig, prefix)
         // todo: here i need to make changes for polymorphic types of LP TYPE Scheme
         (lpOlTypedBinaryConnectiveTerm(lpEq,encTyTl,encodedTl,encodedTr), updatedUsedSymbolsR)
       case tl !=== tr =>
         val (encodedTl, updatedUsedSymbolsL) = term2LP(tl, bVars, sig, usedSymbols ,supressReduction,prefix)
         val (encodedTr, updatedUsedSymbolsR) = term2LP(tr, bVars, sig, updatedUsedSymbolsL ,supressReduction,prefix)
-        val encTyTl = type2LP(tl.ty,sig)
+        val encTyTl = type2LP(tl.ty,sig, prefix)
         // like equ: todo: here i need to make changes for polymorphic types of LP TYPE Scheme
         (lpOlTypedBinaryConnectiveTerm(lpInEq,encTyTl.lift2Poly,encodedTl,encodedTr), updatedUsedSymbolsR)
       case tl Impl tr =>
@@ -371,7 +371,7 @@ object Encodings {
           var updatedUsedSymbols = updatedUsedSymbols0
           var abstractions: Seq[Either[lpOlTypedVar,lpOlTyVar]] = Seq.empty
           newBVars foreach { s_ty =>
-            val encType = type2LP(s_ty._2, sig)
+            val encType = type2LP(s_ty._2, sig, prefix)
             abstractions = abstractions :+ Left(lpOlTypedVar(lpOlConstantTerm(s_ty._1),encType))//todo: for polymorphy we might also need to use Scheme types here
             // todo: summarize same types into one bracket
           }
@@ -389,7 +389,7 @@ object Encodings {
       // match pattern of application
       case _@Symbol(id) ∙ args if leo.modules.input.InputProcessing.adHocPolymorphicArithmeticConstants.contains(id) =>
         val opName = lpEscapeName(sig(id).name, sig, false)
-        val prefixedName = if (prefix) s"${abbreviationSignatureFile}.$opName" else opName
+        val prefixedName = if (prefix) s"${abbreviationSignatureFile}$opName" else opName
         val (opType,tyVars) = polyType2Lp(sig(id)._ty,sig)
         val arithmeticOperator = lpTptpOperator(opName,opType,tyVars)
         val prefixedOperator = lpTptpOperator(prefixedName,opType,tyVars)
@@ -404,7 +404,7 @@ object Encodings {
               updatedUsedSymbols = updatedUsedSymbols0
               arguments = arguments :+ Left(encArg)
             case Right(tyArg) =>
-              val encArg = type2LP(tyArg, sig)
+              val encArg = type2LP(tyArg, sig,prefix)
               arguments = arguments :+ Right(encArg)
           }
         }
@@ -421,7 +421,7 @@ object Encodings {
               updatedUsedSymbols = updatedUsedSymbols0
               arguments = arguments :+ Left(encArg)
             case Right(tyArg) =>
-              val encArg = type2LP(tyArg, sig)
+              val encArg = type2LP(tyArg, sig,prefix)
               arguments = arguments :+ Right(encArg)
           }
         }

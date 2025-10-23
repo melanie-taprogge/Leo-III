@@ -14,21 +14,51 @@ object CNFEncoding {
 
   val allBoolRulesTermName = lpConstantTerm("boolIds")
 
+  val onlyBoolRulesTermName = lpConstantTerm("onlyBoolIds")
+
   val allBoolRuleApplicationStep = lpEval(allBoolRulesTermName)
 
   val fullCnfTacName = lpConstantTerm("cnfTac")
-  def cnfTac(varsListName: Option[lpConstantTerm],skDefsListName: Option[lpConstantTerm]) = {
 
-    /*
-    val instTac: lpTerm= (varsListName, skDefsListName) match {
-      case (Some(vars), Some(sks)) => lpFunctionApp(fullCnfTacName,Seq(vars,sks))
-      case (Some(vars), None) =>
-      case (None, Some(sks)) =>
-      case (None,None) => allBoolRulesTermName
-    }
-     */
-    lpEval(lpFunctionApp(fullCnfTacName,Seq(varsListName.getOrElse(lpListLast),skDefsListName.getOrElse(lpListLast))))
+  val cnfTacQuantifiers = lpConstantTerm("stepwise_quants")
+
+  val cnfTacSkolem = lpConstantTerm("stepwise_skolem")
+
+  def cnfTac(varsListName: Option[lpConstantTerm],skDefsLis: Option[lpList]) = {
+
+    lpEval(lpFunctionApp(fullCnfTacName,Seq(varsListName.getOrElse(lpListLast),skDefsLis.getOrElse(lpListLast))))
 }
+
+  abstract class clausificationProcedures extends lpUserTactic {
+    def name: lpConstantTerm
+    override def pretty(implicit prefix: PrettyConfig): String = name.pretty
+  }
+
+  case object lpSkolemizeExists extends clausificationProcedures {
+    override def name: lpConstantTerm = lpConstantTerm("skolemProzess_∃")
+  }
+
+  case object lpSkolemizeUniv extends clausificationProcedures {
+    override def name: lpConstantTerm = lpConstantTerm("skolemProzess_∀")
+  }
+
+  case object lpSkolemProcess extends clausificationProcedures {
+    override def name: lpConstantTerm = lpConstantTerm("skolemProzess")
+  }
+
+  case object lpMoveUniv extends clausificationProcedures {
+    override def name: lpConstantTerm = lpConstantTerm("move_∀_out")
+  }
+
+  case object lpMoveExists extends clausificationProcedures {
+    override def name: lpConstantTerm = lpConstantTerm("move_¬∃_out")
+  }
+
+  case object singleStepQuant extends clausificationProcedures {
+    override def name: lpConstantTerm = lpConstantTerm("singleStepQuant")
+  }
+
+
 
 
 }

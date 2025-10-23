@@ -388,7 +388,7 @@ object lpDatastructures {
   case class lpInt(n: Int0) extends lpOlTerm {
     override def pretty (implicit prefix : PrettyConfig): String = {
       val baseName = s"int_$n"
-      if (prefix.sigPrefix) s"$abbreviationSignatureFile.$baseName" else baseName
+      if (prefix.sigPrefix) s"$abbreviationSignatureFile$baseName" else baseName
     }
 
     override def prf: lpMlType = throw new Exception(s"trying to provide proof of an integer in LP encoding")
@@ -396,7 +396,7 @@ object lpDatastructures {
 
   case object lpIntType extends lpOlMonoType {
     val baseName = "tptp_int"
-    override def pretty (implicit prefix : PrettyConfig): String = if (prefix.sigPrefix) s"${abbreviationSignatureFile}.$baseName" else baseName
+    override def pretty (implicit prefix : PrettyConfig): String = if (prefix.sigPrefix) s"${abbreviationSignatureFile}$baseName" else baseName
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpIntType)
     override def lift2Meta: lpMlType = lpliftedObjectType(lpIntType)
   }
@@ -707,7 +707,7 @@ object lpDatastructures {
   case class lpOlBoundTerm(quantifier: lpOlBinder, variables: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
 
     def quantEachVar(quantifier: lpOlBinder, variables: Seq[lpOlTypedVar], body: lpOlTerm): lpOlTerm = {
-      if (variables.isEmpty) throw new Exception("trying to encode Lambdapi quanification without variables")
+      if (variables.isEmpty) throw new Exception(s"trying to encode Lambdapi quanification without variables (body : ${body.pretty})")
       else if (variables.length == 1) lpOlMonoQuantifiedTerm(quantifier, variables.head, body)
       else {
         var quantifiedTerm = body
@@ -849,7 +849,7 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpHave(name,ty, proofScript, tab)))
   }
 
-  case class lpEval(tacticTerm: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+  case class lpEval(tacticTerm: lpStatement, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
 
     def addTab(i: Int): lpEval = lpEval(tacticTerm, tab + i)
 
@@ -862,7 +862,11 @@ object lpDatastructures {
 
     override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{eval ${tacticTerm.pretty}"
 
-    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm: lpTerm, tab)))
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm, tab)))
+  }
+
+  abstract class lpUserTactic extends lpOlTerm {
+    override def prf: lpMlType = throw new Exception(s"Error in LP encoding: Trying to generate proof for user tactic")
   }
 
   case class lpRewritePattern (pattern: lpTerm, patternVar: lpOlUntypedVar = lpOlUntypedVar(lpConstantTerm("x"))) extends lpTerm {
@@ -883,6 +887,16 @@ object lpDatastructures {
           val sideStr = if (rwRhs) s"\"left\"" else s"\"\""
           lpOlFunctionApp(lpOlConstantTerm(asOlTerm),Seq(Left(lpOlConstantTerm(sideStr)), Left(lpOlConstantTerm(patternStr)),Left(t)))
         case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${rewriteTerm.pretty(PrettyConfig(false,false))} to $asOlTerm")
+      }
+    }
+
+    lazy val olUsrTac : lpProofScriptStep = {
+      rewriteTerm match {
+        case t: lpOlTerm =>
+          val patternStr = if (rewritePattern0.isDefined) s"\"${rewritePattern0.get}\"" else s"\"\""
+          val sideStr = if (rwRhs) s"\"left\"" else s"\"\""
+          lpUserTacApp(lpConstantTerm(asOlTerm),Seq(lpOlConstantTerm(sideStr), lpOlConstantTerm(patternStr), t))
+        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${rewriteTerm.pretty(PrettyConfig(false, false))} to $asOlTerm")
       }
     }
 
@@ -914,6 +928,16 @@ object lpDatastructures {
 
   case class lpAssume(vars: Seq[lpTerm], tab: Int = 0) extends lpProofScriptStep(tab: Int){
     def addTab(i : Int): lpAssume = lpAssume(vars, tab + i)
+
+    val asOlTerm = "#assume"
+
+    def olTermApp = {
+      lazy val processedVars: Seq[String] = vars.map {
+        case lpOlTypedVar(n,t) => n.pretty
+        case other => throw new Exception(s"Error in LP encoding: Attempting to instanciate $asOlTerm with ${other}")
+      }
+      lpOlFunctionApp(lpOlConstantTerm(asOlTerm), Seq(Left(lpOlConstantTerm(s"\"${processedVars.mkString(" ")}\""))))
+    }
 
     val tabs: String = "\t" * tab
     override def pretty (implicit prefix : PrettyConfig): String = {
@@ -958,18 +982,21 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpTacSimplify(tab)))
   }
 
-  case class lpRepeat(stepToRepeat: lpTerm, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+  case class lpRepeat(stepToRepeat: lpStatement, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
     def addTab(i: Int): lpRepeat = lpRepeat(stepToRepeat, tab + i)
 
     val asOlTerm = "#repeat"
 
-    val olTermApp = {
+    lazy val olTermApp = {
       stepToRepeat match {
         case t: lpOlTerm => lpOlFunctionApp(lpOlConstantTerm(asOlTerm), Seq(Left(t)))
-        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${stepToRepeat.pretty(PrettyConfig(false,false))} to $asOlTerm")
+        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level term ${stepToRepeat.pretty(PrettyConfig(false, false))} to $asOlTerm")
       }
     }
 
+    val asUserTac = {
+      lpUserTacApp(lpConstantTerm(asOlTerm),Seq(stepToRepeat))
+    }
     override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t" * tab
       s"${tabs}repeat ${stepToRepeat.pretty}"
@@ -981,5 +1008,66 @@ object lpDatastructures {
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRepeat(stepToRepeat, tab)))
   }
+
+  case class lpTacBinaryConnectiveTerm(connective: lpTacBinaryConnective, lhs: lpProofScriptStep, rhs: lpProofScriptStep, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    override def addTab(i: Int): lpTacBinaryConnectiveTerm = lpTacBinaryConnectiveTerm(connective, lhs, rhs, tab + i)
+
+    override def toProofScrips: lpProofScript = throw new Exception(s"Error in LP encoidng: trying to convert instance of ${connective.pretty} to proof script")
+
+    //val tabs = "\t" * tab
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix: PrettyConfig): String = throw new Exception(s"Error in LP encoidng: trying to convert instance of ${connective.pretty} to proof script")
+
+    override def pretty(implicit prefix: PrettyConfig): String = s"(${lhs.pretty} ${connective.pretty} ${rhs.pretty})"
+  }
+
+  case class lpUserTacApp(tacConst: lpStatement, tacs: Seq[lpStatement], tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    override def addTab(i: Int): lpUserTacApp = lpUserTacApp(tacConst, tacs, tab + i)
+
+    override def toProofScrips: lpProofScript = throw new Exception(s"Error in LP encoidng: trying to convert instance of ${tacConst.pretty} to proof script")
+
+    //val tabs = "\t" * tab
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix: PrettyConfig): String = throw new Exception(s"Error in LP encoidng: trying to convert instance of ${tacConst.pretty} to proof script")
+
+    override def pretty(implicit prefix: PrettyConfig): String = {
+      if (tacs.isEmpty) throw new Exception(s"Error in LP Encoidng: no tactics given to constructor ${tacConst.pretty}")
+      val prettyArgs = tacs.map(_.pretty)
+      s"(${tacConst.pretty} ${prettyArgs.mkString(" ")})"
+    }
+  }
+
+  abstract class lpTacBinaryConnective extends lpStatement
+
+  final case object lpOrElseTac extends lpTacBinaryConnective {
+    override def pretty(implicit prefix: PrettyConfig): String = "#orelse";
+
+    val nonInfix: String = s"($pretty)"
+  }
+
+
+  /*
+  case class lpOrElse(termA: lpProofScriptStep, termB: lpProofScriptStep, tab: Int = 0) extends lpTacBinaryConnectiveTerm {
+    def addTab(i: Int): lpOrElse = lpOrElse(termA, termB, tab + i)
+
+    val asOlTerm = "#orelse"
+
+    val olTermApp = {
+      (termA, termB) match {
+        case (tA: lpProofScriptStep, tB: lpProofScriptStep) => lpFunctionApp(lpConstantTerm(lpOrElseTac.nonInfix),Seq(tA,tB))
+        case _ => throw new Exception(s"LP-Encoding: Trying to apply meta level terms ${termA.pretty(PrettyConfig(false, false))} and ${termB.pretty(PrettyConfig(false, false))} to $asOlTerm")
+      }
+    }
+
+    override def pretty(implicit prefix: PrettyConfig): String = {
+      throw new Exception(s"Error in LP encoding: trying to use $asOlTerm outside of eval")
+    }
+
+    val tabs = "\t" * tab
+
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix: PrettyConfig): String = throw new Exception(s"Error in LP encoding: trying to use $asOlTerm outside of eval")
+
+    override def toProofScrips: lpProofScript = throw new Exception(s"Error in LP encoding: trying to use $asOlTerm outside of eval")
+  }
+
+   */
 
 }

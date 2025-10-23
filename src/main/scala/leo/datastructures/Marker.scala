@@ -174,10 +174,14 @@ abstract sealed class ClauseAnnotation extends Pretty {
 
 case class AddInfoSkolem(sko: Signature.Key,
                          fVs: Seq[(Int, Type)],
-                         ftVs: Seq[Int])
+                         ftVs: Seq[Int],
+                         univQuant: Boolean)
+
+case class AddInfoUnivQuant(corrChildVar: (Int, Type),
+                            univQuant: Boolean)
 case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
                       renameHappend: Boolean = false,
-                      skolemTerms: Seq[AddInfoSkolem] = Seq.empty,
+                      addInfoQuants: Seq[Either[AddInfoSkolem,AddInfoUnivQuant]] = Seq.empty,
                       derivedClauses: Seq[Clause]  = Seq.empty)
 
 case class AddInfoCnfConj(idxInConj: Int,

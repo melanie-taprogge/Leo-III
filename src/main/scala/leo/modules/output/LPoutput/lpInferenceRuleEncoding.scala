@@ -315,7 +315,7 @@ object lpInferenceRuleEncoding {
 
   case object metaSelect extends inferenceRules {
 
-    override def name: lpConstantTerm = lpConstantTerm(s"select")
+    override def name: lpConstantTerm = lpConstantTerm(s"∧ₑₙ")
 
     override def ty: lpMlType = throw new Exception(s"trying to access type of Lambdapi-Meta theorem transform")
 

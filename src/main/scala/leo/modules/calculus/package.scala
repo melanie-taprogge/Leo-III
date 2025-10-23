@@ -251,7 +251,7 @@ package object calculus {
     val termApps = Term.mkTermApp(typeApps, fvs.map { case (i, ty) => mkBound(ty, i) })
     assert(Term.wellTyped(termApps), s"skTerm Result not well-typed: ${termApps.pretty(sig)}\n" +
       s"% skFunc: ${skFunc.pretty}, type: ${skFunc.ty.pretty(sig)}")
-    val addInto = AddInfoSkolem(skKey,fvs,tyFvs)
+    val addInto = AddInfoSkolem(skKey,fvs,tyFvs,negatePredicate)
     (termApps, addInto)
   }
 

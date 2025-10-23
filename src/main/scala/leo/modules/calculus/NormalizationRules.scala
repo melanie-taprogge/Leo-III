@@ -22,8 +22,8 @@ import scala.collection.mutable
 
 final class RewriteState {
   var rewriteUnderBinderHappened: Boolean = false
-
-  var skolemTerms: Seq[AddInfoSkolem] = Seq.empty
+  var beqondOuterQuantifiers: Boolean = false
+  var skolemTerms: Seq[Either[leo.datastructures.AddInfoSkolem,leo.datastructures.AddInfoUnivQuant]] = Seq.empty
   var renamed: Boolean = false
 }
 object DefExpSimp extends CalculusRule {
@@ -235,16 +235,18 @@ object RenameCNF extends CalculusRule {
 
   final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], l: Seq[Literal], THRESHHOLD: Int)(implicit sig: Signature): (Seq[Seq[Literal]], AddInfoCnf) = {
     var acc: Seq[Seq[Literal]] = Seq(Seq())
-    var accSko: Seq[AddInfoSkolem] = Seq()
+    var accSko: Seq[Either[leo.datastructures.AddInfoSkolem,leo.datastructures.AddInfoUnivQuant]] = Seq()
     var unencodableRewrite = false
     var renameHappened = false
     val it: Iterator[Literal] = l.iterator
+    var litRes: Seq[Seq[Seq[Literal]]] = Seq(Seq())
     while (it.hasNext) {
       val nl = it.next()
       val (l, cnfInfo) = apply_rwUnderBinder(vargen, cashExtracts, nl, THRESHHOLD)
       if (cnfInfo.rewriteUnderBinder) unencodableRewrite = true
       if (cnfInfo.renameHappend) renameHappened = true
-      accSko = accSko ++ cnfInfo.skolemTerms
+      accSko = accSko ++ cnfInfo.addInfoQuants
+      litRes = litRes :+ l
       l match {
         case Seq(Seq(lit)) =>
           acc = acc.map { normLits => normLits :+ lit}
@@ -278,26 +280,44 @@ object RenameCNF extends CalculusRule {
     } else {
     l.left match {
       case Not(t) => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(t, !l.polarity), THRESHHOLD, st)
-      case &(lt,rt) if l.polarity => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true), THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,true), THRESHHOLD, st)
-      case &(lt,rt) if !l.polarity => multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false), THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, false), THRESHHOLD, st))
-      case |||(lt,rt) if l.polarity => multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true),THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, true),THRESHHOLD, st))
-      case |||(lt,rt) if !l.polarity => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false),THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,false),THRESHHOLD, st)
-      case Impl(lt,rt) if l.polarity => multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false),THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, true),THRESHHOLD, st))
-      case Impl(lt,rt) if !l.polarity => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true),THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,false),THRESHHOLD, st)
+      case &(lt,rt) if l.polarity =>
+        st.beqondOuterQuantifiers = true
+        apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true), THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,true), THRESHHOLD, st)
+      case &(lt,rt) if !l.polarity =>
+        st.beqondOuterQuantifiers = true
+        multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false), THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, false), THRESHHOLD, st))
+      case |||(lt,rt) if l.polarity =>
+        st.beqondOuterQuantifiers = true
+        multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true),THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, true),THRESHHOLD, st))
+      case |||(lt,rt) if !l.polarity =>
+        st.beqondOuterQuantifiers = true
+        apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false),THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,false),THRESHHOLD, st)
+      case Impl(lt,rt) if l.polarity =>
+        st.beqondOuterQuantifiers = true
+        multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false),THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, true),THRESHHOLD, st))
+      case Impl(lt,rt) if !l.polarity =>
+        st.beqondOuterQuantifiers = true
+        apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true),THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,false),THRESHHOLD, st)
       case Forall(a@(ty :::> t)) if l.polarity =>
-        st.rewriteUnderBinderHappened = true
-        val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true),THRESHHOLD, st)
+        //st.rewriteUnderBinderHappened = true
+        if (st.beqondOuterQuantifiers) st.rewriteUnderBinderHappened = true
+        val v = vargen.next(ty)
+        st.skolemTerms = st.skolemTerms :+ Right(AddInfoUnivQuant(v,true))
+        apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Forall(a@(ty :::> t)) if !l.polarity =>
         val (sko, addInfo) = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true)
-        st.skolemTerms = st.skolemTerms :+ addInfo
+        st.skolemTerms = st.skolemTerms :+ Left(addInfo)
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD, st)
       case Exists(a@(ty :::> t)) if l.polarity =>
         val (sko, addInfo) = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false)
-        st.skolemTerms = st.skolemTerms :+ addInfo
+        st.skolemTerms = st.skolemTerms :+ Left(addInfo)
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Exists(a@(ty :::> t)) if !l.polarity =>
-        st.rewriteUnderBinderHappened = true
-        val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false),THRESHHOLD, st)
+        //st.rewriteUnderBinderHappened = true
+        if (st.beqondOuterQuantifiers) st.rewriteUnderBinderHappened = true
+        val v = vargen.next(ty)
+        st.skolemTerms = st.skolemTerms :+ Right(AddInfoUnivQuant(v,false))
+        apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false),THRESHHOLD, st)
       case TyForall(a@TypeLambda(t)) if l.polarity =>
         st.rewriteUnderBinderHappened = true
         val ty = vargen.next(); apply0(fvs, ty +: tyFVs, vargen, cashExtracts, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true),THRESHHOLD, st)
