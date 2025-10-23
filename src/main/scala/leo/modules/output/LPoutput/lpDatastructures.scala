@@ -707,7 +707,7 @@ object lpDatastructures {
   case class lpOlBoundTerm(quantifier: lpOlBinder, variables: Seq[lpOlTypedVar], body: lpOlTerm) extends lpOlTerm {
 
     def quantEachVar(quantifier: lpOlBinder, variables: Seq[lpOlTypedVar], body: lpOlTerm): lpOlTerm = {
-      if (variables.isEmpty) throw new Exception("trying to encode Lambdapi quanification without variables")
+      if (variables.isEmpty) throw new Exception(s"trying to encode Lambdapi quanification without variables (body : ${body.pretty})")
       else if (variables.length == 1) lpOlMonoQuantifiedTerm(quantifier, variables.head, body)
       else {
         var quantifiedTerm = body
