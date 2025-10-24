@@ -172,16 +172,22 @@ abstract sealed class ClauseAnnotation extends Pretty {
   def parents: Seq[_ <: ClauseProxy]
 }
 
-case class AddInfoSkolem(sko: Signature.Key,
-                         fVs: Seq[(Int, Type)],
-                         ftVs: Seq[Int],
-                         univQuant: Boolean)
+sealed trait QuantPolarity
+case object QuantUniv extends QuantPolarity
+case object QuantExists extends QuantPolarity
 
-case class AddInfoUnivQuant(corrChildVar: (Int, Type),
-                            univQuant: Boolean)
+sealed trait QuantStep
+final case class SkolemStep(sko: Signature.Key,
+                             fVs: Seq[(Int, Type)],
+                             ftVs: Seq[Int],
+                             polarity: QuantPolarity
+                           ) extends QuantStep
+final case class MoveQuantStep(corrChildVar: (Int, Type),
+                                polarity: QuantPolarity
+                              ) extends QuantStep
 case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
                       renameHappend: Boolean = false,
-                      addInfoQuants: Seq[Either[AddInfoSkolem,AddInfoUnivQuant]] = Seq.empty,
+                      addInfoQuants: Vector[QuantStep] = Vector.empty,
                       derivedClauses: Seq[Clause]  = Seq.empty)
 
 case class AddInfoCnfConj(idxInConj: Int,

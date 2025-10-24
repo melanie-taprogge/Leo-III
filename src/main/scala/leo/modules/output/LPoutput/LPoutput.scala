@@ -46,7 +46,6 @@ object LPoutput {
   val applyAllDefsTacName0 = "applyAllDefinitions"
 
   val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
-  val multiNdLibStr: String = ""//f"${nameLeoIIILPlib}.${multiNDFile}"
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
 
@@ -356,7 +355,8 @@ object LPoutput {
             val appliedSk = lpOlFunctionApp(lpOlConstantTerm(sName),encBvars.map(Left(_)))
             val (definition, tptpDefinedSymbols0) = term2LP(strippedDef, fusebVarListwithMap(newBVars, Map()), sig, Set.empty, false, !outputSingleFile)
             val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(appliedSk, Seq.empty), definition)
-            val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), encBvars, defAsEq.prf)
+            val skolemDefName = nameSkDef(key,sig)
+            val encodedDef = lpDeclaration(lpConstantTerm(skolemDefName), encBvars, defAsEq.prf)
             tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
             skDecsSB.append(encodedDef.pretty)
           }
@@ -633,7 +633,7 @@ object LPoutput {
 
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
-    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $multiNdLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
+    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
     val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
     proofFileSB.insert(0, reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"

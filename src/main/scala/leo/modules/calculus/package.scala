@@ -1,6 +1,6 @@
 package leo.modules
 
-import leo.datastructures.{AddInfoSkolem, Clause, Kind, Literal, Signature, Subst, Term, Type, mkPolyTermLambdaAbs, mkPolyTypeLambdaAbs}
+import leo.datastructures.{Clause, Kind, Literal, QuantExists, QuantUniv, Signature, SkolemStep, Subst, Term, Type, mkPolyTermLambdaAbs, mkPolyTypeLambdaAbs}
 import leo.Out
 import leo.modules.HOLSignature.Not
 import leo.modules.output.SuccessSZS
@@ -207,7 +207,7 @@ package object calculus {
     * @param negatePredicate  boolean indicating whether the term originates from a negated universal quantification
     */
 
-  final def skTermDefined(a: Term, fvs: Seq[(Int, Type)], tyFvs: Seq[Int], negatePredicate: Boolean = false)(implicit sig: Signature): (Term, AddInfoSkolem) = {
+  final def skTermDefined(a: Term, fvs: Seq[(Int, Type)], tyFvs: Seq[Int], negatePredicate: Boolean = false)(implicit sig: Signature): (Term, SkolemStep) = {
     import leo.datastructures.Term.:::>
     import leo.datastructures.Term._
     import leo.modules.HOLSignature.{Choice}
@@ -251,7 +251,7 @@ package object calculus {
     val termApps = Term.mkTermApp(typeApps, fvs.map { case (i, ty) => mkBound(ty, i) })
     assert(Term.wellTyped(termApps), s"skTerm Result not well-typed: ${termApps.pretty(sig)}\n" +
       s"% skFunc: ${skFunc.pretty}, type: ${skFunc.ty.pretty(sig)}")
-    val addInto = AddInfoSkolem(skKey,fvs,tyFvs,negatePredicate)
+    val addInto = SkolemStep(skKey,fvs,tyFvs,if (negatePredicate) QuantUniv else QuantExists)
     (termApps, addInto)
   }
 
