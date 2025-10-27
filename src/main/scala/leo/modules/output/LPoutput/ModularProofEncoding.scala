@@ -248,7 +248,7 @@ object ModularProofEncoding {
         // generate the necessary instances of user-defined tactics for the sub-step
         val (allSubProofSteps, maybeQuantifiedConj) = rwCNFTacticGen(cnfInfo,varCtxt,sig,conj)
         // construct the sub-step and the proof
-        val clauseStepName = s"Clausification_${parentNameLpEnc.name}"
+        val clauseStepName = s"Clausification"
         val clausStep: lpHave = lpEqHaveStepConstructor(clauseStepName, Seq.empty, encParent.term, maybeQuantifiedConj, lpOtype, allSubProofSteps)
 
         ///////////////////////////////////////////////////////////////////////////////////////
@@ -303,7 +303,7 @@ object ModularProofEncoding {
     private def handleClauseVars(cnfInfo: AddInfoCnf, ctxt: RwCnfVarContext, sig: Signature): (Seq[lpProofScriptStep], Seq[lpTypedVar], Seq[lpTypedVar]) = {
       val RwCnfVarContext(allBvars, bV, allMetaVars) = ctxt
       // If there are no meta variables -> noting to do
-      if (allMetaVars.nonEmpty) return (Seq.empty, Seq.empty, Seq.empty)
+      if (allMetaVars.isEmpty) return (Seq.empty, Seq.empty, Seq.empty)
 
       // Else:
       // 1) partition into "new" and "old" variables
@@ -321,6 +321,8 @@ object ModularProofEncoding {
       val shiftedMetaVars = var2Lp(allBvars.map(bVar => (offsetBVar(bVar._1), bVar._2)), extendedBvars, sig).map(_.asMlVar)
       val shiftedOldMetaVars = var2Lp(oldBVars.map(bVar => (offsetBVar(bVar._1), bVar._2)), extendedBvars, sig).map(_.asMlVar)
       val shiftedNewMetaVars = var2Lp(newBVars.map(bVar => (offsetBVar(bVar._1), bVar._2)), extendedBvars, sig).map(_.asMlVar)
+
+      Out.lp_debug_info(s"meta vars to assume: ${shiftedMetaVars.map(_.pretty)}")
 
       // todo : This will have to be revised once we handle inner universal quantifiers
       (Seq(lpAssume(shiftedMetaVars)), shiftedOldMetaVars, shiftedNewMetaVars)
