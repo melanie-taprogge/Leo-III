@@ -228,6 +228,12 @@ object lpDatastructures {
   object lpFunctionApp{
     def toDefName(headSymbolName: String, args: Seq[lpTerm] = Seq.empty, implicitArgs: Seq[lpTerm] = Seq.empty): lpFunctionApp =
       lpFunctionApp(lpConstantTerm(headSymbolName), args, implicitArgs)
+
+    def mk(f: lpTerm, args: Seq[lpTerm]= Seq.empty, implicitArgs: Seq[lpTerm]= Seq.empty): lpTerm =
+      (args, implicitArgs) match {
+        case (Nil,Nil) => f
+        case _ => lpFunctionApp(f, args, implicitArgs)
+      }
   }
 
   //////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -663,12 +669,38 @@ object lpDatastructures {
     override def prf: liftedProp = liftedProp(lpOlUntypedBinaryConnectiveTerm(connective, lhs, rhs))
   }
 
-  case class lpOlUntypedBinaryConnectiveTerm_multi(connective: lpOlUntypedBinaryConnective, args: Seq[lpOlTerm]) extends lpOlConnectiveTerm {
+  final case class lpOlUntypedBinaryConnectiveTerm_multi(connective: lpOlUntypedBinaryConnective, args: Seq[lpOlTerm]) extends lpOlConnectiveTerm {
     override def pretty (implicit prefix : PrettyConfig): String = {
       val term = s"${args.map(arg => arg.pretty).mkString(s" ${connective.pretty} ")}"
       if (args.length == 1) term else s"($term)"
     }
     override def prf: liftedProp = liftedProp(lpOlUntypedBinaryConnectiveTerm_multi(connective, args))
+  }
+
+  object lpOlUntypedBinaryConnectiveTerm_multi {
+
+    /** Smart constructor for binary conjunctions/ disjunctions: handles 0/1-ary cases. */
+    def mk(connective: lpOlUntypedBinaryConnective, terms: Seq[lpOlTerm]): lpOlTerm = {
+      terms match {
+        case Nil => identity(connective)
+        case t +: Nil => t
+        case many => new lpOlUntypedBinaryConnectiveTerm_multi(connective, many)
+      }
+    }
+
+    /** Convenience constructors for common connectives. */
+    def conjunction(terms: Seq[lpOlTerm]): lpOlTerm =
+      mk(lpAnd, terms)
+
+    def disjunction(terms: Seq[lpOlTerm]): lpOlTerm =
+      mk(lpOr, terms)
+
+    /** helper */
+    private def identity(conn: lpOlUntypedBinaryConnective): lpOlTerm = conn match {
+      case `lpAnd` => lpOlTop
+      case `lpOr` => lpOlBot
+      case _ => throw new Exception(s"Error in LP-Encoding: Trying to construct a binary connective term for 0 elements and connective ${conn.pretty}")
+    }
   }
 
   case class lpOlTypedBinaryConnectiveTerm(connective: lpOlTypedBinaryConnective, ty: lpOlType, lhs: lpOlTerm, rhs: lpOlTerm) extends lpOlConnectiveTerm {

@@ -33,6 +33,10 @@ package object LPoutput {
     lpConstantTerm(s"step${number}")
   }
 
+  @inline def nameSkDef(sko: Signature.Key, sig: Signature): String = {
+    s"${sig(sko).name}_def"
+  }
+
   val lambdapiNames = Set(
     lpOtype.pretty, lpWildcard.pretty, lpSet.pretty, lpScheme.pretty,
     lpSet2Schme.pretty, lpEq.pretty, lpElWitness.pretty) // todo:generate automatically

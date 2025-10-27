@@ -23,7 +23,7 @@ import scala.collection.mutable
 final class RewriteState {
   var rewriteUnderBinderHappened: Boolean = false
   var beqondOuterQuantifiers: Boolean = false
-  var skolemTerms: Seq[Either[leo.datastructures.AddInfoSkolem,leo.datastructures.AddInfoUnivQuant]] = Seq.empty
+  var skolemTerms: Vector[QuantStep] = Vector.empty
   var renamed: Boolean = false
 }
 object DefExpSimp extends CalculusRule {
@@ -235,7 +235,7 @@ object RenameCNF extends CalculusRule {
 
   final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], l: Seq[Literal], THRESHHOLD: Int)(implicit sig: Signature): (Seq[Seq[Literal]], AddInfoCnf) = {
     var acc: Seq[Seq[Literal]] = Seq(Seq())
-    var accSko: Seq[Either[leo.datastructures.AddInfoSkolem,leo.datastructures.AddInfoUnivQuant]] = Seq()
+    var accSko: Vector[QuantStep] = Vector()
     var unencodableRewrite = false
     var renameHappened = false
     val it: Iterator[Literal] = l.iterator
@@ -302,21 +302,21 @@ object RenameCNF extends CalculusRule {
         //st.rewriteUnderBinderHappened = true
         if (st.beqondOuterQuantifiers) st.rewriteUnderBinderHappened = true
         val v = vargen.next(ty)
-        st.skolemTerms = st.skolemTerms :+ Right(AddInfoUnivQuant(v,true))
+        st.skolemTerms = st.skolemTerms :+ MoveQuantStep(v,QuantUniv)
         apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Forall(a@(ty :::> t)) if !l.polarity =>
         val (sko, addInfo) = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true)
-        st.skolemTerms = st.skolemTerms :+ Left(addInfo)
+        st.skolemTerms = st.skolemTerms :+ addInfo
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD, st)
       case Exists(a@(ty :::> t)) if l.polarity =>
         val (sko, addInfo) = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false)
-        st.skolemTerms = st.skolemTerms :+ Left(addInfo)
+        st.skolemTerms = st.skolemTerms :+ addInfo
         apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true),THRESHHOLD, st)
       case Exists(a@(ty :::> t)) if !l.polarity =>
         //st.rewriteUnderBinderHappened = true
         if (st.beqondOuterQuantifiers) st.rewriteUnderBinderHappened = true
         val v = vargen.next(ty)
-        st.skolemTerms = st.skolemTerms :+ Right(AddInfoUnivQuant(v,false))
+        st.skolemTerms = st.skolemTerms :+ MoveQuantStep(v,QuantExists)
         apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false),THRESHHOLD, st)
       case TyForall(a@TypeLambda(t)) if l.polarity =>
         st.rewriteUnderBinderHappened = true
