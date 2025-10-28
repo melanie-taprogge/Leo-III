@@ -173,15 +173,15 @@ object LPoutput {
 
             case leo.modules.calculus.PolaritySwitch =>
               val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig) //¿polarity switch always only has one parent, right?
-              (toProofStep(stepName, encStep, "PolaritySwitch", encoding._1, None),outputInfo)
+              (toProofStep(stepName, encStep, "PolaritySwitch", encoding, None),outputInfo)
 
             case leo.modules.calculus.FuncExt =>
               val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig)
-              (toProofStep(stepName, encStep, "FuncExt", encoding._1, encoding._3),outputInfo)
+              (toProofStep(stepName, encStep, "FuncExt", encoding._1, encoding._2),outputInfo)
 
             case leo.modules.calculus.BoolExt =>
               val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig)
-              (toProofStep(stepName, encStep, "BoolExt", encoding._1, encoding._3),outputInfo)
+              (toProofStep(stepName, encStep, "BoolExt", encoding._1, encoding._2),outputInfo)
 
             case leo.modules.calculus.OrderedEqFac =>
               val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig)
@@ -215,7 +215,7 @@ object LPoutput {
                     (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
                   }
                   else {
-                    val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
+                    val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig)
                     (toProofStep(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None),outputInfo)
                   }
                 } else if (cl.furtherInfo.addInfoSimpRule.get == "paraSimp") {
@@ -223,7 +223,7 @@ object LPoutput {
                     (toProofStep(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
                   }
                   else {
-                    val (allSteps, usedSymbols) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig, Seq(cl.annotation.parents.head.cl.lits.length - 1))
+                    val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig, Seq(cl.annotation.parents.head.cl.lits.length - 1))
                     (toProofStep(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None), outputInfo)
                   }
                 }else {
@@ -237,15 +237,15 @@ object LPoutput {
 
             case leo.modules.calculus.PreUni =>
               val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig)
-              (toProofStep(stepName, encStep, "PreUni", encodingPreUni._1, encodingPreUni._3),outputInfo)
+              (toProofStep(stepName, encStep, "PreUni", encodingPreUni._1, encodingPreUni._2),outputInfo)
 
             case leo.modules.calculus.RewriteSimp =>
               val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig)
-              (toProofStep(stepName, encStep, "RewriteSimp", encodingRewrite._1, encodingRewrite._3),outputInfo)
+              (toProofStep(stepName, encStep, "RewriteSimp", encodingRewrite._1, encodingRewrite._2),outputInfo)
 
             case leo.modules.calculus.LiftEq =>
               val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig)
-              (toProofStep(stepName, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._3),outputInfo)
+              (toProofStep(stepName, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
             case _ =>
               val parentIDs = parentInLpEncID.map(id => id.name)
               (toProofStep(stepName, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")),outputInfo)
