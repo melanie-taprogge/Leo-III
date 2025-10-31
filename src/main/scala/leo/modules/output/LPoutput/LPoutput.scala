@@ -19,7 +19,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.pretty._
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
-import leo.modules.output.LPoutput.NewLpDatastructures.{Encoder, LogicConst, LpSig, LpSigBuilder, Name, Prefixes, QName, RenderOptions, SymRef, constDfn}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Encoder, LogicConst, LpSig, LpSigBuilder, Name, Prefixes, QName, RenderOptions, Renderer, SymRef, constDfn}
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -116,6 +116,7 @@ object LPoutput {
         if (identicalSteps.contains(parent.id)) {
           // in this case we already have the parent as a key and want to map the new child to the parents parent
           val exVal = identicalSteps(parent.id)
+          Out.lp_debug_info(s"identical steps for parent ${parent.id} (maps to ${exVal})")
           identicalSteps.update(cl.id, exVal)
         } else {
           // in this case we just want to link the child to the parent
@@ -154,7 +155,7 @@ object LPoutput {
     else {
       def nameOf(p: ClauseProxy): lpConstantTerm = {
         val asName = identicalSteps.getOrElse(p.id, nameStep_new(p.id))
-        lpConstantTerm(asName.local.value)
+        lpConstantTerm(Renderer.LpQname(asName,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
       }
 
       Right(parents.map(p => ParentInfo(p, nameOf(p))))
@@ -202,8 +203,9 @@ object LPoutput {
 
     // for compatibility, temproarily translate the names to constantnt terms...
     val parentInLpEncID = {
-      parentInLpEncID_new.map(nm => lpConstantTerm(nm.pretty(sig)))
+      parentInLpEncID_new.map(nm => lpConstantTerm(Renderer.LpQname(nm,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic))))
     }
+    Out.lp_debug_info(s"parents in lp encoding new : $parentInLpEncID_new, as terms: $parentInLpEncID")
 
     Out.lp_debug_info(s"Encoding step $stepName: application of caluclus rule ${if (rule == null) "Tautology" else rule.name}")
     Out.lp_debug_info(s"The parents are ${parentInLpEncID_new.map(term => term.local.value).mkString(", ")}")
@@ -505,6 +507,7 @@ object LPoutput {
         //problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty(PrettyConfig(!outputSingleFile,false)))
         problemEncSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration(Name(safeAxName),Seq.empty,encClause.asMl),sig,RenderOptions(true,false,monomorphic)))
         identicalSteps += (stepId -> QName.in(Prefixes.formulaeFilePrefix.get, safeAxName))
+        Out.lp_debug_info(s"linking to axiom $safeAxName (id: $stepId)")
         axCounter = axCounter + 1
       } else {
         val infoForStep = new lpProofStepInfo(clausifiedSteps.toMap, identicalSteps, tptpDefinedSymbols)

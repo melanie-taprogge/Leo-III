@@ -191,8 +191,8 @@ object Encoder {
         (Lam(tyVars, encBody), updatedUsedSymbols)
 
       // match pattern of application
-      case _@Symbol(id) ∙ args if leo.modules.input.InputProcessing.adHocPolymorphicArithmeticConstants.contains(id) =>
-        throw new Exception("polymorphic constructor!")
+      //case _@Symbol(id) ∙ args if leo.modules.input.InputProcessing.adHocPolymorphicArithmeticConstants.contains(id) =>
+      //  throw new Exception("polymorphic constructor!")
 
       case f ∙ args => // todo: Probably this can be done more niceley with folding :-)
         val (translatedF, updatedUsedSymbols0) = term2LP(f, bVars, supressReduction)

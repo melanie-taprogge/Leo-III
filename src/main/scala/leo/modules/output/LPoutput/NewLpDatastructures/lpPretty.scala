@@ -158,7 +158,7 @@ object Renderer {
         val ifs = qname(sig.termNames(i), ro)
         val encArgs: Seq[String] = args match {
           case Nil => Seq()
-          case Arg.ExplicitTypeArg(t) +: remArgs => s"[${olTy(t, ro, sig)}]" +: renderArgs(remArgs,ro,sig)
+          case Arg.ExplicitTypeArg(t) +: remArgs => s"(${olTy(t, ro, sig)})" +: renderArgs(remArgs,ro,sig)
           case _ => renderArgs(args, ro, sig)
         }
         paren(ctx > Prec.App, s"$ifs ${encArgs.mkString(" ")}")
