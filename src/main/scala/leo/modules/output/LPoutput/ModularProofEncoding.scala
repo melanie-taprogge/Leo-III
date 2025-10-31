@@ -734,7 +734,7 @@ object ModularProofEncoding {
       Out.lp_debug_info(s"Looking for transformations to get from \n${encEditLitTerm} to \n${appliedLitTerm}}")
       // if we had a permutation, we need to infer the index in the clause modulo application
       val indexModuloPerm = permutation.indexOf(indexOfLit)
-      val (literalsToEqRW, _, canEncode0) = transformLiteral(encEditLitTerm, appliedLitTerm, indexModuloPerm, lenParent)
+      val (literalsToEqRW, canEncode0) = transformLiteral(encEditLitTerm, appliedLitTerm, indexModuloPerm, lenParent)
       if (canEncode0) {
         Out.lp_debug_info(s"Transformation to equational form is applied: ${literalsToEqRW.map(_.pretty)}")
         (false, literalsToEqRW)
@@ -1258,7 +1258,7 @@ object ModularProofEncoding {
     val otherLitBeforeEqFact : (lpOlTerm, lpOlTerm, lpOlTerm) = {
       if (!otherLit.equational){
         val transformOtherLit0 = equationalForm(otherLitEnc,polarityOfRule)
-        val (newSteps, newUsedSymbols, newCanEncode) = transformLiteral(transformOtherLit0._1,otherLitEnc,permutaion(posOtherLit),lenParent)
+        val (newSteps, newCanEncode) = transformLiteral(transformOtherLit0._1,otherLitEnc,permutaion(posOtherLit),lenParent)
         allTransformSteps =  allTransformSteps ++ newSteps
         if (!newCanEncode) {
           canEncode = false
@@ -1286,7 +1286,7 @@ object ModularProofEncoding {
     val maxLitBeforeEqFact = {
       if (!maxLit.equational) {
         val transformMaxLit0 = equationalForm(maxLitEnc, polarityOfRule)
-        val (newSteps, newUsedSymbols, newCanEncode) = transformLiteral(transformMaxLit0._1,maxLitEnc, permutaion(posMaxLit), lenParent)
+        val (newSteps, newCanEncode) = transformLiteral(transformMaxLit0._1,maxLitEnc, permutaion(posMaxLit), lenParent)
         allTransformSteps = allTransformSteps ++ newSteps
         if (!newCanEncode) {
           canEncode = false
@@ -1325,7 +1325,7 @@ object ModularProofEncoding {
     var allBackTransformSteps : Seq[lpProofScriptStep] = Seq.empty
     Out.lp_debug_info(s"derived other lit = ${otherLitBeforeEqFact._1.pretty}, found other lit = ${childOtherLitEnc.pretty}")
     if (otherLitBeforeEqFact._1 != childOtherLitEnc){
-      val (newSteps, newUsedSymbols, newCanEncode) = transformLiteral(childOtherLitEnc,otherLitBeforeEqFact._1,0,currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childOtherLitEnc,otherLitBeforeEqFact._1,0,currentLits.length)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(0,childOtherLitEnc)
       if (!newCanEncode) {
@@ -1335,7 +1335,7 @@ object ModularProofEncoding {
       Out.lp_debug_info(s"transformed other literal to ${childOtherLitEnc.pretty}")
     }
     if (currentLits(1) != childUc1Enc){
-      val (newSteps, newUsedSymbols, newCanEncode) = transformLiteral(childUc1Enc, currentLits(1), 1, currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childUc1Enc, currentLits(1), 1, currentLits.length)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(1,childUc1Enc)
       if (!newCanEncode) {
@@ -1345,7 +1345,7 @@ object ModularProofEncoding {
       Out.lp_debug_info(s"transformed UC1 to ${childUc1Enc.pretty}")
     }
     if (currentLits(2) != childUc2Enc) {
-      val (newSteps, newUsedSymbols, newCanEncode) = transformLiteral(childUc2Enc, currentLits(2), 2, currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childUc2Enc, currentLits(2), 2, currentLits.length)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(2,childUc2Enc)
       if (!newCanEncode) {
@@ -1560,7 +1560,7 @@ object ModularProofEncoding {
         val encDesiredLit = lpLiteral(lit1, bVarMap, sig)
         Out.lp_debug_info(s"needs Transformation for simplification: from ${encOrigLit.term.pretty} to ${encDesiredLit.term.pretty}")
         val impPattern: lpOlTerm => lpOlTerm = x => lpOlUntypedBinaryConnectiveTerm(lpImp, lpOlWildcard, x)
-        val (transformSteps, _, canEncode) = transformLiteral(encDesiredLit.term, encOrigLit.term, simpLits.length, parentLits.length, Some(impPattern))
+        val (transformSteps, canEncode) = transformLiteral(encDesiredLit.term, encOrigLit.term, simpLits.length, parentLits.length, Some(impPattern))
         if (!canEncode) throw new Exception(s"LP-Encoding SIMP: could not transform ${encOrigLit.term.pretty} to ${encDesiredLit.term.pretty}")
         implicitRwTransf = implicitRwTransf ++ transformSteps
       }
@@ -1834,7 +1834,7 @@ object ModularProofEncoding {
           if (finalLit != encCorrespondingLit){
             // transformation to or from bottom or order has changed
             Out.lp_debug_info(s"corresponding lit in child: ${encCorrespondingLit.pretty}, transformation necessary")
-            val (transformationSteps, _, canEncode0) = transformLiteral(encCorrespondingLit,finalLit,permutation.indexOf(indx), indices.length)
+            val (transformationSteps, canEncode0) = transformLiteral(encCorrespondingLit,finalLit,permutation.indexOf(indx), indices.length)
             if (canEncode0){
               allSteps = allSteps ++ transformationSteps
               Out.lp_debug_info(s"transformation successful")
@@ -2008,7 +2008,7 @@ object ModularProofEncoding {
         val encLitChild = encChild.args(litCount)
         if (!(encLitChild == rewrittenLit)) {
           Out.lp_debug_info(s"rewritten Literal: ${rewrittenLit.pretty} ,corresponding literal in child caluse: ${encLitChild.pretty}")
-          val (additionalSteps, _, canEncode) = transformLiteral(encLitChild, rewrittenLit, litCount, clauseLen) // todo: acutally, rewerite pattern should be ootional since we do not want it for clauses of length one
+          val (additionalSteps, canEncode) = transformLiteral(encLitChild, rewrittenLit, litCount, clauseLen) // todo: acutally, rewerite pattern should be ootional since we do not want it for clauses of length one
           if (canEncode) Out.lp_debug_info(s"proposed Steps: \n${additionalSteps.map(_.pretty).mkString("\n")}")
           else {
             Out.lp_debug_info(s"unable to encode the transformation of ${encLitChild.pretty} to ${rewrittenLit.pretty}}")

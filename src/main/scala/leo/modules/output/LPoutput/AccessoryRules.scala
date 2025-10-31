@@ -163,6 +163,7 @@ object AccessoryRules {
     }
   }
 
+  /*
   def makeLiteralEquational_proofSkript(lits: Seq[lpOlTerm], origClause: lpClause, sourceBefore: lpTerm, desiredEquational: Boolean, desiredPolarity: Boolean, nameStept: lpConstantTerm): (lpProofScriptStep, Map[lpOlTerm, (lpOlTerm, lpOlTerm, lpOlTerm)], Seq[lpOlTerm], Set[lpStatement]) = {
 
     // Takes a literal and an desired polarity and returns the transformed versions
@@ -275,6 +276,7 @@ object AccessoryRules {
     val haveStep = lpHave(nameStept.name, clauseAfter.withoutQuant.prf, lpProofScript(rewriteSteps :+ lpRefine(lpFunctionApp(sourceBefore, Seq()))))
     (haveStep, transformations.toMap, clauseAfter.lits, usedSymbols)
   }
+   */
 
   def flipStep(litCount: Int, clauseLen: Int, pol: Boolean, eqType: lpOlType, embedInPattern: Option[lpOlTerm => lpOlTerm] = None) = {
     val rewritePatternEq = generateClausePattern(Seq(litCount), clauseLen, pol)
@@ -304,13 +306,12 @@ object AccessoryRules {
   }
 
   // todo: restructure to use lpLiterl as input
-  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int, embedInPattern: Option[lpOlTerm => lpOlTerm] = None): (Seq[lpProofScriptStep], Set[lpStatement], Boolean) = {
+  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int, embedInPattern: Option[lpOlTerm => lpOlTerm] = None): (Seq[lpProofScriptStep], Boolean) = {
     Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
     // todo: compare modulo alpha conversion?
 
     // Transform two literals into each other, including cases of eq-sym application, transformation to and from equality literal inclduing ones where we insert bottom rather than top
 
-    var usedSymbols: Set[lpStatement] = Set.empty
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     var canEncode = false
     var flip: Boolean = false
@@ -384,11 +385,9 @@ object AccessoryRules {
         necessaryRule match {
           case Some(rule) =>
             if (flip) {
-              usedSymbols = usedSymbols + flipLiteral()
               allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty0.get, embedInPattern)
               Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
             }
-            usedSymbols = usedSymbols + rule
             allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.term, Seq()))
             Out.lp_debug_info(s"Applying ${rule.term} to transform equational literal to non-equational form")
             true
@@ -464,11 +463,9 @@ object AccessoryRules {
         }
         necessaryRule match {
           case Some(rule) =>
-            usedSymbols = usedSymbols + rule
             allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.term, Seq()), true)
             Out.lp_debug_info(s"Applying ${rule.term} to transform non-equational literal to equational form")
             if (flip) {
-              usedSymbols = usedSymbols + flipLiteral()
               allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty1.get, embedInPattern)
               Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
             }
@@ -492,7 +489,6 @@ object AccessoryRules {
         // the only possible difference is if the sides differ:
         if (lhs0 != lhs1){
           val necessaryFlip = if (pol0) true else false
-          usedSymbols = usedSymbols + flipLiteral()
           allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty0.get, embedInPattern)
           Out.lp_debug_info(s"Applying ${flipLiteral()} to flip literal ${lit0.pretty}")
           true
@@ -531,7 +527,7 @@ object AccessoryRules {
       }
     }
     if (canEncode) Out.lp_debug_info(s"success")
-    (allSteps,usedSymbols,canEncode)
+    (allSteps,canEncode)
   }
 
   ////////////////////////////////////////////////////////////////
@@ -575,6 +571,7 @@ object AccessoryRules {
     }
   }
 
+  /*
   def flipEqLiteralsProofScript(lits: Seq[(lpOlTerm, lpOlType)], origClause: lpClause, sourceBefore: lpTerm, nameStept: lpConstantTerm): (lpProofScriptStep, Seq[lpOlTerm], Set[lpStatement]) = {
 
     // change order within literals of a given clause
@@ -635,7 +632,7 @@ object AccessoryRules {
     val haveStep = lpHave(nameStept.name, clauseAfter.withoutQuant.prf, lpProofScript(rewriteSteps :+ lpRefine(lpFunctionApp(sourceBefore, Seq()))))
     (haveStep, litsAfter, usedSymbols)
   }
-
+   */
 
   ////////////////////////////////////////////////////////////////
   ////////// Literal level transformations

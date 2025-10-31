@@ -22,9 +22,9 @@ object lpDatastructures {
     def pretty (implicit prefix : PrettyConfig = PrettyConfig(false,false)): String
   }
 
-  abstract class lpKeyword extends lpStatement
+  abstract class lpModifier extends lpStatement
 
-  case object lpOpaque extends lpKeyword {
+  case object lpOpaque extends lpModifier {
     override def pretty (implicit prefix : PrettyConfig): String = "opaque"
   }
 
@@ -72,7 +72,7 @@ object lpDatastructures {
     }
   }
 
-  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], maybeTyping: Option[lpMlType], proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier: Seq[lpKeyword]= Seq.empty) extends lpStatement {
+  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], maybeTyping: Option[lpMlType], proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier: Seq[lpModifier]= Seq.empty) extends lpStatement {
     override def pretty (implicit prefix : PrettyConfig): String = {
 
       val proofEnc = proof match {

@@ -496,7 +496,7 @@ object ToTHF {
   ///////////////////////////////
   // Term quantification collection
   /** Gather consecutive all-quantifications (nameless). */
-  final private def collectForall(t: Term): (Seq[Type], Term) = {
+  final def collectForall(t: Term): (Seq[Type], Term) = {
     collectForall0(Seq.empty, t)
   }
   @tailrec
@@ -523,7 +523,7 @@ object ToTHF {
 
 
   /** Gather consecutive exist-quantifications (nameless). */
-  final private def collectExists(t: Term): (Seq[Type], Term) = {
+  final def collectExists(t: Term): (Seq[Type], Term) = {
     collectExists0(Seq.empty, t)
   }
   @tailrec
@@ -550,7 +550,7 @@ object ToTHF {
 
   /** Gather consecutive lambda-abstractions (nameless).
     * Returns [t1, t2, ..., tn] where t1 is the outermost type */
-  final private def collectLambdas(t: Term): (Seq[Type], Term) = {
+  final def collectLambdas(t: Term): (Seq[Type], Term) = {
     collectLambdas0(Seq.empty, t)
   }
   @tailrec
@@ -562,7 +562,7 @@ object ToTHF {
   }
 
   @tailrec
-  private final def collectTyLambdas(count: Int, t: Term): (Int, Term) = {
+  final def collectTyLambdas(count: Int, t: Term): (Int, Term) = {
     t match {
       case TypeLambda(body) => collectTyLambdas(count+1, body)
       case _ => (count, t)

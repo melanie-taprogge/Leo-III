@@ -34,7 +34,7 @@ object SimplificationEncoding {
         24 -> (lpSimp_negTop, SimpNeedsTyping(lpSimp_negTop)),
         26 -> (lpSimp_negTop, SimpNeedsTyping(lpSimp_negTop)))
 
-  abstract class simplificationRules extends lpStatement{
+  abstract class simplificationRules extends lpStatement{ //todo: treat uniformly with other defined rules etc.
     def name: lpConstantTerm
   }
 
