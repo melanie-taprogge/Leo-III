@@ -16,7 +16,7 @@ Some of the encodings rely on features added after the latest stable releases of
 - [Lambdapi](https://github.com/Deducteam/lambdapi)
 - [Lambdapi Standard Library](https://github.com/Deducteam/lambdapi-stdlib)
 
-Furthermore, the [library for Leo-III encodings in Lambdapi](https://anonymous.4open.science/r/Leo-III-lambdapi-lib-CB15) is required and can be installed by following the instructions provided in its GitHub repository.
+Furthermore, the [library for Leo-III encodings in Lambdapi](https://anonymous.4open.science/r/Leo-III-lambdapi-lib-8044) is required and can be installed by following the instructions provided in its GitHub repository.
 
 
 <details>
