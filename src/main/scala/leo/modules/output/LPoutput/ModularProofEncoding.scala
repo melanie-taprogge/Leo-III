@@ -370,7 +370,7 @@ object ModularProofEncoding {
 
     /** Generate a rewrite tactic with appropriate application of quantified variables for a given Skolem term */
     private def SkolemRwTac(skInto: SkolemStep, bV: Map[Int, String], sig: Signature, quantified: Boolean = true): lpOlFunctionApp = {
-      val skName = lpOlConstantTerm(nameSkDef(skInto.sko,sig)) // todo: naming function uniform wih LPOutput module
+      val skName = lpOlConstantTerm(nameSkDef(skInto.sko,sig).local.value) // todo: naming function uniform wih LPOutput module
       val varsToApply = var2Lp(skInto.fVs, bV, sig, true).map(Left(_))
       val appliedName = if (quantified && varsToApply.nonEmpty) lpOlFunctionApp(skName, varsToApply) else skName
       lpRewrite(None, appliedName, true).olTermApp

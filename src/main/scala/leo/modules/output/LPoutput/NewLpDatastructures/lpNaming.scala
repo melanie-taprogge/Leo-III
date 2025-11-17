@@ -1,5 +1,7 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
+import leo.modules.output.LPoutput
+
 object Prefixes {
   val sigPrefix = Some(Prefix(Name("S")))
   val formulaeFilePrefix = Some(Prefix(Name("F")))
@@ -21,6 +23,7 @@ object lpEncSig {
   val forAllStr = "∀"
   val exStr = "∃"
   val witnessStr = "el"
+  val choiceStr = "ε"
 
   val allAscii = Seq(oTyStr, witnessStr)
 }
@@ -48,7 +51,7 @@ object lpSysStrings {
     "quantifier", "sequential", "TYPE"
   )
 
-  val reserve = lpKeywords ++ lpEncSig.allAscii ++ tptpRepSig.allAscii
+  val reserve = lpKeywords ++ lpEncSig.allAscii ++ tptpRepSig.allAscii ++ LPoutput.lpKeywords //todo: the latter is only necessary for compatibility with old DS, delete once fully migrated
 
   val lpAllowedRegEx = """^[^\t\r\n :,;`(){}\[\]".@$|?/]+$"""
 }

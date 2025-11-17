@@ -68,18 +68,6 @@ object lpClauseInst {
     (fullBvarsMap, encCls.zip(encVars).map(ecnCl => lpClauseInst(ecnCl._1, ecnCl._2)))
   }
 }
-case class constDfn(
-                     name: QName,
-                     dec: Stmt.Declaration,
-                       )
-object constDfn {
-  def apply (dnfName: QName, ty: OlType, hd: LpTerm[Level.Obj], defn: LpTerm[Level.Obj]): constDfn = {
-    val defAsEq = LogicConst.Eq(ty,hd,defn)
-    val encodedDef = Stmt.Declaration(dnfName.local,Seq(),Lifting.ProofTerm(defAsEq))
-    Out.lp_debug_info(s"defining ${dnfName.local.value} as $defn")
-    constDfn(dnfName, encodedDef)
-  }
 
-}
 
 

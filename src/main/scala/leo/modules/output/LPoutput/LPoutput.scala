@@ -14,12 +14,13 @@ import leo.modules.output.LPoutput.ModularProofEncoding.RwCnfEncoding.encRenameC
 import leo.modules.output.LPoutput.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Const
+import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, LpSet}
 import leo.modules.output.LPoutput.NewLpDatastructures.pretty._
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
-import leo.modules.output.LPoutput.NewLpDatastructures.{Encoder, LogicConst, LpSig, LpSigBuilder, Name, Prefixes, QName, RenderOptions, Renderer, SymRef, constDfn}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, Encoder, Level, LogicConst, LpSig, LpSigBuilder, LpTerm, Name, Prefixes, QName, RenderOptions, Renderer, SymRef}
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -61,8 +62,7 @@ object LPoutput {
   final class lpProofStepInfo (val clausifiedSteps: Map[lpConstantTerm, lpConstantTerm] = Map.empty,
                                val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty,
                                val tptpDefinedSymbols: Set[lpOlTerm] = Set.empty,
-                               val additionalDefinedSymbols: Set[Signature.Key] = Set.empty,
-                               val skDefinitions: Seq[lpDeclaration] = Seq.empty)
+                               val additionalDefinedSymbols: Set[Signature.Key] = Set.empty)
 
   def toProofStep(stepName: String, encStep: lpMlType, ruleName: String, proofTerm: lpProofScript, notEncoded: Option[String]): Seq[lpProofScriptStep] = {
     if (notEncoded.isDefined) {
@@ -239,9 +239,8 @@ object LPoutput {
             case leo.modules.calculus.RenameCNF =>
               val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig.orig)
               val stepsCNF = toProofStep(stepName, encodingCNF._3, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
-              val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols,encodingCNF._4,Seq())
+              val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,newTptpDefinedSymbols,encodingCNF._4)
               (stepsCNF,outputInfo)
-
 
             case leo.modules.calculus.PolaritySwitch =>
               val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig.orig) //¿polarity switch always only has one parent, right?
@@ -397,51 +396,36 @@ object LPoutput {
 
     signatureSymbols.foreach { key =>
       val symbol = sig.orig.apply(key)
-      val sName = lpEscapeName(symbol.name, sig.orig, false)
+      //val sName = lpEscapeName(symbol.name, sig.orig, false)
 
       if (symbol.hasKind) {
-        typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, lpSet).pretty)
+        val sName = sig.typeNames(symbol.key)
+        //typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, lpSet).pretty)
+        typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, LpSet), sig, RenderOptions(false, false, monomorphic)))
       } else {
+        val sName = sig.termNames(symbol.key)
+        val isSk = isPropSet(Signature.PropSkolemConstant, symbol.flag)
         if (symbol.hasType) {
-          if (isPropSet(Signature.PropSkolemConstant, symbol.flag)) {
-            val typeDec = type2LP(symbol._ty, sig.orig, !outputSingleFile)
-            skDecsSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
+          val typeDec = NewLpDatastructures.Encoder.type2LP(symbol._ty)
+          //val sName = lpEscapeName(symbol.name, sig.orig, false)
+          if (isSk) {
+            //val typeDec = type2LP(symbol._ty, sig.orig, !outputSingleFile)
+            //skDecsSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
+            skDecsSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
           }
           else {
-            val typeDec = type2LP(symbol._ty, sig.orig, false)
-            typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
+            //val typeDec = type2LP(symbol._ty, sig.orig, false)
+            //typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
+            typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(false, false, monomorphic)))
           }
         }
 
-        if (symbol.hasDefn) { // && (! additionalSymbols.contains(key))) {
-
-          if (isPropSet(Signature.PropSkolemConstant, symbol.flag)) { //todo: In new encoding
-            val defTermType = type2LP(symbol._defn.ty, sig.orig, !outputSingleFile)
-            //todo: maybe generally encode defs with free vars like this?
-            //Extract the lambda terms of the new definition and build a quantified version where the variables are applied to the skolem term
-            val (bVarTys, strippedDef) = collectLambdasLP(symbol._defn)
-            val newBVars = makeBVarList(bVarTys, 0)
-            val encBvars = newBVars.map(v => lpOlTypedVar(lpOlConstantTerm(v._1),type2LP(v._2,sig.orig)) )
-            val appliedSk = lpOlFunctionApp(lpOlConstantTerm(sName),encBvars.map(Left(_)))
-            val (definition, tptpDefinedSymbols0) = term2LP(strippedDef, fusebVarListwithMap(newBVars, Map()), sig.orig, Set.empty, false, !outputSingleFile)
-            val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(appliedSk, Seq.empty), definition)
-            val skolemDefName = nameSkDef(key,sig.orig)
-            val encodedDef = lpDeclaration(lpConstantTerm(skolemDefName), encBvars, defAsEq.prf)
-            tptpDefinedSymbols = tptpDefinedSymbols ++ tptpDefinedSymbols0
-            skDecsSB.append(encodedDef.pretty)
-          }
-          else {
-            val (constDfn(defName, defDec),tptpDefinedSymbols0) = Encoder.encDfn(key, sig)
-            val compatibleTptpDefinedSymbols0 = tptpDefinedSymbols0.map(nm => lpOlConstantTerm(nm.pretty(sig)))
-            tptpDefinedSymbols = tptpDefinedSymbols ++ compatibleTptpDefinedSymbols0
-            //val maybePrefixedName = if (outputSingleFile) sName else s"${abbreviationSignatureFile}" + sName
-            //val defAsEq = lpOlTypedBinaryConnectiveTerm(lpEq, defTermType, lpOlFunctionApp(lpOlConstantTerm(maybePrefixedName), Seq.empty), definition)
-            //val encodedDef = lpDeclaration(lpConstantTerm(s"${sName}_def"), Seq.empty, defAsEq.prf)
-            defSB.append(NewLpDatastructures.Renderer.stmt(defDec,sig,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
-            // add to the list of definitions that should later be extended in the corresponding steps
-            // todo: In future, use the qnames consturcted here and add them to the signature
-            //definitions += NewLpDatastructures.Renderer.LpQname(defName,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic))
-          }
+        if (symbol.hasDefn) {
+          val (defDec, tptpDefinedSymbols0) = Encoder.encDfn(key, sig, isSk)
+          val compatibleTptpDefinedSymbols0 = tptpDefinedSymbols0.map(nm => lpOlConstantTerm(nm.pretty(sig)))
+          tptpDefinedSymbols = tptpDefinedSymbols ++ compatibleTptpDefinedSymbols0
+          if (isSk) skDecsSB.append(NewLpDatastructures.Renderer.stmt(defDec, sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+          else defSB.append(NewLpDatastructures.Renderer.stmt(defDec, sig, RenderOptions(!outputSingleFile, false, monomorphic)))
         }
       }
     }
@@ -472,7 +456,6 @@ object LPoutput {
     val compressedProof = proof
     var idClauseMap: mutable.HashMap[Long, ClauseProxy] = mutable.HashMap.empty
     val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty
-    var skDefinitions: Set[lpDeclaration] = Set.empty
     val clausifiedSteps: mutable.HashMap[lpConstantTerm, lpConstantTerm] = mutable.HashMap.empty
     var conjEnc = false
     var axCounter = 0
@@ -516,7 +499,6 @@ object LPoutput {
         identicalSteps ++= newInfo.identicalSteps
         tptpDefinedSymbols = tptpDefinedSymbols ++ newInfo.tptpDefinedSymbols
         additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
-        skDefinitions = skDefinitions ++ newInfo.skDefinitions
         proofSteps = proofSteps ++ newProofSteps
       }
     }
@@ -562,10 +544,9 @@ object LPoutput {
       signatureFileSB.append(typeDecSB)
     }
 
-    if (skDefinitions.nonEmpty || skDecSB.length != 0) {
+    if (skDecSB.length != 0) {
       proofFileSB.append("\n\n// SKOLEM TERMS ///////////////////////////////////\n\n")
       proofFileSB.append(skDecSB)
-      proofFileSB.append(skDefinitions.map(defn => s"// ${defn.pretty}").mkString(""))
     }
 
     if (tacticSB.nonEmpty) {

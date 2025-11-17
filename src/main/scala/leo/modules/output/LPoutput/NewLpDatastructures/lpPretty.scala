@@ -11,7 +11,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.LogicConst
 import leo.modules.output.LPoutput.NewLpDatastructures.Prefixes._
 import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig._
 import leo.modules.output.LPoutput.NewLpDatastructures.lpSysStrings._
-import leo.modules.output.LPoutput.NewLpDatastructures.tptpConstMappings.{leoBinders, leoTypedConnectives, leoUntypedConnectives}
+import leo.modules.output.LPoutput.NewLpDatastructures.tptpConstMappings.{LeoConstants, leoBinders, leoTypedConnectives, leoUntypedConnectives}
 
 import scala.collection.immutable.{AbstractSeq, LinearSeq}
 
@@ -90,7 +90,7 @@ object Renderer {
   private def paren(need: Boolean, s: String) = if (need) s"($s)" else s
 
   private def bin(op: String, pOp: Int, lhs: String, lPrec: Int, rhs: String, rPrec: Int, ctx: Int) = {
-    paren(ctx > pOp, s"$lhs $op $rhs")
+    paren(ctx >= pOp, s"$lhs $op $rhs")
   }
 
 
@@ -110,7 +110,7 @@ object Renderer {
 
       case LogicConst.Imp(l, r) =>
         val ls = termP(l, ro, Prec.Imp, sig);
-        val rs = termP(r, ro, Prec.Imp - 1, sig) // right-assoc style
+        val rs = termP(r, ro, Prec.Imp - 1, sig)
         bin(impStr, Prec.Imp, ls, Prec.Imp, rs, Prec.Imp, ctx)
 
       case LogicConst.Eq(_, l, r) => //todo: add option to print type
@@ -129,39 +129,53 @@ object Renderer {
         termP(LogicConst.Not(LogicConst.Eq(t,l,r)),ro,Prec.Not,sig)
 
       // Quantifiers: ∀ (λ (x : T) …)
-      case LogicConst.Forall(bs, _, body) =>
-        val bStr = bs.map { case (n, t0) => s"(${n.value} : ${ty(t0, ro, sig)})" }.mkString(" ")
+      case LogicConst.Forall(bind, body) =>
         val bodyStr = termP(body, ro, Prec.Min, sig)
+        val (n, t0) = bind
+        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
         s"($forAllStr(λ $bStr, $bodyStr))"
 
-      case LogicConst.Exists(bs, _, body) =>
-        val bStr = bs.map { case (n, t0) => s"(${n.value} : ${ty(t0, ro, sig)})" }.mkString(" ")
+      case LogicConst.Exists(bind, body) =>
         val bodyStr = termP(body, ro, Prec.Min, sig)
+        val (n, t0) = bind
+        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
         s"($exStr(λ $bStr, $bodyStr))"
+
+      case LogicConst.Choice(bind, body) =>
+        val bodyStr = termP(body, ro, Prec.Min, sig)
+        val (n, t0) = bind
+        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
+        s"($choiceStr(λ $bStr, $bodyStr))"
 
       // Generic cases (as you already had)
       case LpTerm.Var(n, _) => n.value
       //case LpTerm.Const(n) => qname(n,ro)
+
+      case LpTerm.Const(SymRef.Leo(i)) if ((leoTypedConnectives ++ leoUntypedConnectives ++ leoBinders).contains(i)) =>
+        val ifs = qname(sig.termNames(i), ro)
+        s"($ifs)"
+
       case LpTerm.Const(SymRef.Leo(i)) =>
         val name = sig.termNames(i)
         qname(name, ro)
       case LpTerm.Const(SymRef.LP(qn)) => qname(qn, ro)
 
-      case LpTerm.Lam(bs, body) =>
-        val decs = bs.map {
-          case (n, Some(t0)) => s"(${n.value} : ${ty(t0, ro, sig)})"
-          case (n, None) => n.value
-        }.mkString(" ")
-        paren(ctx > Prec.Min, s"λ $decs, ${termP(body, ro, Prec.Min, sig)}")
+      case LpTerm.Lam(bind, body) =>
+        val (n, t0) = bind
+        val dec = t0 match {
+          case Some(t00) => s"(${n.value} : ${ty(t00, ro, sig)})"
+          case None => n.value
+        }
+        paren(ctx > Prec.Min, s"λ $dec, ${termP(body, ro, Prec.Min, sig)}")
 
       case LpTerm.App(LpTerm.Const(SymRef.Leo(i)), args) if ((leoBinders).keySet.toSeq.contains(i)) =>
         val ifs = qname(sig.termNames(i), ro)
         val encArgs: Seq[String] = args match {
           case Nil => Seq()
-          case Arg.ExplicitTypeArg(t) +: remArgs => s"(${olTy(t, ro, sig)})" +: renderArgs(remArgs,ro,sig)
+          case Arg.ExplicitTypeArg(t) +: remArgs => s"[${olTy(t, ro, sig)}]" +: renderArgs(remArgs,ro,sig)
           case _ => renderArgs(args, ro, sig)
         }
-        paren(ctx > Prec.App, s"$ifs ${encArgs.mkString(" ")}")
+        paren(ctx > Prec.App, s"($ifs) ${encArgs.mkString(" ")}")
 
       case LpTerm.App(LpTerm.Const(SymRef.Leo(i)), args) if ((leoTypedConnectives).keySet.toSeq.contains(i)) =>
         val ifs0 = qname(sig.termNames(i), ro)
@@ -238,12 +252,14 @@ object Renderer {
       case Var(n, _) => name(n)
       case Const(SymRef.LP(qn)) => qname(qn, ro)
       case Const(SymRef.Leo(id)) => qname(sig.termNames(id), ro)
-      case Lam(bs, body) =>
-        val decs = bs.map {
-          case (n, Some(ty0)) => s"(${name(n)} : ${ty(ty0, ro, sig)})"
-          case (n, None) => name(n).toString
-        }.mkString(" ")
-        s"(λ $decs, ${renderTerm(body, ro, sig)})"
+      case Lam(binding, body) =>
+        val bodyStr = renderTerm(body, ro, sig)
+        val (n, t0) = binding
+        val dec = t0 match {
+          case Some(t00) => s"(${name(n)} : ${ty(t00, ro, sig)})"
+          case None => name(n)
+        }
+        s"(λ $dec, $bodyStr)"
       case App(f, args) =>
         val (imps, exps) = args.partition(_.isInstanceOf[Arg.Implicit[_]])
         val is = if (imps.isEmpty) "" else " " + imps.map { case Arg.Implicit(t1) => s"[${renderTerm(t1, ro, sig)}]" }.mkString(" ")

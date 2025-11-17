@@ -44,8 +44,9 @@ package object LPoutput {
     QName.in(Prefixes.formulaeFilePrefix.get,s"${baseName.local.value}_def")
   }
 
-  @inline def nameSkDef(sko: Signature.Key, sig: Signature): String = {
-    s"${sig(sko).name}_def"
+  @inline def nameSkDef(sko: Signature.Key, sig: Signature): QName = {
+    val baseName = s"${sig(sko).name}_def"
+    QName.local(baseName)
   }
 
   val lambdapiNames = Set(

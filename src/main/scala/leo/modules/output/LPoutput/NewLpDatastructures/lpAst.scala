@@ -25,7 +25,7 @@ object QName {
 sealed trait SymRef
 object SymRef {
   final case class Leo(id: Int) extends SymRef      // Leo's signature key
-  final case class LP(qn: QName) extends SymRef // fixed LP library symbol
+  final case class LP(qn: QName) extends SymRef
 }
 
 // ── Types (LP meta level + encoded HOL types) ─────────────────────────────────
@@ -51,7 +51,7 @@ sealed trait LpTerm[L <: Level]
 object LpTerm {
   final case class Var[L <: Level](name: Name, ty: Option[LpType]) extends LpTerm[L]
   final case class Const[L <: Level](sym: SymRef) extends LpTerm[L]
-  final case class Lam[L <: Level](binders: Seq[(Name, Option[LpType])], body: LpTerm[L]) extends LpTerm[L]
+  final case class Lam[L <: Level](binder: (Name, Option[LpType]), body: LpTerm[L]) extends LpTerm[L]
   final case class App[L <: Level](f: LpTerm[L], args: Seq[Arg[L]]) extends LpTerm[L]
 }
 sealed trait Arg[L <: Level]
@@ -124,6 +124,7 @@ object LogicConst {
   val eqN  = SymRef.Leo(HOLSignature.===.key)
   val allN = SymRef.Leo(HOLSignature.Forall.key)
   val exN  = SymRef.Leo(HOLSignature.Exists.key)
+  val chN  = SymRef.Leo(HOLSignature.Choice.key)
 
   val Top = LpTerm.Const[Level.Obj](topN)
   val Bot = LpTerm.Const[Level.Obj](botN)
@@ -134,6 +135,7 @@ object LogicConst {
   val cEq  = LpTerm.Const[Level.Obj](eqN)
   val cAll = LpTerm.Const[Level.Obj](allN)
   val cEx  = LpTerm.Const[Level.Obj](exN)
+  val cCh  = LpTerm.Const[Level.Obj](chN)
 
   private def E(t: LpTerm[Level.Obj]) = Arg.Explicit(t)
 
@@ -195,26 +197,49 @@ object LogicConst {
 
   object Forall {
     val head = cAll
-    def apply(binders: Seq[(Name, LpType)], ty: OlType, body: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
-      LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty),E(LpTerm.Lam(binders.map { case (n, ty) => n -> Some(ty) }, body))))
+    def apply(binder: (Name, LpType), body: LpTerm[Level.Obj]): LpTerm[Level.Obj] = {
+      val (n, bTy) = binder
+      LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
+    }
 
-    def unapply(t: LpTerm[Level.Obj]): Option[(Seq[(Name, LpType)], OlType, LpTerm[Level.Obj])] = t match {
-      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(ty),Arg.Explicit(LpTerm.Lam(bs, body)))) =>
-        val typed = bs.collect { case (n, Some(ty)) => (n, ty) }
-        if (typed.size == bs.size) Some((typed, ty, body)) else None
+    def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
+      case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
+        val (n, Some(bty)) = bs
+        val typed = (n, bty)
+        Some((typed, body))
       case _ => None
     }
   }
 
   object Exists {
     val head = cEx
-    def apply(binders: Seq[(Name, LpType)], ty: OlType, body: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
-      LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty),E(LpTerm.Lam(binders.map { case (n, ty) => n -> Some(ty) }, body))))
+    def apply(binder: (Name, LpType), body: LpTerm[Level.Obj]): LpTerm[Level.Obj] = {
+      val (n, bTy) = binder
+      LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
+    }
 
-    def unapply(t: LpTerm[Level.Obj]): Option[(Seq[(Name, LpType)], OlType, LpTerm[Level.Obj])] = t match {
-      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(t),Arg.Explicit(LpTerm.Lam(bs, body)))) =>
-        val typed = bs.collect { case (n, Some(ty)) => (n, ty) }
-        if (typed.size == bs.size) Some((typed, t, body)) else None
+    def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
+      case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
+        val (n, Some(bty)) = bs
+        val typed = (n, bty)
+        Some((typed, body))
+      case _ => None
+    }
+  }
+
+  object Choice {
+    val head = cCh
+
+    def apply(binder: (Name, LpType), body: LpTerm[Level.Obj]): LpTerm[Level.Obj] = {
+      val (n, bTy) = binder
+      LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
+    }
+
+    def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
+      case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
+        val (n, Some(bty)) = bs
+        val typed = (n, bty)
+        Some((typed, body))
       case _ => None
     }
   }
