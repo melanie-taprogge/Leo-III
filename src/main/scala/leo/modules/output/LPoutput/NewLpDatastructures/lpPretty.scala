@@ -74,9 +74,9 @@ object Renderer {
     val App = 90
     val Not = 80
     val Eq = 70
-    val Imp = 60
+    val Imp = 40
     val Or = 50
-    val And = 40
+    val And = 60
     val Min = 0
   }
 
