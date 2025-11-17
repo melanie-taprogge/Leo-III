@@ -1,6 +1,6 @@
-package leo.modules.output.LPoutput
+package leo.modules.output.LPoutput.OldLpDatastructures
 
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 
 object LPSignature {
 

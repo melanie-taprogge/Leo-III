@@ -1,11 +1,9 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
-import leo.Out
 import leo.datastructures.{Signature, isPropSet}
 import leo.datastructures.Signature.Key
 import leo.modules.HOLSignature
 import leo.modules.HOLSignature._
-import leo.modules.output.LPoutput.NewLpDatastructures.LogicConst._
 import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig._
 import leo.modules.output.LPoutput.NewLpDatastructures.tptpRepSig.tptpIntStr
 

@@ -6,7 +6,7 @@ import leo.modules.prover.{Interaction, RunStrategy, State}
 import leo.modules.{FVState, GeneralState, myAssert}
 import leo.modules.relevance.AxiomFilterConfig
 import leo.{Configuration, Out}
-import leo.modules.output.LPoutput.Encodings.clause2LP
+import leo.modules.output.LPoutput.OldLpDatastructures.Encodings.clause2LP
 
 /**
   * Facade object for various control methods of the seq. proof procedure.

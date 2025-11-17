@@ -1,22 +1,18 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.Clause.asTerm
 import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
-import leo.modules.output.{fusebVarListwithMap, makeBVarList}
 import leo.modules.prover.LocalState
 import leo.modules.{saturatedUserSignature, symbolsInProof}
-import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.LPSignature.{lpDne, tempLib, tempLibDeps}
+import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
+import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{lpDne, tempLib, tempLibDeps}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
 import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfConj
 import leo.modules.output.LPoutput.ModularProofEncoding.RwCnfEncoding.encRenameCnf_conj
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
-import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Const
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, LpSet}
 import leo.modules.output.LPoutput.NewLpDatastructures.pretty._
-
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
@@ -33,7 +29,6 @@ object LPoutput {
   val outputSingleFile = false
 
   val permlibFile = "MetaTheorems"
-  val multiNDFile = "Multi_ND"
   val calcRuleLibFile = "EPrules"
   val leoSimpTacticFile = "UserTactic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
@@ -396,28 +391,17 @@ object LPoutput {
 
     signatureSymbols.foreach { key =>
       val symbol = sig.orig.apply(key)
-      //val sName = lpEscapeName(symbol.name, sig.orig, false)
 
       if (symbol.hasKind) {
         val sName = sig.typeNames(symbol.key)
-        //typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, lpSet).pretty)
         typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, LpSet), sig, RenderOptions(false, false, monomorphic)))
       } else {
         val sName = sig.termNames(symbol.key)
         val isSk = isPropSet(Signature.PropSkolemConstant, symbol.flag)
         if (symbol.hasType) {
           val typeDec = NewLpDatastructures.Encoder.type2LP(symbol._ty)
-          //val sName = lpEscapeName(symbol.name, sig.orig, false)
-          if (isSk) {
-            //val typeDec = type2LP(symbol._ty, sig.orig, !outputSingleFile)
-            //skDecsSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
-            skDecsSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
-          }
-          else {
-            //val typeDec = type2LP(symbol._ty, sig.orig, false)
-            //typeDecSB.append(lpDeclaration(lpConstantTerm(sName), Seq.empty, typeDec.lift2Meta).pretty)
-            typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(false, false, monomorphic)))
-          }
+          if (isSk) skDecsSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+          else typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(false, false, monomorphic)))
         }
 
         if (symbol.hasDefn) {
@@ -487,7 +471,6 @@ object LPoutput {
         val axName0 = if (tptpName == "introduced(axiom_of_choice)") "axiom_of_choice" else s"${tptpName.dropRight(1).split(",", 2)(1)}"
         val axName = if (gdv_mode) axName0 else axName0 + s"_p$axCounter"
         val safeAxName = lpEscapeName(axName,sig.orig,false)
-        //problemEncSB.append(lpDeclaration(lpConstantTerm(safeAxName), Seq.empty, encClause).pretty(PrettyConfig(!outputSingleFile,false)))
         problemEncSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration(Name(safeAxName),Seq.empty,encClause.asMl),sig,RenderOptions(true,false,monomorphic)))
         identicalSteps += (stepId -> QName.in(Prefixes.formulaeFilePrefix.get, safeAxName))
         Out.lp_debug_info(s"linking to axiom $safeAxName (id: $stepId)")
@@ -509,8 +492,6 @@ object LPoutput {
     val (tptpDefinedSymbols_defs, typeDecSB, skDecSB, defSB, tacticSB) = generateObjectDeclaartions(signatureSymbols, flagSt, sig)
 
     tptpDefinedSymbols = tptpDefinedSymbols_defs ++ tptpDefinedSymbols
-
-    //val objectDecSB = typeDecSB.append(defSB)
 
     // set necessary flags
     if (flagSt.etaExpFlag) proofFileSB.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n")
@@ -619,7 +600,6 @@ object LPoutput {
 
     // todo: only require what we need
     lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List",s"Stdlib.Epsilon",calcRuleLibStr,permLibStr)
-    //val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\n"
     lazy val reqString = reqList.map(s => s"require open $s;\n").mkString("")
     var additions = ""
     val singleProof: mutable.StringBuilder = new StringBuilder()

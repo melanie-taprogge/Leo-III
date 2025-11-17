@@ -1,18 +1,15 @@
-package leo.modules.output.LPoutput
+package leo.modules.output.LPoutput.OldLpDatastructures
 
-import leo.datastructures.Term.{Integer, Rational, Real}
-import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term, Type}
-import leo.datastructures.Type._
 import leo.datastructures.Term._
-import leo.modules.HOLSignature
+import leo.datastructures.Type._
+import leo.datastructures._
 import leo.modules.HOLSignature._
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
-import leo.modules.output._
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
+import leo.modules.output.LPoutput.{applyPartiallyAppliedConnective, lpEscapeName, lpEscapeTerm}
 import leo.modules.output.ToTHF.{collectChoice, collectForallTys}
+import leo.modules.output._
 import leo.modules.output.logger.Out
-
-import scala.collection.mutable
 
 ////////////// ENCODING OF TYPES, TERMS, CLAUSES, DEFINITIONS AND PROOF STEPS
 

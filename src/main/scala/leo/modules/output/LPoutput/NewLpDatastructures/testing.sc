@@ -1,15 +1,10 @@
-import leo.datastructures.{Signature, mkDisjunction}
-import leo.modules.input.Input.parseProblem
+import leo.datastructures.{Signature}
 import leo.modules.input.TPTPParser
 import leo.modules.output.LPoutput.NewLpDatastructures.LogicConst.cOr
-import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Lam
-import leo.modules.output.LPoutput.NewLpDatastructures.Stmt._
-import leo.modules.output.LPoutput.NewLpDatastructures.Proof._
-import leo.modules.output.LPoutput.NewLpDatastructures.Renderer._
 import leo.modules.output.LPoutput.NewLpDatastructures._
 import leo.modules.output.LPoutput.NewLpDatastructures.nAry
 import leo.modules.output.LPoutput.NewLpDatastructures.pretty._
-import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpTerm, Name, Renderer}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpTerm, Renderer}
 
 val t: LpTerm[Level.Obj] = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("p")))
 val emptyOrigSig = Signature.freshWithHOL()

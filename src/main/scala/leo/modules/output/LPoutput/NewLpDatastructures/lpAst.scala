@@ -2,9 +2,7 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.modules.HOLSignature
-import leo.modules.HOLSignature.{&, ===, LitFalse, LitTrue, Not, |||}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
-import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig._
 
 
 // ── Levels prevent object/meta mixing ──────────────────────────────────────────

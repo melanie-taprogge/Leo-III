@@ -2,18 +2,18 @@ package leo.modules.output.LPoutput
 import leo.Out
 import leo.datastructures.Literal.{asTerm, leftSide, mkLit, rightSide, symbols}
 import leo.datastructures.Term.{:::>, ∙}
-import leo.modules.output.LPoutput.Encodings._
+import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
 import leo.datastructures.{AddInfoCnf, AddInfoCnfConj, AddInfoPara, Clause, ClauseProxy, Literal, MoveQuantStep, QuantExists, QuantStep, QuantUniv, Signature, SkolemStep, Subst, Term, Type, isPropSet, mkPolyUnivQuant, partitionArgs}
 import leo.modules.HOLSignature._
 import leo.modules.calculus.PolaritySwitch
-import leo.modules.output.LPoutput.lpDatastructures.{lpOlTerm, _}
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.calculus.Simp.normalize
 import leo.modules.output.LPoutput.CNFEncoding.{allBoolRuleApplicationStep, allBoolRulesTermName, cnfTac, cnfTacQuantifiers, cnfTacSkolem, lpMoveExists, lpMoveUniv, lpSkolemProcess, lpSkolemizeExists, lpSkolemizeUniv, onlyBoolRulesTermName, singleStepQuant}
 import leo.modules.output.LPoutput.CommonProofSteps.ScriptBuilders.assumeClauseVars
-import leo.modules.output.LPoutput.LPSignature.{lpEm, lpLorElimMulti, lpLorIntro1, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim, lpTheorems}
+import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{lpEm, lpLorElimMulti, lpLorIntro1, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim, lpTheorems}
 import leo.modules.output.LPoutput.LPoutput.{ParentInfo, abbreviationFormulaeFile}
 import leo.modules.output.intToName
 import leo.modules.saturatedUserSignature

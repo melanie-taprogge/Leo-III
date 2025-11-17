@@ -1,7 +1,7 @@
 package leo.modules.output.LPoutput
 
-import leo.modules.output.LPoutput.Encodings._
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 
 
 /**

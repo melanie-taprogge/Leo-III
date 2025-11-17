@@ -1,7 +1,7 @@
 package leo.modules
 
 import leo.datastructures.{Kind, Signature, Type}
-import leo.modules.output.LPoutput.lpDatastructures.{lpConstantTerm, lpDeclaration}
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures.{lpConstantTerm, lpDeclaration}
 
 /**
   * Collection of traits, clases and utility objects relevant for

@@ -2,15 +2,12 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 
 // smart constructors for things like clauses, conjunctions, disjunctions, etc.
 import LogicConst._
-import leo.Out
 import leo.datastructures.Clause
-import leo.datastructures.Signature.Key
 import leo.modules.output.LPoutput.Lifting.{ProofTerm, liftOlVars}
-import leo.modules.output.LPoutput.NewLpDatastructures.Encoder.{clauseLits2Lp, clauseVars2LP, var2Lp, vars2Lp}
-import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Var}
-import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, LpSet, Pi}
+import leo.modules.output.LPoutput.NewLpDatastructures.Encoder.{clauseLits2Lp, clauseVars2LP, vars2Lp}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Var}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{Pi}
 import leo.modules.output.LPoutput.NewLpDatastructures.OlType.TyVar
-import leo.modules.output.LPoutput.{Lifting, NewLpDatastructures, nameDefn}
 
 // n-ary conjunctions or disjuncions
 

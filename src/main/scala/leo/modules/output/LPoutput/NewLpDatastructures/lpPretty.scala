@@ -1,19 +1,12 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
-import leo.Out
 import leo.modules.output.LPoutput.NewLpDatastructures.Stmt._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm._
 import leo.modules.output.LPoutput.NewLpDatastructures.Proof._
-import leo.datastructures.{Signature, isPropSet}
 import leo.modules.HOLSignature
 import leo.modules.output.LPoutput.NewLpDatastructures.Arg.Implicit
-import leo.modules.output.LPoutput.NewLpDatastructures.LogicConst
-import leo.modules.output.LPoutput.NewLpDatastructures.Prefixes._
 import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig._
-import leo.modules.output.LPoutput.NewLpDatastructures.lpSysStrings._
-import leo.modules.output.LPoutput.NewLpDatastructures.tptpConstMappings.{LeoConstants, leoBinders, leoTypedConnectives, leoUntypedConnectives}
-
-import scala.collection.immutable.{AbstractSeq, LinearSeq}
+import leo.modules.output.LPoutput.NewLpDatastructures.tptpConstMappings.{leoBinders, leoTypedConnectives, leoUntypedConnectives}
 
 
 final case class RenderOptions(sigPrefix: Boolean = true, formulaPrefix: Boolean = true, monomorphic: Boolean = true)

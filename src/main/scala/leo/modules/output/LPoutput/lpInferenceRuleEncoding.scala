@@ -1,7 +1,7 @@
 package leo.modules.output.LPoutput
 
-import leo.modules.output.LPoutput.LPSignature._
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature._
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 //import leo.modules.output.LPoutput.NaturalDeductionRules._
 
 /** Definitions of the Inferences rules of the calculus EP

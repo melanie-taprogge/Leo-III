@@ -1,25 +1,17 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.datastructures.Signature.Key
-import leo.datastructures.Term.{Integer, Rational, Real}
-import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term, Type}
+import leo.datastructures.{Clause, Literal, Term, Type}
 import leo.datastructures.Type._
 import leo.datastructures.Term._
-import leo.datastructures.impl.TermAbstr
-import leo.modules.HOLSignature
 import leo.modules.HOLSignature._
-import leo.modules.output.LPoutput.Encodings.collectLambdasLP
-import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
-import leo.modules.output.LPoutput.NewLpDatastructures.LogicConst.{Bot, cEq}
+import leo.modules.output.LPoutput.OldLpDatastructures.Encodings.collectLambdasLP
+import leo.modules.output.LPoutput.NewLpDatastructures.LogicConst.{Bot}
 import leo.modules.output._
-import leo.modules.output.ToTHF.{collectChoice, collectExists, collectForall, collectForallTys, collectLambdas, collectTyLambdas}
-import leo.modules.output.logger.Out
-import leo.modules.output.LPoutput.NewLpDatastructures.Stmt._
+import leo.modules.output.ToTHF.{collectTyLambdas}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, LpSet}
 import leo.modules.output.LPoutput.NewLpDatastructures.OlType.{Base, Fun, TyVar}
-import leo.modules.output.LPoutput.NewLpDatastructures.Proof._
-import leo.modules.output.LPoutput.NewLpDatastructures.tptpConstMappings.leoBinders
 import leo.modules.output.LPoutput.{Lifting, nameDefn, nameSkDef}
 
 object Encoder {
