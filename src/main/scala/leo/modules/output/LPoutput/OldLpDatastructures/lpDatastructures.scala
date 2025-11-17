@@ -120,11 +120,17 @@ object lpDatastructures {
 
   }
 
-  abstract class lpSimpRuleVersion extends lpStatement {
-    def term: lpTerm
-    def rwLeft: Boolean
+  abstract class lpNameRef extends lpStatement {
 
-    override def pretty (implicit prefix : PrettyConfig): String = term.pretty
+    def name: lpConstantTerm
+
+    override def pretty(implicit prefix : PrettyConfig) = name.pretty
+
+  }
+
+  abstract class lpSimpRuleVersion extends lpStatement {
+    def name: lpTerm
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
 

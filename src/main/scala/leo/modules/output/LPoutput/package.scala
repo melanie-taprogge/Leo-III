@@ -187,19 +187,6 @@ package object LPoutput {
     }
   }
 
-  def nestedLorIlApp(lhs: Seq[lpOlTerm], rhs: Seq[lpOlTerm], prfRhs: lpTerm): lpFunctionApp = {
-    // iterativeley construct the proofs for disjunctions of literals based on a proof for the rhs. This is necessary to avoid errors in cases where (a \lor b) \lor (c \lor d ( ...
-    // would otherwise been proven
-    if (lhs.length == 0) throw new Exception("trying to pass empty lhs to nestedLorIlApp")
-    if (lhs.length == 1) NaturalDeductionRules.orIr().instanciate(lhs.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, rhs), Some(prfRhs))
-    else {
-      val currentVar = lhs.last
-      val newLhs = lhs.init
-      val newRhs = Seq(currentVar) ++ rhs
-      val newProof = NaturalDeductionRules.orIr().instanciate(currentVar, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, rhs), Some(prfRhs))
-      nestedLorIlApp(newLhs, newRhs, newProof)
-    }
-  }
 
   def clauseRuleQuantification(parent: Clause, bVarMap: Map[Int, String], sig: Signature): (Seq[lpTypedVar], Seq[lpUntypedVar]) = {
     //throw new Exception("CHANGE clauseRuleQuantification")

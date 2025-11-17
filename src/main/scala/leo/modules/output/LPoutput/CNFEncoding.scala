@@ -8,8 +8,6 @@ import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
   * @author Melanie Taprogge
   */
 
-//todo: encode proofs properly
-
 object CNFEncoding {
 
   val allBoolRulesTermName = lpConstantTerm("boolIds")

@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput
 
 import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpTerm, LpType}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
-import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, LpSet, Prf}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{LpSet, Prf}
 import leo.modules.output.LPoutput.NewLpDatastructures.OlType.TyVar
 
 object Lifting {

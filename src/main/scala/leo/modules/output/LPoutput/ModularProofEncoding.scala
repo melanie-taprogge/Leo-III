@@ -1,9 +1,8 @@
 package leo.modules.output.LPoutput
 import leo.Out
-import leo.datastructures.Literal.{asTerm, leftSide, mkLit, rightSide, symbols}
-import leo.datastructures.Term.{:::>, ∙}
+import leo.datastructures.Literal.{asTerm}
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
-import leo.datastructures.{AddInfoCnf, AddInfoCnfConj, AddInfoPara, Clause, ClauseProxy, Literal, MoveQuantStep, QuantExists, QuantStep, QuantUniv, Signature, SkolemStep, Subst, Term, Type, isPropSet, mkPolyUnivQuant, partitionArgs}
+import leo.datastructures.{AddInfoCnf, AddInfoCnfConj, AddInfoPara, Clause, ClauseProxy, Literal, MoveQuantStep, QuantExists, QuantStep, QuantUniv, Signature, SkolemStep, Term, Type}
 import leo.modules.HOLSignature._
 import leo.modules.calculus.PolaritySwitch
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
@@ -11,14 +10,12 @@ import leo.modules.output.LPoutput.AccessoryRules._
 import leo.modules.output.LPoutput.lpInferenceRuleEncoding._
 import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.calculus.Simp.normalize
-import leo.modules.output.LPoutput.CNFEncoding.{allBoolRuleApplicationStep, allBoolRulesTermName, cnfTac, cnfTacQuantifiers, cnfTacSkolem, lpMoveExists, lpMoveUniv, lpSkolemProcess, lpSkolemizeExists, lpSkolemizeUniv, onlyBoolRulesTermName, singleStepQuant}
+import leo.modules.output.LPoutput.CNFEncoding.{cnfTacQuantifiers, lpMoveExists, lpMoveUniv, lpSkolemizeExists, lpSkolemizeUniv, onlyBoolRulesTermName}
 import leo.modules.output.LPoutput.CommonProofSteps.ScriptBuilders.assumeClauseVars
-import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{lpEm, lpLorElimMulti, lpLorIntro1, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim, lpTheorems}
+import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{eqImp, lpEm, lpLorElimMulti, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim}
 import leo.modules.output.LPoutput.LPoutput.{ParentInfo, abbreviationFormulaeFile}
-import leo.modules.output.intToName
 import leo.modules.saturatedUserSignature
 
-import scala.collection.immutable.{AbstractSeq, LinearSeq}
 import scala.collection.mutable
 
 /** Modular encoding of proofs
@@ -92,7 +89,7 @@ object ModularProofEncoding {
 
           // i)  Define an equality term to rewrite (¬ ¬ a) to a using the have tactic
           val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encLeft, lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,encLeft)))
-          val polaritySwitchStep = lpRefine(lpFunctionApp(lpStd_eq_sym,Seq(lpSimp_dne.instanciate(encLeft))))
+          val polaritySwitchStep = lpRefine(lpFunctionApp(lpStd_eq_sym.name,Seq(lpSimp_dne.instanciate(encLeft))))
           val polaritySwitchName = s"PolaritySwitch_lit$litCount"
           val havepolaritySwitchStep = lpHave(polaritySwitchName, equalityToProve.prf, lpProofScript(Seq(polaritySwitchStep)))
           allSteps = allSteps :+ havepolaritySwitchStep
@@ -414,7 +411,7 @@ object ModularProofEncoding {
     /** assemble the final `refine` step with aproperiate instanciation */
     private def assembleRefinement(apply2parent: Seq[lpTypedVar], parentNameLpEnc: lpConstantTerm, clauseStepName: String, apply2step: Seq[lpTypedVar]): lpRefine = {
       val appliedParent = lpFunctionApp.mk(parentNameLpEnc, apply2parent)
-      val instClausStep = lpFunctionApp(lpFunctionApp(lpFunctionApp(lpTheorems.eqImp, Seq(lpConstantTerm(clauseStepName))), Seq(appliedParent)), apply2step)
+      val instClausStep = lpFunctionApp(lpFunctionApp(lpFunctionApp(eqImp.name, Seq(lpConstantTerm(clauseStepName))), Seq(appliedParent)), apply2step)
       lpRefine(instClausStep)
     }
 
@@ -942,7 +939,7 @@ object ModularProofEncoding {
       val caseUniLitFalse: lpProofScript = branchUniLitFalse(newCtxt.childC)
 
       // Finish 2 by combining the proof scripts for the case split
-      val ufTrueOrFalse = lpFunctionApp(lpLorelim, Seq(lpFunctionApp(lpEm.name, Seq(newCtxt.childC.encPosUniLit)), lpWildcard, lpWildcard))
+      val ufTrueOrFalse = lpFunctionApp(lpLorelim.name, Seq(lpFunctionApp(lpEm.name, Seq(newCtxt.childC.encPosUniLit)), lpWildcard, lpWildcard))
       val caseSplitUniLit = lpRefine(ufTrueOrFalse, Seq(caseUniLitTrue, caseUniLitFalse))
 
       val proof = lpProofScript(assumeVarsStep ++ stepWithLit2Eq :+ caseSplitUniLit)
@@ -1068,7 +1065,7 @@ object ModularProofEncoding {
       if (intoLitInChildNeedsflip) {
         Out.lp_debug_info(s"intoLit in child needs to be flipped")
         val flipPattern = generateClausePattern(Seq(ctxt.childC.intoLitIdx), ctxt.childC.len, ctxt.childC.intoLit.polarity)
-        val flipStep = lpRewrite(Some(lpRewritePattern(flipPattern)), flipLiteral().instanciate(ctxt.intoC.encIntoLit.tyLhs))
+        val flipStep = lpRewrite(Some(lpRewritePattern(flipPattern)), flipLiteral.instanciate(ctxt.intoC.encIntoLit.tyLhs))
         Seq(lpProofScriptCommentLine("Target literal needs to be flipped"), flipStep)
       } else Seq.empty
     }
@@ -1078,7 +1075,7 @@ object ModularProofEncoding {
     private def branchUniLitFalse(childCl: ParaChildClause) = {
       val nameUniLit = lpConstantTerm("uniLitInEq")
       val assumeUniLit = lpAssume(Seq(nameUniLit))
-      val orIntro = if (childCl.enc.lits.length > 2) lpLorIntroMulti2.instanciate((childCl.enc.lits.init), Seq(childCl.encUniLit)) else lpLorIntro2
+      val orIntro: lpTerm = if (childCl.enc.lits.length > 2) lpLorIntroMulti2.instanciate((childCl.enc.lits.init), Seq(childCl.encUniLit)) else lpLorIntro2.name
       lpProofScript(Seq(assumeUniLit, lpRefine(lpFunctionApp(orIntro, Seq(nameUniLit)))))
     }
 
@@ -1434,91 +1431,6 @@ object ModularProofEncoding {
   ////////// Extended Calculus
   ////////////////////////////////////////////////////////////////
 
-  def simplificationInfoToSteps(parent: Clause, additionalInfo: Seq[(Seq[Int],Int)], sig: Signature):(Seq[lpProofScriptStep])={
-
-    // outdated
-
-    var rewriteSteps: Seq[lpProofScriptStep] = Seq.empty
-
-    additionalInfo foreach { tuple =>
-      val (appliedSimpRule, needsTypeInst) = SimplificationEncoding.SimpRuleMap(tuple._2)
-      val (rewritePattern0, termAtRewriteVar) = acessSubterm(Clause.asTerm(parent), tuple._1, sig)
-      //the pattern we need to match can not only be determined based on the terms because we also need to account for the
-      // equality between the child and parent clause we added!
-      val rewritePattern = lpRewritePattern(lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, rewritePattern0, lpOlWildcard))
-      val rewriteStep = if (needsTypeInst) {
-        // in this case we need to find out the type of the terms in this equality to instanciate the simplification rule with them
-        val ty = termAtRewriteVar match {
-          case tl === tr =>
-            type2LP(tl.ty, sig)
-          //todo: can equivalence also occour here
-          case _ => throw new Exception(s"detected connective other than equality where equality was exprected")
-        }
-        lpRewrite(Option(rewritePattern), lpFunctionApp(appliedSimpRule.name, Seq(lpConstantTerm(s"[${ty.lift2Poly.pretty}]"))))
-      }
-      else lpRewrite(Option(rewritePattern), appliedSimpRule.name)
-      rewriteSteps = rewriteSteps :+ rewriteStep
-    }
-    (rewriteSteps)
-  }
-
-  def simplificationProofScript(child: Clause, parent: Clause, additionalInfo: Seq[(Seq[Int],Int)], symbolsToUnfold: Set[Signature.Key], parentNameLpEnc: lpConstantTerm, quantifiedVars: Seq[lpUntypedVar], bVars: Map[Int, String], sig: Signature):lpProofScript={
-
-    // proof the equality between a parent and a child term given a set of rewrite rules and their positions
-
-    val encParent = term2LP(Clause.asTerm(parent), bVars, sig)._1
-    val encChild = term2LP(Clause.asTerm(child), bVars, sig)._1
-    //print(s"Encoding simplification step: ${encParent.pretty} to ${encChild.pretty}\n")
-
-
-    val simplificationStepName: String = {
-      if (additionalInfo.nonEmpty) {
-        if (symbolsToUnfold.nonEmpty) "DefExpAndSimp" else "Simp"
-      } else {
-        if (symbolsToUnfold.nonEmpty) "DefExp" else throw new Exception(s"Nothing was expanded or simplified in simplification step")
-      }
-    }
-
-    // the complete proof script consists of 3 steps:
-    // 1. If necessary, unfold definitions
-    // 2. Proof the equality between the parent and the child clause
-    // 3. By applying identity (λ x ,x) and the parent term encoding to the equality proven in 2, we can conclude the child
-
-    var allProofStep: Seq[lpProofScriptStep] = Seq.empty
-    var rewriteSteps: Seq[lpProofScriptStep] = Seq.empty
-
-    //// 1. Unfold necessary definitions
-    if (symbolsToUnfold.nonEmpty) {
-      rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Unfold necessary definitions")
-      val unfoldVars = symbolsToUnfold.map(sym => lpConstantTerm(sig(sym).name))
-      rewriteSteps = rewriteSteps :+ lpSimplify(unfoldVars)
-      if (additionalInfo.nonEmpty) rewriteSteps = rewriteSteps :+ lpProofScriptCommentLine("Application of simplification rules")
-    }
-
-    //// 2. Equality between parent and child
-    val additionalSteps = simplificationInfoToSteps(parent, additionalInfo, sig)
-    rewriteSteps = rewriteSteps ++ additionalSteps
-    // at the end, only something like x=x should remain of the focussed goal. We add the tactic "reflexivity" to prove this.
-    rewriteSteps = rewriteSteps :+ lpReflexivity()
-
-    // we proof that the term before the transformation = the term after the transformation
-    val eqSimpTerm = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,encParent,encChild).prf
-    val haveStep = lpHave(simplificationStepName,eqSimpTerm,lpProofScript(rewriteSteps))
-
-    allProofStep = allProofStep :+ haveStep
-
-
-    //// 3. Refine step
-    val application = lpFunctionApp(lpConstantTerm(simplificationStepName),Seq(Identity, lpFunctionApp(parentNameLpEnc,quantifiedVars)))
-    val applicationStep = lpRefine(application)
-    allProofStep = allProofStep :+ applicationStep
-
-    // combine all steps into one proof script
-    val proofScript = lpProofScript(allProofStep)
-
-    proofScript
-  }
-
   def inferImplicitTransformationsSimp(parentLits: Seq[Literal], ChildLits: Seq[Literal], childLen: Int, bVarMap: Map[Int, String], ignoreIndices: Seq[Int], sig: Signature): (Seq[Literal], Seq[Int], Seq[lpProofScriptStep]) = {
 
     // Applies simplification to the given literals and then applies the operations carried out by Leo-III that can potentialy lead to the literal
@@ -1848,9 +1760,9 @@ object ModularProofEncoding {
           /*
           if (lhs != lit_cl.left) {
             // 2 b) for the new equality literlas, the order within the equality may have changed, if so: apply rewrite tactic
-            allSteps = allSteps :+ lpRewrite(rwPattern, flipLiteral().instanciate(encRhs, encLhs, None))
-            finalLit = flipLiteral().res(litPol, encType.lift2Poly, encRhs, encLhs)
-            usedRules = usedRules + flipLiteral()
+            allSteps = allSteps :+ lpRewrite(rwPattern, flipLiteral.instanciate(encRhs, encLhs, None))
+            finalLit = flipLiteral.res(litPol, encType.lift2Poly, encRhs, encLhs)
+            usedRules = usedRules + flipLiteral
           }
            */
           liftedLits = liftedLits :+ finalLit
@@ -1954,12 +1866,12 @@ object ModularProofEncoding {
           // Choose the fitting rule for the transformation todo: aso use the general skript here
           val haveTransformStep = if (rwPol) {
             val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlTop, rwLhs)
-            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkTopEqPosProp.term), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
+            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, lpSimp_topEq.name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
             haveTransformStep0
           } else {
             rwRhs = lpOlBot
             val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, lpOlBot, rwLhs)
-            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, mkBotEqNegProp.term), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
+            val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, lpSimp_botEq.name), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
             haveTransformStep0
           }
           Out.lp_debug_info(s"Transforming rewrite rule to equality...")
@@ -1972,7 +1884,7 @@ object ModularProofEncoding {
           eqFlipCounter = eqFlipCounter + 1
           val transformedRewriteEq = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, rwRhs, rwLhs)
           Out.lp_debug_info(s"transforming rewirte clause to ${transformedRewriteEq.pretty}")
-          val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, lpFunctionApp(flipLiteral().name, Seq.empty, Seq(rwType))), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
+          val haveTransformStep0 = lpHave(transformationStepName, transformedRewriteEq.prf, lpProofScript(Seq(lpRewrite(None, lpFunctionApp(flipLiteral.name, Seq.empty, Seq(rwType))), lpRefine(lpFunctionApp(sourceBeforeEq, Seq())))))
           val haveTransformStep = haveTransformStep0
           //  2 b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly todo: sbustitution
           allSteps = allSteps :+ haveTransformStep
