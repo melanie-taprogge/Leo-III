@@ -18,8 +18,9 @@ object tptpConstMappings {
 
   val leoBaseTy = Map[Signature.Key,QName](
     HOLSignature.oKey -> QName.local(oTyStr),
-    HOLSignature.iKey -> QName.local(iTyStr),
-    HOLSignature.intKey -> QName.in(Prefixes.sigPrefix.get,tptpIntStr))
+    HOLSignature.iKey -> QName.local(iTyStr)
+    ,HOLSignature.intKey -> QName.in(Prefix.Sig,tptpIntStr)
+  )
 
 
   val leoTopBot = Map[Signature.Key, QName](LitTrue.key -> QName.local(topStr),
@@ -31,7 +32,8 @@ object tptpConstMappings {
 
   val leoBinders = Map[Signature.Key, QName](
     HOLSignature.Forall.key -> QName.local(forAllStr),
-    HOLSignature.Exists.key -> QName.local(exStr)
+    HOLSignature.Exists.key -> QName.local(exStr),
+    HOLSignature.Choice.key -> QName.local(choiceStr)
   )
 
   val leoUntypedConnectives = Map[Signature.Key, QName](
@@ -113,7 +115,7 @@ object LpSigBuilder {
             val qn = if (isPropSet(Signature.PropSkolemConstant, meta.flag))
               QName(None, Name(safe))
             else
-              QName(Prefixes.sigPrefix, Name(safe))
+              QName(Some(Prefix.Sig), Name(safe))
             (k -> qn)
           }
       }.toMap
@@ -128,7 +130,7 @@ object LpSigBuilder {
         else{
           val raw = meta.name
           val safe = avails(raw, res)
-          val qn = QName(Prefixes.sigPrefix, Name(safe))
+          val qn = QName(Some(Prefix.Sig), Name(safe))
           (k -> qn)
         }
       }.toMap

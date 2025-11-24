@@ -409,6 +409,8 @@ object lpDatastructures {
   case object lpIntType extends lpOlMonoType {
     val baseName = "tptp_int"
     override def pretty (implicit prefix : PrettyConfig): String = if (prefix.sigPrefix) s"${abbreviationSignatureFile}$baseName" else baseName
+    //override def pretty (implicit prefix : PrettyConfig): String =  s"${abbreviationSignatureFile}$baseName"
+
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpIntType)
     override def lift2Meta: lpMlType = lpliftedObjectType(lpIntType)
   }

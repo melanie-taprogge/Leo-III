@@ -60,7 +60,7 @@ object lpClauseInst {
   def apply_to_set(cls: Seq[Clause]): (Map[Int, String], Seq[lpClauseInst]) = {
     val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = clauseVars2LP(allImpBoundVars)._2
-    val encCls = cls.map(cl => clauseLits2Lp(cl.lits, fullBvarsMap)._1)
+    val encCls = cls.map(cl => clauseLits2Lp(cl.lits, fullBvarsMap))
     val encVars: Seq[Seq[Either[Var[Level.Obj], TyVar]]] = cls.map(cl => vars2Lp(cl.implicitlyBound, fullBvarsMap).map(Left(_)))
     (fullBvarsMap, encCls.zip(encVars).map(ecnCl => lpClauseInst(ecnCl._1, ecnCl._2)))
   }

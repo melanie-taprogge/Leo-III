@@ -2,10 +2,6 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.modules.output.LPoutput
 
-object Prefixes {
-  val sigPrefix = Some(Prefix(Name("S")))
-  val formulaeFilePrefix = Some(Prefix(Name("F")))
-}
 
 object lpEncSig {
   val prfStr = "π"
@@ -26,6 +22,10 @@ object lpEncSig {
   val choiceStr = "ε"
 
   val allAscii = Seq(oTyStr, witnessStr)
+}
+
+object numbers {
+  def nameInt(n:BigInt) : String = s"int_${n}"
 }
 
 object tptpRepSig {

@@ -2,11 +2,11 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.modules.output.LPoutput.NewLpDatastructures.Stmt._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm._
-import leo.modules.output.LPoutput.NewLpDatastructures.Proof._
-import leo.modules.HOLSignature
-import leo.modules.output.LPoutput.NewLpDatastructures.Arg.Implicit
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProof._
 import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig._
+import leo.modules.output.LPoutput.NewLpDatastructures.numbers.nameInt
 import leo.modules.output.LPoutput.NewLpDatastructures.tptpConstMappings.{leoBinders, leoTypedConnectives, leoUntypedConnectives}
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures.PrettyConfig
 
 
 final case class RenderOptions(sigPrefix: Boolean = true, formulaPrefix: Boolean = true, monomorphic: Boolean = true)
@@ -28,7 +28,10 @@ object Renderer {
       val colonTy = tyOpt.fold("")(t => s": ${ty(t, ro, sig)}")
       val eq = body match {
         case DefBody.LpTermBody(t0) => " " + renderTerm(t0, ro, sig) + ";"
-        case DefBody.ProofBody(p) => "\n" + "begin\n" + indent(proof(p, ro, sig)) + "\nend;"
+        case DefBody.ProofBody(p) =>
+          val proofScript = p.map(step =>
+            indent(proof(step, ro, sig))).mkString("\n")
+          "\n" + "begin\n" + proofScript + "\nend;"
       }
       s"${mod}symbol ${name(n)}$imp$par$colonTy ≔$eq\n"
 
@@ -43,17 +46,25 @@ object Renderer {
 
   def typ(t: LpType, sig: LpSig, ro: RenderOptions = RenderOptions()): String = ty(t, ro, sig)
 
-  def proofText(p: Proof, sig: LpSig, ro: RenderOptions = RenderOptions()): String = proof(p, ro, sig)
+  def proofText(p: LpProof, sig: LpSig, ro: RenderOptions = RenderOptions()): String = proof(p, ro, sig)
 
   def LpQname(qn: QName, ro: RenderOptions = RenderOptions()): String = qname(qn, ro)
 
 
-  def proof(p: Proof, ro: RenderOptions, sig: LpSig): String = p match {
+  def proof(p: LpProof, ro: RenderOptions, sig: LpSig): String = {
+    p match {
     case Refine(t, subs) =>
-      val sub = subs.map(sp => "\n" + indent(curly(proof(sp, ro, sig)))).mkString("")
-      s"refine ${renderTerm(t, ro, sig)}$sub"
+      val proofScript = if (subs.isEmpty) "" else s"\n${curly(subs.map(step => indent(proof(step, ro, sig))).mkString("\n"))}"
+      s"refine ${renderTerm(t, ro, sig)}$proofScript;"
     case Have(n, ty0, pr) =>
-      s"have ${name(n)} : ${ty(ty0, ro, sig)}\n" + indent(curly(proof(pr, ro, sig)))
+      //val proofScript = curly(pr.map(step => indent(proof(step, ro, sig))).mkString("\n"))
+      val proofScript = curly(pr.map(step =>
+        step match {
+          case Left(step) => proof(step, ro, sig)
+          case Right(lpScript) => lpScript.pretty(PrettyConfig(ro.sigPrefix,ro.formulaPrefix))
+        }
+        ).mkString("\n"))
+      s"have ${name(n)} : ${ty(ty0, ro, sig)}\n" + indent(proofScript) + ";"
     case Rewrite(pattern, rule, side) =>
       val sside = side match {
         case Side.Left => " left ";
@@ -61,11 +72,15 @@ object Renderer {
         case Side.Any => " "
       }
       val pat = pattern.fold("") { p => s".[${name(p.hole)} in ${renderTerm(p.LpTerm, ro, sig)}] " }
-      s"rewrite$sside$pat${renderTerm(rule, ro, sig)}"
-    case Reflexivity => "reflexivity"
-    case Simplify(ns) => s"simplify ${ns.map(name).mkString(" ")}"
-    case Repeat(step) => s"repeat ${proof(step, ro, sig)}"
-    case Eval(tac) => s"eval ${renderTerm(tac, ro, sig)}"
+      s"rewrite$sside$pat${renderTerm(rule, ro, sig)};"
+    case Reflexivity => "reflexivity;"
+    case Simplify(ns) => s"simplify ${ns.map(name).mkString(" ")};"
+    case Repeat(step) => s"repeat ${proof(step, ro, sig)};"
+    case Eval(tac) => s"eval ${renderTerm(tac, ro, sig)};"
+    case Comment(com) => s"// $com;"
+    case Admit => s"admit;"
+    case Assume(vars) => s"assume ${vars.map(_.value).mkString(" ")};"
+  }
   }
 
   // ── procedure aware printer ───────────────────────────────────────────────────
@@ -117,9 +132,8 @@ object Renderer {
 
       // some of the leo connectives i do nor represent explicitly
       // todo: either also hanlde the unapplied cases or handle them differently, for instance by defining rules for them
-
-      case LpTerm.App(LpTerm.Const(SymRef.Leo(HOLSignature.!===.key)), Seq(Arg.ExplicitTypeArg(t), Arg.Explicit(l), Arg.Explicit(r))) =>
-        termP(LogicConst.Not(LogicConst.Eq(t,l,r)),ro,Prec.Not,sig)
+      case LogicConst.InEq(t, l, r) => //todo: add option to print type
+        termP(LogicConst.Not(LogicConst.Eq(t, l, r)),ro, ctx, sig)
 
       // Quantifiers: ∀ (λ (x : T) …)
       case LogicConst.Forall(bind, body) =>
@@ -141,6 +155,8 @@ object Renderer {
         s"($choiceStr(λ $bStr, $bodyStr))"
 
       // Generic cases (as you already had)
+      case Wildcard() => "_"
+
       case LpTerm.Var(n, _) => n.value
       //case LpTerm.Const(n) => qname(n,ro)
 
@@ -161,7 +177,7 @@ object Renderer {
         }
         paren(ctx > Prec.Min, s"λ $dec, ${termP(body, ro, Prec.Min, sig)}")
 
-      case LpTerm.App(LpTerm.Const(SymRef.Leo(i)), args) if ((leoBinders).keySet.toSeq.contains(i)) =>
+      case LpTerm.App(LpTerm.Const(SymRef.Leo(i)), args) if (leoBinders.keySet.toSeq.contains(i)) =>
         val ifs = qname(sig.termNames(i), ro)
         val encArgs: Seq[String] = args match {
           case Nil => Seq()
@@ -190,12 +206,14 @@ object Renderer {
         val ifs = termP(f, ro, Prec.App, sig)
         val encArgs = renderArgs(args, ro, sig)
         paren(ctx > Prec.App, s"$ifs ${encArgs.mkString(" ")}")
+
+      case TptpInt(n) => qname(QName.in(Prefix.Sig,nameInt(n)),ro)
     }
   }
 
-  private def renderArg(args: Arg[Level.Obj], ro: RenderOptions, sig: LpSig) = {
-    args match {
-      case Implicit(t) => s"[${termP(t, ro, 0, sig)}]"
+  private def renderArg(arg: Arg[Level.Obj], ro: RenderOptions, sig: LpSig) = {
+    arg match {
+      case Arg.Implicit(t) => s"[${termP(t, ro, 0, sig)}]"
       case Arg.Explicit(t) => termP(t, ro, Prec.Atom, sig)
       case Arg.ImplicitTypeArg(ty) => s"[${olTy(ty, ro, sig)}]"
       case Arg.ExplicitTypeArg(ty) => olTy(ty, ro, sig)
@@ -210,7 +228,11 @@ object Renderer {
   private def name(n: Name): String = n.value
 
   private def qname(q: QName, ro: RenderOptions): String = q.file match {
-    case Some(Prefix(mod)) if ro.sigPrefix => s"${mod.value}.${q.local.value}"
+    case Some(p) =>
+      p match {
+        case Prefix.Sig => if (ro.sigPrefix) s"S.${q.local.value}" else q.local.value
+        case Prefix.Formula => if (ro.formulaPrefix) s"F.${q.local.value}" else q.local.value
+      }
     case _ => q.local.value
   }
 
@@ -229,9 +251,10 @@ object Renderer {
       s"Π $b, ${ty(body, ro, sig)}"
     case LpType.Arrow(a, b) => s"(${ty(a, ro, sig)} → ${ty(b, ro, sig)})"
     case LpType.Prf(a) => s"$prfStr ${termP(a, ro, Prec.Atom, sig)}"
+    case LpType.Old(st) => st
   }
 
-  private def olTy(ol: OlType, ro: RenderOptions, sig: LpSig): String = ol match {
+  def olTy(ol: OlType, ro: RenderOptions, sig: LpSig): String = ol match {
     //case OlType.O => oTyStr
     //case OlType.I => iTyStr
     case OlType.Base(SymRef.LP(qn)) => qname(qn, ro)
@@ -254,10 +277,20 @@ object Renderer {
         }
         s"(λ $dec, $bodyStr)"
       case App(f, args) =>
-        val (imps, exps) = args.partition(_.isInstanceOf[Arg.Implicit[_]])
-        val is = if (imps.isEmpty) "" else " " + imps.map { case Arg.Implicit(t1) => s"[${renderTerm(t1, ro, sig)}]" }.mkString(" ")
-        val es = if (exps.isEmpty) "" else " " + exps.map { case Arg.Explicit(t1) => renderTerm(t1, ro, sig) }.mkString(" ")
+        val (imps, exps) = args.partition(arg => arg.isInstanceOf[Arg.Implicit[_]] || arg.isInstanceOf[Arg.ImplicitTypeArg] )
+        val is = if (imps.isEmpty) "" else " " + imps.map {
+          case Arg.Implicit(t1) => s"[${renderTerm(t1, ro, sig)}]"
+          case Arg.ImplicitTypeArg(t1) => s"[${olTy(t1, ro, sig)}]"
+        }.mkString(" ")
+        val es = if (exps.isEmpty) "" else " " + exps.map {
+          case Arg.Explicit(t1) => renderTerm(t1, ro, sig)
+          case Arg.ExplicitTypeArg(t1) => olTy(t1, ro, sig)
+
+        }.mkString(" ")
         s"(${renderTerm(f, ro, sig)}$is$es)"
+      case Wildcard() => "_"
+      case Obj(t) => termP(t,ro,Prec.Atom,sig)
+      case TptpInt(n) => qname(QName.in(Prefix.Sig,nameInt(n)),ro)
     }
   }
 }
@@ -281,7 +314,7 @@ object pretty {
     def pretty(implicit sig: LpSig): String = Renderer.typ(t, sig, ro)
   }
 
-  implicit class ProofOps(private val p: Proof) extends AnyVal {
+  implicit class ProofOps(private val p: LpProof) extends AnyVal {
     def pretty(implicit sig: LpSig): String = Renderer.proofText(p, sig, ro)
   }
 

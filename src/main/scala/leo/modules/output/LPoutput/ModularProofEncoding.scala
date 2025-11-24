@@ -219,6 +219,7 @@ object ModularProofEncoding {
       *         - The `lpMlType` is the (possibly ∀-quantified) goal.
       */
     def encRenameCnf_conj(parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, cnfInfo: AddInfoCnf, sig: Signature): (lpProofScript, Option[String], lpMlType, Set[Signature.Key]) = {
+      //todo: You should be able to safeley remove the "allsymbols" as the step is added to the standard leo output now anyways...
       ///////////////////////////////////////////////////////////////////////////////////////
       //// 0. Set up: encode everything and test if the step can be encoded
       // encodings

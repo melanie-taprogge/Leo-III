@@ -2,6 +2,7 @@ package leo.datastructures.impl
 
 import leo.{Out, datastructures}
 import leo.datastructures.Position.HeadPos
+import leo.datastructures.Term.{Bound, Rational, Real}
 import leo.datastructures.Type._
 import leo.datastructures._
 import leo.modules.myAssert
@@ -119,6 +120,40 @@ protected[datastructures] sealed abstract class TermImpl(protected[TermImpl] var
     }
 
     check(this :: Nil)
+  }
+
+  final lazy val numbers: Multiset[Term] = {
+    import leo.datastructures.Term.{:::>, TypeLambda, ∙}
+    import scala.annotation.tailrec
+
+    @tailrec
+    def collect(todo: List[Term], acc: Multiset[Term]): Multiset[Term] = {
+      todo match {
+        case Nil => acc
+        case term :: rest =>
+          term match {
+            case Term.Integer(_) | Term.Rational(_, _) | Term.Real(_, _, _) =>
+              collect(rest, acc + term)
+
+            case datastructures.Term.Symbol(_) | Bound(_, _) => collect(rest, acc)
+
+            case _ :::> body =>
+              collect(body :: rest, acc)
+
+            case TypeLambda(body) =>
+              collect(body :: rest, acc)
+
+            case f ∙ args =>
+              val argsList: List[Term] = args.collect { case Left(a) => a }.toList
+              collect(f :: argsList ::: rest, acc)
+
+            case _ =>
+              collect(rest, acc)
+          }
+      }
+    }
+
+    collect(this.betaNormalize :: Nil, Multiset.empty)
   }
 }
 

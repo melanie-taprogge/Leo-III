@@ -56,10 +56,6 @@ object LPSignature {
     // symbol dne x : π(¬ ¬ x) → π x
     // todo: add proof encoding
     override def name: lpConstantTerm = lpConstantTerm("¬¬ₑ")
-
-    def ty: lpMlType = lpMlDependType(Seq(lpTypedVar(lpConstantTerm("x"), lpOtype.lift2Meta)),lpMlFunctionType(Seq(lpOlUnaryConnectiveTerm(lpNot,lpOlUnaryConnectiveTerm(lpNot,lpOlConstantTerm("x"))).prf,lpOlConstantTerm("x").prf)))
-
-    override def pretty (implicit prefix : PrettyConfig): String = lpDeclaration(lpDne.name, Seq.empty, lpDne.ty).pretty
   }
 
   case object lpPropExt extends lpNameRef {
