@@ -1,12 +1,13 @@
-package leo.modules.output.LPoutput
+package leo.modules.output.LPoutput.NewLpDatastructures
 
-import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpTerm, LpType}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{LpSet, Prf}
 import leo.modules.output.LPoutput.NewLpDatastructures.OlType.TyVar
 
+/** Constructors for Lambdapi meta-level Types and Terms based on object-level instances **/
 object Lifting {
-  object TyVarM {
+  // ** Variables 
+  private object TyVarM {
     def apply(v: TyVar): Var[Level.Meta] =
       Var(v.name,Some(LpSet))
 
@@ -16,7 +17,7 @@ object Lifting {
     }
   }
 
-  object OlVarM {
+  private object OlVarM {
     def apply(v: Var[Level.Obj]): Var[Level.Meta] = {
       Var(v.name, v.ty)
     }
@@ -27,11 +28,12 @@ object Lifting {
     }
   }
 
-  def liftOlVars(v: Either[Var[Level.Obj],TyVar]) = v match {
+  def liftOlVars(v: Either[Var[Level.Obj], TyVar]): Var[Level.Meta] = v match {
     case Left(olVar) => OlVarM(olVar)
     case Right(tyVar) => TyVarM(tyVar)
   }
 
+  // ** Propositions
   object ProofTerm {
     def apply(t: LpTerm[Level.Obj]): LpType = {
       Prf(t)

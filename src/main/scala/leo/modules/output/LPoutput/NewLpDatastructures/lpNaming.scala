@@ -1,14 +1,25 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.modules.output.LPoutput
+import leo.modules.output.LPoutput.LpLibs.ND
 
+//////////////////////////////////////////
+// Utility for determining weather a name is not safe to use
+// - Defines the Strings used in the standard library
+// - Defines a list of all Lambdapi Keywords
+// - Defines a RegEx for all forbidden Strings
+//////////////////////////////////////////
 
+/** Stirngs used in the Lambdapi Standard Library to represent object-logics*/
 object lpEncSig {
+  // ** Propositions as types
   val prfStr = "π"
   val elStr = "τ"
+  // ** Standard Library Types
   val oTyStr = "o"
   val iTyStr = "ι"
   val tyConStr = "⤳"
+  // ** Standard Library Propositional Constants
   val topStr = "⊤"
   val botStr = "⊥"
   val negStr = "¬"
@@ -16,29 +27,27 @@ object lpEncSig {
   val orStr = "∨"
   val impStr = "⇒"
   val eqStr = "="
+  // ** Standard Library Binders
   val forAllStr = "∀"
   val exStr = "∃"
-  val witnessStr = "el"
   val choiceStr = "ε"
 
-  val allAscii = Seq(oTyStr, witnessStr)
-}
-
-object numbers {
-  def nameInt(n:BigInt) : String = s"int_${n}"
-}
-
-object tptpRepSig {
+  // ** Symbols encoded by new constants
   val tptpIntStr = "tptp_int"
+  val tptpRationalStr = "tptp_rat"
+  val tptpRealStr = "tptp_real"
 
-  val allAscii = Seq(tptpIntStr)
+  val allAscii: Seq[String] = Seq(oTyStr, eqStr, tptpIntStr, tptpRealStr, tptpRationalStr)
 }
 
+
+/** All of the strings used as keywords etc. in Lambdapi */
 object lpSysStrings {
 
-  val lpKeywords = Set(
+  // todo: just like the logic names, define these as meta-values and call on them from printing
+  private val lpKeywords = Set(
     "require", "open", "symbol", "notation", "builtin", "opaque",
-    "rule", "unif_rule", "coerce_rule", "inductive", "proof",
+    "rule", "off", "unif_rule", "coerce_rule", "inductive", "proof",
     "assume", "apply", "refine", "simplify", "rewrite", "have",
     "print", "proofterm", "assert", "assertnot", "compute",
     "constant", "injective", "commutative", "associative",
@@ -51,33 +60,30 @@ object lpSysStrings {
     "quantifier", "sequential", "TYPE"
   )
 
-  val reserve = lpKeywords ++ lpEncSig.allAscii ++ tptpRepSig.allAscii ++ LPoutput.lpKeywords //todo: the latter is only necessary for compatibility with old DS, delete once fully migrated
+  /** All of the strings that may not be used as symbol names in the encoded problem and proof */
+  val reserve: Set[String] = lpKeywords ++ lpEncSig.allAscii ++ ND.Names.allAscii ++ LPoutput.lpKeywords //todo: the latter is only necessary for compatibility with old DS, delete once fully migrated
 
+  /** Regular expression matching all symbols that syntactically are not allowed in Lambdapi */
   val lpAllowedRegEx = """^[^\t\r\n :,;`(){}\[\]".@$|?/]+$"""
-}
-/*
-object tptpNames {
-  val tptpDefinedSymbolMap: Map[String, String] = Map(
-    "$false" -> lpEncSig.topStr,
-    "$true" -> lpEncSig.botStr)
+  // todo: also make sure the symbols do not include any occurrences of the pre-and postfixes used in LP to encode the forbidden names
 }
 
 
-  private def termId2Qn(i : Int, sig: Signature):QName = {
-    val origName: String = sig(i).name
-    // skolem symbols are always local
-    val prfx = if (isPropSet(Signature.PropSkolemConstant, sig(i).flag)) None else sigPrefix
-    val symbol = tptpDefinedSymbolMap.getOrElse(origName, NameAllocator.safe(origName,sig))
-    QName(prfx,Name(symbol))
-  }
+//////////////////////////////////////////
+// Utility for generating names
+//////////////////////////////////////////
 
-  private def tyId2Qn(i: Int, sig: Signature): QName = {
-    val origName: String = sig(i).name
-    val symbol = tptpDefinedSymbolMap.getOrElse(origName, lpEscapeName(origName, sig))
-    QName(sigPrefix, Name(symbol))
-  }
+/** Generate uniform names for classes of Lambdapi symbols */
+object nameGeneration {
+  /** Generate Lambdapi names for encoded integers */
+  @inline def nameInt(n:BigInt) : String = s"int_$n"
 
-   */
+  /** Generate Lambdapi names for encoded rational numbers */
+  def nameRational(n0: BigInt, n1: BigInt): String = s"rat_${n0}_$n1"
+
+  /** Generate Lambdapi names for encoded real numbers */
+  def nameReal(n0: BigInt, n1: BigInt , n2: BigInt): String = s"real_${n0}_${n1}_$n2"
+}
 
 
 

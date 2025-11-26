@@ -4,7 +4,6 @@ import leo.{Out, modules}
 import leo.datastructures.Term.Integer
 import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
 import leo.modules.HOLSignature.{HOLDifference, HOLGreater, HOLGreaterEq, HOLLess, HOLLessEq, HOLProduct, HOLQuotient, HOLSum, HOLUnaryMinus}
-import leo.modules.output.LPoutput.LpLibs.ND
 import leo.modules.output.LPoutput.LpLibs.ND.MlTerms
 import leo.modules.prover.LocalState
 import leo.modules.{numbersInProof, saturatedUserSignature, symbolsInProof}
@@ -18,13 +17,12 @@ import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Wildcard
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, LpSet}
 import leo.modules.output.LPoutput.NewLpDatastructures.Stmt.Opaque
-import leo.modules.output.LPoutput.NewLpDatastructures.numbers.nameInt
-import leo.modules.output.LPoutput.NewLpDatastructures.pretty._
+import leo.modules.output.LPoutput.NewLpDatastructures.nameGeneration.nameInt
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
-import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, Encoder, HolBaseTypes, Level, LogicConst, LpProof, LpSig, LpSigBuilder, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, TypeEncoding, TermEncoding, ClauseEncoding, DefEncoding, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef}
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -66,23 +64,23 @@ object LPoutput {
                                val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty,
                                val additionalDefinedSymbols: Set[Signature.Key] = Set.empty) //todo: remove additionalDefinedSymbols
 
-  def toProofStep(stepName: String, encStep: LpType, ruleName: String, proofTerm: lpProofScriptStep, notEncoded: Option[String]): Option[(LpProof.Comment, LpProof)] = {
+  def toProofStep(stepName: String, encStep: LpType, ruleName: String, proofTerm: lpProofScriptStep, notEncoded: Option[String]): Option[(LpProofScript.Comment, LpProofScript)] = {
     toProofStep(stepName, encStep, ruleName, Right(proofTerm), notEncoded)
   }
 
-    def toProofStep(stepName: String, encStep: LpType, ruleName: String, proofTerm: Either[LpProof, lpProofScriptStep], notEncoded: Option[String]): Option[(LpProof.Comment,LpProof)] = {
+    def toProofStep(stepName: String, encStep: LpType, ruleName: String, proofTerm: Either[LpProofScript, lpProofScriptStep], notEncoded: Option[String]): Option[(LpProofScript.Comment,LpProofScript)] = {
     if (notEncoded.isDefined) {
       // if the step is actually new, we want to add it to the output
       // add substeps for which the encoding is not implemented using the "admit" tactic
       Out.lp_debug_info(s"Not encoded yet (${notEncoded.get})\n")
       //val proofScript = lpHave(stepName, encStep, lpProofScript(Seq(lpProofScriptAdmit())))
-      val proofScript = LpProof.Have(Name(stepName),encStep,Seq(Left(LpProof.Admit)))
-      Some((LpProof.Comment(s"Unencoded step ($ruleName): " + notEncoded.get), proofScript))
+      val proofScript = LpProofScript.Have(Name(stepName),encStep,Seq(Left(LpProofScript.Admit)))
+      Some((LpProofScript.Comment(s"Unencoded step ($ruleName): " + notEncoded.get), proofScript))
     } else {
       Out.lp_debug_info(s"Encoding finished!\n")
       // add the encoded proofs to the overall proof as substeps
-      val proofScript = LpProof.Have(Name(stepName),encStep,Seq(proofTerm))
-      Some((LpProof.Comment(ruleName), proofScript))
+      val proofScript = LpProofScript.Have(Name(stepName),encStep,Seq(proofTerm))
+      Some((LpProofScript.Comment(ruleName), proofScript))
       // and add the necessary symbols to the generated Signature
     }
   }
@@ -114,7 +112,7 @@ object LPoutput {
   def identifySteps_new(cl: ClauseProxy, identicalSteps: mutable.HashMap[Long, QName], encStep: NewLpDatastructures.lpClauseInst): (Boolean, mutable.HashMap[Long, QName]) = {
     var encodeStep = false
     cl.annotation.parents foreach { parent => // todo: save them rather than translating over and over again
-      val encParent = NewLpDatastructures.Encoder.clause2LP(parent.cl)
+      val encParent = NewLpDatastructures.ClauseEncoding.clause2LP(parent.cl)
       if (encParent == encStep) { // case: any potential differences are abstracted away by rendering -> need not prove
         if (identicalSteps.contains(cl.id)) {
           if (identicalSteps(cl.id) != nameStep(parent.id)) {
@@ -163,7 +161,7 @@ object LPoutput {
     else {
       def nameOf(p: ClauseProxy): lpConstantTerm = {
         val asName = identicalSteps.getOrElse(p.id, nameStep_new(p.id))
-        lpConstantTerm(Renderer.LpQname(asName,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
+        lpConstantTerm(Renderer.qname(asName,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
       }
 
       Right(parents.map(p => ParentInfo(p, nameOf(p))))
@@ -202,7 +200,7 @@ object LPoutput {
     }
   }
 
-  def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo): (Option[(LpProof.Comment,LpProof)], lpProofStepInfo) = {
+  def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo): (Option[(LpProofScript.Comment,LpProofScript)], lpProofStepInfo) = {
 
     val stepName = nameStep(cl.id).name
     val rule = cl.annotation.fromRule
@@ -211,14 +209,14 @@ object LPoutput {
 
     // for compatibility, temproarily translate the names to constantnt terms...
     val parentInLpEncID = {
-      parentInLpEncID_new.map(nm => lpConstantTerm(Renderer.LpQname(nm,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic))))
+      parentInLpEncID_new.map(nm => lpConstantTerm(Renderer.qname(nm,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic))))
     }
     Out.lp_debug_info(s"parents in lp encoding new : $parentInLpEncID_new, as terms: $parentInLpEncID")
 
     Out.lp_debug_info(s"Encoding step $stepName: application of caluclus rule ${if (rule == null) "Tautology" else rule.name}")
     Out.lp_debug_info(s"The parents are ${parentInLpEncID_new.map(term => term.local.value).mkString(", ")}")
 
-    val (encStep0) = Encoder.clause2LP(cl.cl)
+    val (encStep0) = ClauseEncoding.clause2LP(cl.cl)
     val encStep = encStep0.asMl
     val (needsEnc, newIdenticalSteps) = identifySteps_new(cl,stepInfo.identicalSteps,encStep0)
 
@@ -436,7 +434,7 @@ object LPoutput {
         val sName = sig.termNames(con)
         if (sig.orig(con).hasType) {
           Out.lp_debug_info(s"declaring $sName")
-          val typeDec = Encoder.polyType2Lp(sig.orig(con)._ty)
+          val typeDec = TypeEncoding.polyType2Lp(sig.orig(con)._ty)
           typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, typeDec), sig, RenderOptions(false, false, monomorphic)))
         }
       }
@@ -453,13 +451,13 @@ object LPoutput {
         val sName = sig.termNames(symbol.key)
         val isSk = isPropSet(Signature.PropSkolemConstant, symbol.flag)
         if (symbol.hasType) {
-          val typeDec = NewLpDatastructures.Encoder.type2LP(symbol._ty)
+          val typeDec = TypeEncoding.type2LP(symbol._ty)
           if (isSk) skDecsSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
           else typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(false, false, monomorphic)))
         }
 
         if (symbol.hasDefn) {
-          val (defDec) = Encoder.encDfn(key, sig, isSk)
+          val defDec = DefEncoding.encDfn(key, sig, isSk)
           if (isSk) skDecsSB.append(NewLpDatastructures.Renderer.stmt(defDec, sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
           else defSB.append(NewLpDatastructures.Renderer.stmt(defDec, sig, RenderOptions(!outputSingleFile, false, monomorphic)))
         }
@@ -474,12 +472,12 @@ object LPoutput {
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
     val signatureFileSB: mutable.StringBuilder = new StringBuilder()
     val formulaeFileSB: mutable.StringBuilder = new StringBuilder()
-    var proofSteps: Seq[LpProof] = Seq.empty
+    var proofSteps: Seq[LpProofScript] = Seq.empty
 
     val flagSt = new lpProofObject
 
     val sig0 = state.signature
-    val sig = LpSigBuilder.build(sig0)
+    val sig = LpSig.fromLeo(sig0)
     val proof = state.proof
 
     var tptpDefinedSymbols: Set[QName] = Set.empty
@@ -509,14 +507,14 @@ object LPoutput {
         if (conjEnc) throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
         conjEnc = true
         val (encConj, _) = clause2LP(step.cl, Set(), sig.orig)
-        val (newEncConj) = Encoder.clause2LP(step.cl)
+        val (newEncConj) = ClauseEncoding.clause2LP(step.cl)
         identicalSteps += (stepId -> conjName)
         conjecture = newEncConj.lits match {
           case Seq(LogicConst.Not(conj)) => conj
           case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
         }
       } else if (step.role == Role_Axiom) { //todo: what about other roles like lamme etc. ?
-        val (encClause) = NewLpDatastructures.Encoder.clause2LP(step.cl)
+        val encClause = ClauseEncoding.clause2LP(step.cl)
         val tptpName = step.annotation.pretty
         val axName0 = if (tptpName == "introduced(axiom_of_choice)") "axiom_of_choice" else s"${tptpName.dropRight(1).split(",", 2)(1)}"
         val axName = if (gdv_mode) axName0 else axName0 + s"_p$axCounter"
@@ -593,22 +591,22 @@ object LPoutput {
 
     // construct the proof based on all the individual steps
     // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
-    proofSteps = LpProof.Assume(Seq(conjName.local)) +: proofSteps
-    val refineStep = LpProof.Refine(LpTerm.App[Level.Meta](MlTerms.lpDne,Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]))))
+    proofSteps = LpProofScript.Assume(Seq(conjName.local)) +: proofSteps
+    val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](MlTerms.lpDne,Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]))))
     proofSteps = refineStep +: proofSteps
     // finally, test if the derived last clause is the empty clause or a flex-flex clause.
     // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
     val emptyClause = NewLpDatastructures.lpClauseInst(Seq(),Seq()).asMl//lpClause(Seq(), Seq(lpOlBot))
     val lastStep: LpTerm[Level.Meta] = proofSteps.last match {
       //case lpHave(name, `emptyClause`, _, _) => lpConstantTerm(name)
-      case LpProof.Have(name,`emptyClause`,_) => LpTerm.Const(SymRef.LP(QName.local(name.value)))
-      case LpProof.Have(name, flexFlex0, _) =>
+      case LpProofScript.Have(name,`emptyClause`,_) => LpTerm.Const(SymRef.LP(QName.local(name.value)))
+      case LpProofScript.Have(name, flexFlex0, _) =>
         //throw new Exception(s"flex flex clause!")
         // transformation of flex-flex to bot necessary todo
         Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
         val proofFun = LpType.Arrow(flexFlex0,LpType.Prf(LogicConst.Bot))//lpMlFunctionType(Seq(flexFlex0, lpOlBot.prf))
         val flexFlexStepName = "flexflex_to_bot"
-        throw new Exception(s"flex flex clause!, ${flexFlex0.pretty(sig)}")
+        throw new Exception(s"flex flex clause!, ${flexFlex0}")
         LpTerm.Const(SymRef.LP(QName.local(name.value)))
         /*
         val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
@@ -632,12 +630,12 @@ object LPoutput {
 
 
 
-      case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last.pretty(sig)}")
+      case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last}")
     }
     //proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
-    proofSteps = proofSteps :+ LpProof.Refine(lastStep)
+    proofSteps = proofSteps :+ LpProofScript.Refine(lastStep)
     //val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
-    val prettyTy = Renderer.typ(LpType.Prf(conjecture),sig)
+    val prettyTy = Renderer.ty(LpType.Prf(conjecture),RenderOptions(),sig)
     Out.lp_debug_info(s"can encode conjecture: $prettyTy")
     /*
     proofSteps foreach{st =>

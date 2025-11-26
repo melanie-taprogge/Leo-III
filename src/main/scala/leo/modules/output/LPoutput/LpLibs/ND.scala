@@ -2,9 +2,20 @@ package leo.modules.output.LPoutput.LpLibs
 
 import leo.modules.output.LPoutput.NewLpDatastructures._
 import leo.modules.output.LPoutput.NewLpDatastructures.Level
+import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig._
 object ND {
 
+  //todo: do naming uniformly
+
   object Names {
+
+    // ** Names as Strings
+    // Standard Library Axioms
+    val witnessStr = "el"
+    val emStr = "em"
+
+    val allAscii = Seq(witnessStr, emStr)
+
     // ND rules
     val lpLorelimS: SymRef  = SymRef.LP(QName.local("∨ₑ"))
     val lpLorIntro1S: SymRef  = SymRef.LP(QName.local("∨ᵢ₁"))
@@ -14,11 +25,11 @@ object ND {
 
     // axioms
     // excluded middle
-    val lpEmS: SymRef  = SymRef.LP(QName.local("em"))
+    val lpEmS: SymRef  = SymRef.LP(QName.local(emStr))
     // double negation elimination
     val lpDneS: SymRef  = SymRef.LP(QName.local("¬¬ₑ"))
     // non-emptiness of sets
-    private[ND] val lpWitnessConS: SymRef = SymRef.LP(QName.local("el"))
+    private[ND] val lpWitnessConS: SymRef = SymRef.LP(QName.local(witnessStr))
 
   }
 
