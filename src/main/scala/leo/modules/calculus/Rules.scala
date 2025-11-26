@@ -187,31 +187,66 @@ object FlexFlexUni extends CalculusRule {
   final def canApply(cl: Clause): Boolean = Clause.effectivelyEmpty(cl)
 
   final def apply(cl: Clause): (Clause, Subst) = {
+
+    import leo.datastructures.Term.{:::>,TypeLambda}
+
+    // Returns the first top-level flex-headed term under leading abstractions,
+    // or None if the side is not flex-headed
+    def flexHeadInfo(t: Term): Option[(Int, Seq[Term], Type)] = {
+      @annotation.tailrec
+      def go(term: Term, depth: Int): Option[(Int, Seq[Term], Type)] = term match {
+        case TermApp(Bound(_, scope), args) =>
+          if (scope > depth) Some((scope - depth, args, term.ty)) else None
+        case _ :::> body =>
+          go(body, depth + 1)
+        case TypeLambda(body) =>
+          go(body, depth)
+        case _ =>
+          None
+      }
+      go(t.etaExpand, 0)
+    }
+
     val variableGenerator = calculus.freshVarGen(cl)
-    val freshVar = variableGenerator.apply(HOLSignature.i) // the result to project everything on.
     var substMap: Map[Int, Term] = Map.empty
     val lits = cl.lits.iterator
     while (lits.hasNext) {
       val lit = lits.next()
       val (left,right) = (lit.left, lit.right)
-      (left,right) match {
-        case (TermApp(Bound(_,idxLeft), argsLeft), TermApp(Bound(_,idxRight), argsRight)) =>
+      val flexHeadLeft = flexHeadInfo(left)
+      val flexHeadRight = flexHeadInfo(right)
+      Out.lp_debug_info(s"flexhead left = $flexHeadLeft\nflexhead right = $flexHeadRight")
+
+      (flexHeadLeft,flexHeadRight) match {
+        case (Some((idxLeft, argsLeft, tyLeft)), Some((idxRight, argsRight, tyRight))) =>
           // this is idxLeft_tyleft(argsleft) =? idxRight_tyright(argsRight)
           // we want substitutions: idxLeft -> lambda (argsleft.size). freshVar,
           //                        idxRight -> lambda (argsRight.size). freshVar
+
+          Out.lp_debug_info(s"doing this")
+
+          assert(tyLeft == tyRight)
+
+          val freshVar = variableGenerator.apply(tyLeft) // the result to project everything on.
+          Out.lp_debug_info(s"size of args: ${argsLeft.size} and ${argsRight.size}")
+          Out.lp_debug_info(s"args: ${argsLeft.map(_.pretty)} and ${argsRight.map(_.pretty)}")
           if (!substMap.contains(idxLeft)) {
+            Out.lp_debug_info(s"doing this 2")
             val leftBindingTarget: Term = Term.mkTermAbs(argsLeft.map(_.ty), freshVar.lift(argsLeft.size))
             substMap = substMap + (idxLeft -> leftBindingTarget)
           }
           if (!substMap.contains(idxRight)) {
+            Out.lp_debug_info(s"doing this 3")
             val rightBindingTarget: Term = Term.mkTermAbs(argsRight.map(_.ty), freshVar.lift(argsRight.size))
-            substMap = substMap + (idxLeft -> rightBindingTarget)
+            substMap = substMap + (idxRight -> rightBindingTarget)
           }
         case _ =>  // Nothing to do, cannot be applied
       }
     }
+    Out.lp_debug_info(s"subst map: $substMap")
     val subst = Subst.fromMap(substMap)
     val resultClause = cl.substitute(subst)
+    Out.lp_debug_info(s"did anything change?: ${resultClause != cl}\nclause before: ${cl.pretty}\nclause after: ${resultClause.pretty}")
     (resultClause, subst)
   }
 }
