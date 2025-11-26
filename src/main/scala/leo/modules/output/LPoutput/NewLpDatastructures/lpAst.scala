@@ -279,7 +279,7 @@ object LogicConst {
       LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(l), E(r)))
 
     def unapply(t: LpTerm[Level.Obj]): Option[(OlType, LpTerm[Level.Obj], LpTerm[Level.Obj])] = t match {
-      case LpTerm.App(`head`, List(Arg.ExplicitTypeArg(t), Arg.Explicit(l), Arg.Explicit(r))) => Some((t,l,r))
+      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(t), Arg.Explicit(l), Arg.Explicit(r))) => Some((t,l,r))
       case _ => None
     }
   }
@@ -348,7 +348,7 @@ object LogicConst {
       LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(l), E(r)))
 
     def unapply(t: LpTerm[Level.Obj]): Option[(OlType, LpTerm[Level.Obj], LpTerm[Level.Obj])] = t match {
-      case LpTerm.App(`head`, List(Arg.ExplicitTypeArg(t), Arg.Explicit(l), Arg.Explicit(r))) => Some((t, l, r))
+      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(t), Arg.Explicit(l), Arg.Explicit(r))) => Some((t, l, r))
       case _ => None
     }
   }
