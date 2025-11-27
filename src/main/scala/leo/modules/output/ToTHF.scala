@@ -190,9 +190,9 @@ object ToTHF {
     //override def apply(): String = apply_andTrack(termsubst, typesubst, implicitlyBound, tyVars)(sig)._1
     apply_andTrack(termsubst, typesubst, implicitlyBound, tyVars)(sig)._1
   }
-  final def apply_andTrack(termsubst: Subst, typesubst: Subst, implicitlyBound: Seq[(Int, Type)], tyVars: Seq[Int])(implicit sig: Signature): (Output, (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)])) = {
+  final def apply_andTrack(termsubst: Subst, typesubst: Subst, implicitlyBound: Seq[(Int, Type)], tyVars: Seq[Int])(implicit sig: Signature): (Output, AddInfoUni) = {
     var sb = new StringBuilder
-    var addInfo: (Seq[(Int, Any, Int, Map[Int, String])], Seq[(Int, Any)]) = (Seq.empty, Seq.empty)
+    var addInfo = AddInfoUni()
     if (termsubst.length > 0) {
       val (_, varmap) = clauseImplicitsToTPTPQuantifierList(implicitlyBound)(sig)
       val varmapMaxKey = if (varmap.nonEmpty) varmap.keySet.max else 0
@@ -207,10 +207,12 @@ object ToTHF {
               case TermFront(t) =>
                 val newVars = t.looseBounds.map(k => (k, intToName(varmapSize + k - varmapMaxKey - 1)))
                 val varmap2 = varmap ++ newVars
-                addInfo = (addInfo._1 :+ (i, t, tyVars.size, varmap2), addInfo._2)
+                val info = UniTermSubst(sourceIndex = i, rhs = UniTermByTerm(term = t, tyVarCount = tyVars.size, varmap = varmap2) )
+                addInfo = addInfo.copy(termSubsts = addInfo.termSubsts :+ info)
                 sb.append(s"bind(${varmap.apply(i)}, $$thf(${toTPTP0(t, tyVars.size, varmap2)(sig)}))")
               case BoundFront(j) =>
-                addInfo = (addInfo._1 :+ (i, intToName(varmapSize + j - varmapMaxKey - 1), 0, Map.empty), addInfo._2)
+                val info = UniTermSubst(sourceIndex = i, rhs = UniTermByBoundVar(targetIndex = j))
+                addInfo = addInfo.copy(termSubsts = addInfo.termSubsts :+ info)
                 sb.append(s"bind(${varmap.apply(i)}, $$thf(${intToName(varmapSize + j - varmapMaxKey - 1)}))")
               case _ => throw new SZSException(SZS_Error, "Types in term substitution")
             }
@@ -231,11 +233,13 @@ object ToTHF {
         try {
           erg match {
             case BoundFront(n) =>
-              addInfo = (addInfo._1, addInfo._2 :+ (i - 1, n - 1))
+              val info = UniTypeSubst(sourceIndex = i - 1, rhs = UniTypeByVar(targetIndex = n - 1))
+              addInfo = addInfo.copy(typeSubsts = addInfo.typeSubsts :+ info)
               sb.append(s"bind_type(T${intToName(i - 1)},$$thf(T${intToName(n - 1)}))")
             case TermFront(_) => throw new SZSException(SZS_Error, "Term in type substitution")
             case TypeFront(typ) =>
-              addInfo = (addInfo._1, addInfo._2 :+ (i - 1, typ))
+              val info = UniTypeSubst(sourceIndex = i - 1, rhs = UniTypeByType(typ))
+              addInfo = addInfo.copy(typeSubsts = addInfo.typeSubsts :+ info)
               sb.append(s"bind_type(T${intToName(i - 1)},$$thf(${typeToTHF1(typ)(sig)}))")
           }
         } catch {

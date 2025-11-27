@@ -204,6 +204,22 @@ case class AddInfoPara(withClause: Clause,
                        preSimpClause: Clause,
                        typeSubstNeeded: Boolean)
 
+sealed trait UniTermRhs
+case class UniTermByTerm(term: Term,
+                         tyVarCount: Int,
+                         varmap: Map[Int, String]) extends UniTermRhs
+case class UniTermByBoundVar(targetIndex: Int) extends UniTermRhs
+
+case class UniTermSubst(sourceIndex: Int, rhs: UniTermRhs)
+sealed trait UniTypeRhs
+case class UniTypeByVar(targetIndex: Int) extends UniTypeRhs
+case class UniTypeByType(typ: Type) extends UniTypeRhs
+
+case class UniTypeSubst(sourceIndex: Int, rhs: UniTypeRhs)
+case class AddInfoUni(termSubsts: Seq[UniTermSubst] = Seq.empty,
+                      typeSubsts: Seq[UniTypeSubst] = Seq.empty)
+
+
 case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
                         val rwUnderBinder: Boolean = false,
                         unencodableCNF: Boolean = false,
@@ -217,7 +233,8 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
   var para: Option[AddInfoPara] = None
   var addInfoDefExp:Option[Literal] = None
   var addInfoUniRule: (String,(Literal,Literal)) = ("",(Literal(LitFalse(),false),Literal(LitFalse(),false))) // todo for now I am doing it this way but maybe if i do not need this for other rules as well it would be better to use tuples
-  var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
+  //var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
+  var addInfoUni: AddInfoUni = AddInfoUni()
   var addInfoRewriting: Option[Clause] = None
   var addInfoLiftEq: Seq[Seq[Int]] = Seq.empty
 }

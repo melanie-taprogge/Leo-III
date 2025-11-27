@@ -1257,8 +1257,8 @@ package inferenceControl {
                                rule: CalculusRule)(sig: Signature): AnnotatedClause = {
       val (clause, subst) = uniResult
       val (tPTPRepresent, addInfoUnification0) = ToTHF.apply_andTrack(subst._1, subst._2, origin.cl.implicitlyBound, origin.cl.typeVars)(sig)
-      val addInfoUnification = new FurtherInfo()
-      addInfoUnification.addInfoUni = (addInfoUnification.addInfoUni._1 ++ addInfoUnification0._1,addInfoUnification.addInfoUni._2 ++ addInfoUnification0._2)
+      val addInfoUnification = FurtherInfo()
+      addInfoUnification.addInfoUni = addInfoUnification0
       val res = AnnotatedClause(clause, Role_Plain, InferredFrom(rule, Seq((origin, tPTPRepresent))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,origin.properties | ClauseAnnotation.PropUnified),addInfoUnification)
       res
     }

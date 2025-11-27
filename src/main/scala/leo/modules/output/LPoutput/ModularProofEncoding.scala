@@ -1,8 +1,8 @@
 package leo.modules.output.LPoutput
 import leo.Out
-import leo.datastructures.Literal.{asTerm}
+import leo.datastructures.Literal.asTerm
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
-import leo.datastructures.{AddInfoCnf, AddInfoCnfConj, AddInfoPara, Clause, ClauseProxy, Literal, MoveQuantStep, QuantExists, QuantStep, QuantUniv, Signature, SkolemStep, Term, Type}
+import leo.datastructures.{AddInfoCnf, AddInfoCnfConj, AddInfoPara, AddInfoUni, Clause, ClauseProxy, Literal, MoveQuantStep, QuantExists, QuantStep, QuantUniv, Signature, SkolemStep, Term, Type, UniTermByBoundVar, UniTermByTerm}
 import leo.modules.HOLSignature._
 import leo.modules.calculus.PolaritySwitch
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
@@ -2089,7 +2089,7 @@ object ModularProofEncoding {
     rewriteSteps
   }
 
-  def encPreUni(cl: ClauseProxy, parent: ClauseProxy, addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]), addInfoUniRule: (String, (Literal, Literal)), parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Option[String]) = {
+  def encPreUni(cl: ClauseProxy, parent: ClauseProxy, addInfoUni: AddInfoUni, addInfoUniRule: (String, (Literal, Literal)), parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Option[String]) = {
     // encode different versions of unification (after rule applications, ...)
 
     val bVars = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
@@ -2115,8 +2115,8 @@ object ModularProofEncoding {
       val encParentLiterals = encParent.args
 
       // Encode the actual unification and possibly the following simplification
-      val typeUnification = addInfoUni._2
-      val termUnification = addInfoUni._1
+      val typeUnification = addInfoUni.typeSubsts
+      val termUnification = addInfoUni.termSubsts
 
       if (termUnification.length != unboundVarsParent.length) {
         //throw new Exception(s"trying to encode the unification that does not bind all free variables, this is implemented but untested, make sure this is done correctly") //todo
@@ -2133,17 +2133,15 @@ object ModularProofEncoding {
           val subsMap: mutable.HashMap[String, lpOlTerm] = mutable.HashMap.empty
           val varmap = clauseImplicitsToTPTPQuantifierList_map(parent.cl.implicitlyBound)(sig)
           termUnification foreach { termUni =>
-            val lpUnboundVar = varmap.apply(termUni._1)
+            val lpUnboundVar = varmap.apply(termUni.sourceIndex)
             // Term unifications can either be bindings of variables by terms or by variables...
             // Depending on that, the second element of the tuple is either a term or a String
-            termUni._2 match {
-              case var0: String =>
+            termUni.rhs match {
+              case UniTermByBoundVar(targetIndex) =>
                 canEncode = false
-              //throw new Exception(s"binding by variables not yet encoded (only terms so far) $var0") //todo: is it really variables? I suppose so, but bound ones, no?
-              case t: Term =>
-                val encBindTerm = term2LP(t, termUni._4, sig)._1 //todo: dont i need the offset? was it an oversight not to use it in term2lp?
+              case UniTermByTerm(term, _, varmap) =>
+                val encBindTerm = term2LP(term, varmap, sig)._1 //todo: dont i need the offset? was it an oversight not to use it in term2lp?
                 subsMap += (lpUnboundVar -> encBindTerm)
-              case _ => throw new Exception("Encountered unexpected bound object when encoding Unification step in lp")
             }
           }
 
