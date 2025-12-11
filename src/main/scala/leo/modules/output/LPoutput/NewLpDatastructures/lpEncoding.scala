@@ -1,10 +1,12 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
+import leo.Out
 import leo.datastructures.Signature.Key
 import leo.datastructures.{Clause, Literal, Term, Type}
 import leo.datastructures.Type._
 import leo.datastructures.Term._
 import leo.modules.HOLSignature._
+import leo.modules.output.LPoutput.LpLibs.ND.Terms.lpWitnessCon
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings.collectLambdasLP
 import leo.modules.output._
 import leo.modules.output.ToTHF.{collectForallTys, collectTyLambdas}
@@ -88,20 +90,24 @@ object TermEncoding {
   }
 
   /** Translate an individual argument to Lambdapi and mark it as explicit */
-  private def arg2LP(arg: Either[Term, Type], bVars: Map[Int, String], supressReduction: Boolean = false): Arg[Level.Obj] = {
+  private def arg2LP(arg: Either[Term, Type], bVars: Map[Int, String], supressReduction: Boolean = false, replaceUnknownVars: Boolean = false): Arg[Level.Obj] = {
     arg match {
       case Left(termArg) =>
-        Arg.Explicit(term2LP(termArg, bVars, supressReduction))
+        Arg.Explicit(term2LP(termArg, bVars, supressReduction, replaceUnknownVars))
       case Right(tyArg) =>
         Arg.ExplicitTypeArg(type2LP(tyArg))
     }
   }
 
   /** Translate a sequence of arguments to Lambdapi and marks them as explicit */
-  @inline private def args2LP(args: Seq[Either[Term, Type]], bVars: Map[Int, String], supressReduction: Boolean = false): Seq[Arg[Level.Obj]] = {
-    args.map(arg2LP(_, bVars, supressReduction))
+  @inline private def args2LP(args: Seq[Either[Term, Type]], bVars: Map[Int, String], supressReduction: Boolean = false, replaceUnknownVars: Boolean = false): Seq[Arg[Level.Obj]] = {
+    args.map(arg2LP(_, bVars, supressReduction, replaceUnknownVars))
   }
 
+  //todo: handle replacing unknown Vars differently... -> have a step that both does that and adjusts the numbers of the remaining variables -> check how this is done in Leo
+  @inline def bVarGen(bVars: Map[Int, String], ty: Type, replaceUnknownVars: Boolean)={
+    if (replaceUnknownVars && bVars.nonEmpty) (intToName(bVars.map(_._1).max), ty) else (intToName(bVars.size), ty)
+  }
 
   /**
     * Translate (Object-logical HOL) terms to the Lambdapi Encoding
@@ -111,7 +117,7 @@ object TermEncoding {
     * @param suppressReduction Boolean indicating weather reduction (for isntance of eta expanded terms) should be suppressed
     * @return The encoded Object-level term
     * */
-  def term2LP(t: Term, bVars: Map[Int, String], suppressReduction: Boolean = false): LpTerm[Level.Obj] = {
+  def term2LP(t: Term, bVars: Map[Int, String], suppressReduction: Boolean = false, replaceUnknownVars: Boolean = false): LpTerm[Level.Obj] = {
 
     t match {
       // Constant symbols
@@ -129,6 +135,10 @@ object TermEncoding {
         val encodedReal = TptpReal[Level.Obj](n, m, l)
         encodedReal
 
+      case Bound(ty, scope) if (replaceUnknownVars && !bVars.contains(scope)) =>
+        val encType = type2LP(ty)
+        LpTerm.App[Level.Obj](lpWitnessCon, Seq(Arg.ExplicitTypeArg(encType))) //todo: constructor for witness
+
       // todo: Variables using DB indices
       case Bound(_, scope) =>
         var2Lp(scope, t.ty, bVars)
@@ -137,41 +147,41 @@ object TermEncoding {
       case Forall(_) =>
         t match {
           case Forall(bVarTy :::> body) =>
-            val newBVar = (intToName(bVars.size), bVarTy)
-            val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction)
+            val newBVar = bVarGen(bVars,bVarTy,replaceUnknownVars)//(intToName(bVars.size), bVarTy)
+            val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction, replaceUnknownVars)
             val quantifiedVar = {
               val encType = type2LP(bVarTy)
-              (Name(intToName(bVars.size)), El(encType))
+              (Name(newBVar._1), El(encType))
             }
             LogicConst.Forall(quantifiedVar, encBody)
           case Forall(_) =>
-            term2LP(t.etaExpand, bVars, suppressReduction)
+            term2LP(t.etaExpand, bVars, suppressReduction, replaceUnknownVars)
         }
       case Exists(_) =>
         t match {
           case Exists(bVarTy :::> body) =>
-            val newBVar = (intToName(bVars.size), bVarTy) //makeBVarList(Seq(bVarTys), bVars.size)
-            val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction)
+            val newBVar = bVarGen(bVars,bVarTy,replaceUnknownVars)//(intToName(bVars.size), bVarTy) //makeBVarList(Seq(bVarTys), bVars.size)
+            val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction, replaceUnknownVars)
             val quantifiedVar = {
               val encType = type2LP(bVarTy)
-              (Name(intToName(bVars.size)), El(encType))
+              (Name(newBVar._1), El(encType))
             }
             LogicConst.Exists(quantifiedVar, encBody)
           case Exists(_) =>
-            term2LP(t.etaExpand, bVars, suppressReduction)
+            term2LP(t.etaExpand, bVars, suppressReduction, replaceUnknownVars)
         }
       case Choice(_) =>
         t match {
           case Choice(bVarTy :::> body) =>
-            val newBVar = (intToName(bVars.size), bVarTy) //makeBVarList(Seq(bVarTys), bVars.size)
-            val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction)
+            val newBVar = bVarGen(bVars,bVarTy,replaceUnknownVars)//(intToName(bVars.size), bVarTy) //makeBVarList(Seq(bVarTys), bVars.size)
+            val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction, replaceUnknownVars)
             val quantifiedVar = {
               val encType = type2LP(bVarTy)
-              (Name(intToName(bVars.size)), El(encType))
+              (Name(newBVar._1), El(encType))
             }
             LogicConst.Choice(quantifiedVar, encBody)
           case Choice(_) =>
-            term2LP(t.etaExpand, bVars, suppressReduction)
+            term2LP(t.etaExpand, bVars, suppressReduction, replaceUnknownVars)
         }
       /*
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet ${t.pretty}")
@@ -180,46 +190,46 @@ object TermEncoding {
       // special cases abstracted away in LP translation
       // todo: maybe handle in additional step explicitly? (i.e. add definitions and expand them)
       case tr <= tl =>
-        val encodedTl = term2LP(tl, bVars, suppressReduction)
-        val encodedTr = term2LP(tr, bVars, suppressReduction)
+        val encodedTl = term2LP(tl, bVars, suppressReduction, replaceUnknownVars)
+        val encodedTr = term2LP(tr, bVars, suppressReduction, replaceUnknownVars)
         LogicConst.Imp(encodedTl, encodedTr)
       case _ <=> _ => throw new Error(s"encountered un-encoded connective <=> ${t.pretty}")
       case tl ~& tr =>
-        val encodedTl = term2LP(tl, bVars, suppressReduction)
-        val encodedTr = term2LP(tr, bVars, suppressReduction)
+        val encodedTl = term2LP(tl, bVars, suppressReduction, replaceUnknownVars)
+        val encodedTr = term2LP(tr, bVars, suppressReduction, replaceUnknownVars)
         LogicConst.Or(LogicConst.Not(encodedTl), LogicConst.Not(encodedTr))
       case tl ~||| tr =>
-        val encodedTlL = term2LP(tl, bVars, suppressReduction)
-        val encodedTrR = term2LP(tr, bVars, suppressReduction)
+        val encodedTlL = term2LP(tl, bVars, suppressReduction, replaceUnknownVars)
+        val encodedTrR = term2LP(tr, bVars, suppressReduction, replaceUnknownVars)
         LogicConst.Not(LogicConst.Or(encodedTlL, encodedTrR))
       case t1 <~> t2 => throw new Error(s"encountered un-encoded connective <~> ${t.pretty}")
 
       // term abstraction in terms
       case _ :::> _ =>
         val t0 = if (suppressReduction) t else t.etaContract
-        if (t != t0) term2LP(t0, bVars, suppressReduction)
+        if (t != t0) term2LP(t0, bVars, suppressReduction, replaceUnknownVars)
         else
           t0 match {
             case ty :::> body =>
-              val newBVar = (intToName(bVars.size), ty)
-              val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction)
+              val newBVar = bVarGen(bVars,ty,replaceUnknownVars)
+              val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction, replaceUnknownVars)
               val abstraction: (Name, Option[LpType]) = {
                 val encType = type2LP(newBVar._2)
                 (Name(newBVar._1), Some(El(encType)))
               }
               Lam(abstraction, encBody)
-            case _ => term2LP(t0, bVars, suppressReduction)
+            case _ => term2LP(t0, bVars, suppressReduction, replaceUnknownVars)
           }
 
       case TypeLambda(_) =>
         val (tyAbsCount, body) = collectTyLambdas(0, t)
         val tyVars = (1 to tyAbsCount).map(n => (Name(s"T${intToName(n - 1)}"), Some(LpSet)))
-        val encBody = term2LP(body, bVars, suppressReduction)
+        val encBody = term2LP(body, bVars, suppressReduction, replaceUnknownVars)
         throw new Exception(s"Error in Lambdapi encoding: Unencoded Type Lambda")
 
       case f ∙ args =>
-        val translatedF = term2LP(f, bVars, suppressReduction)
-        val arguments = args2LP(args, bVars, suppressReduction)
+        val translatedF = term2LP(f, bVars, suppressReduction, replaceUnknownVars)
+        val arguments = args2LP(args, bVars, suppressReduction, replaceUnknownVars)
         App(translatedF, arguments)
 
       // Others should be invalid
@@ -273,11 +283,11 @@ object ClauseEncoding {
     * @note Built-in equality and the meta-equality of equational literals are not
     *       differentiated in the encoding
     * */
-  private def lit2Lp(lit: Literal, bVarMap: Map[Int, String]): LpTerm[Level.Obj] = {
+  def lit2Lp(lit: Literal, bVarMap: Map[Int, String], surpressReduction: Boolean = false, replaceUnknownVars: Boolean = false): LpTerm[Level.Obj] = {
     if (lit.equational) {
       val (left, right) = (lit.left, lit.right)
-      val lefEnc = term2LP(left, bVarMap, false)
-      val rigEnc = term2LP(right, bVarMap, false)
+      val lefEnc = term2LP(left, bVarMap, surpressReduction,replaceUnknownVars)
+      val rigEnc = term2LP(right, bVarMap, surpressReduction,replaceUnknownVars)
       val encTyTl = type2LP(left.ty)
       val eqTerm = LogicConst.Eq(encTyTl, lefEnc, rigEnc)
       if (lit.polarity) {
@@ -286,7 +296,7 @@ object ClauseEncoding {
         LogicConst.Not(eqTerm)
       }
     } else {
-      val termEnc = term2LP(lit.left, bVarMap, false)
+      val termEnc = term2LP(lit.left, bVarMap, surpressReduction,replaceUnknownVars)
       if (lit.polarity) {
         termEnc
       } else {

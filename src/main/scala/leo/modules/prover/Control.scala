@@ -447,12 +447,12 @@ package inferenceControl {
         if (maybeSubst.isDefined) {
           val initialTypeSubst = maybeSubst.get
           Out.finest(s"[Paramod] Type unification succeeded: ${initialTypeSubst.pretty}")
-          val result1 = result0.substituteOrdered(Subst.id, initialTypeSubst)(sig)
+          val result1 = result0.substituteOrdered(Subst.id, initialTypeSubst)(sig)._1
           val result2 = Clause(result1.lits.map(l => Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)))
           val addInfoPara = FurtherInfo()
           addInfoPara.para = Some(AddInfoPara(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm, preSimp, true))
           val intermediateClause = if (result0 != preSimp) {
-            val preSimpRes1 = preSimp.substituteOrdered(Subst.id, initialTypeSubst)(sig)
+            val preSimpRes1 = preSimp.substituteOrdered(Subst.id, initialTypeSubst)(sig)._1
             val preSimpRes2 = Clause(preSimpRes1.lits.map(l => Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)))
             val intermediateClause0 = AnnotatedClause(preSimpRes2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
             val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder)
@@ -501,7 +501,7 @@ package inferenceControl {
         val vargen = freshVarGen(intermediateClause.cl)
         vargen.addVars(shiftedIntoClause.implicitlyBound)
         vargen.addVars(withClause.implicitlyBound)
-        val result = PatternUni.apply(vargen, Vector((uniEqLeft, uniEqRight)), otherLits)(sig)
+        val (result, flippedIds) = PatternUni.apply(vargen, Vector((uniEqLeft, uniEqRight)), otherLits)(sig)
         if (result.isEmpty) {
 //          Out.finest(s"[Paramod] Not unifiable, dropping clause. ")
 //          val (simpsubst, asd) = Simp.uniLitSimp(uniEqLeft, uniEqRight)
@@ -552,7 +552,12 @@ package inferenceControl {
               myAssert(Clause.wellTyped(withClauseSubst))
               myAssert(Literal.wellTyped(withLitSubst))
               if (Configuration.isSet("noOrdCheck3") || withClauseSubst.maxLits(sig).contains(withLitSubst)) {
-                val res = AnnotatedClause(resultClause, InferredFrom(PatternUni, Seq((intermediateClause, ToTHF(termSubst, typeSubst, intermediateClause.cl.implicitlyBound, intermediateClause.cl.typeVars)(sig)))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification,intermediateClause.properties | ClauseAnnotation.PropUnified))
+                val (prettySubst, addInfoUnification0) = ToTHF.apply_andTrack(termSubst, typeSubst, intermediateClause.cl.implicitlyBound, intermediateClause.cl.typeVars)(sig)
+                val addInfoUnification = FurtherInfo()
+                val uniLitSubst = uniLit.substitute(termSubst, typeSubst0)
+                val uniLitInfo = UniLitInfo(intermediateClause.cl.lits.length -1,uniLitSubst)
+                addInfoUnification.addInfoUni = AddInfoUni(addInfoUnification0,Seq(uniLitInfo), flippedIds.get)
+                val res = AnnotatedClause(resultClause, Role_Plain, InferredFrom(PatternUni, Seq((intermediateClause, prettySubst))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification,intermediateClause.properties | ClauseAnnotation.PropUnified),addInfoUnification)
                 res
               } else {
                 leo.Out.finest(s"[Paramod] Dropped due to ordering restrictions (#3).")
@@ -739,10 +744,10 @@ package inferenceControl {
               val typeSubst = maybeTypeSubst.get
               val literalSubst = literals.map {l =>
                 val l2 = l.substituteOrdered(Subst.id, typeSubst)
-                Literal.mkOrdered(l2.left.etaExpand, l2.right.etaExpand, l2.polarity)
+                Literal.mkOrdered(l2._1.left.etaExpand, l2._1.right.etaExpand, l2._1.polarity)
               }
 //                val maxLitsSubst = maxLits.map(_.substituteOrdered(Subst.id, typeSubst))
-              results = results ++ factorLitLit(cl, Clause(literalSubst), maxLitIndex, literalSubst(maxLitIndex), curOtherLitIdx, literalSubst(curOtherLitIdx))(state)
+              results = results ++ factorLitLit(cl, Clause(literalSubst.map(_._1)), maxLitIndex, literalSubst(maxLitIndex)._1, curOtherLitIdx, literalSubst(curOtherLitIdx)._1)(state)
             } else {
               /* not type unifiable, skip */
             }
@@ -785,10 +790,10 @@ package inferenceControl {
               val typeSubst = maybeTypeSubst.get
               val literalSubst = literals.map { l =>
                 val l2 = l.substituteOrdered(Subst.id, typeSubst)
-                Literal.mkOrdered(l2.left.etaExpand, l2.right.etaExpand, l2.polarity)
+                Literal.mkOrdered(l2._1.left.etaExpand, l2._1.right.etaExpand, l2._1.polarity)
               }
               //                val maxLitsSubst = maxLits.map(_.substituteOrdered(Subst.id, typeSubst))
-              results = results ++ factorLitLit_LP(cl, Clause(literalSubst), maxLitIndex, literalSubst(maxLitIndex), curOtherLitIdx, literalSubst(curOtherLitIdx),true)(state)
+              results = results ++ factorLitLit_LP(cl, Clause(literalSubst.map(_._1)), maxLitIndex, literalSubst(maxLitIndex)._1, curOtherLitIdx, literalSubst(curOtherLitIdx)._1,true)(state)
             } else {
               /* not type unifiable, skip */
             }
@@ -1082,9 +1087,10 @@ package inferenceControl {
       val cl = cl0.cl
       assert(cl.lits.nonEmpty)
       val uniLit = cl.lits.last
+      val uniLitInfo = UniLitInfo(cl.lits.length -1,cl.lits.last)
 
       val uniEq = getUniTaskFromLit(uniLit)
-      val uniResult0 = doUnify0(cl0, freshVarGen, Vector(uniEq), cl.lits.init)(state)
+      val uniResult0 = doUnify0(cl0, freshVarGen, Vector(uniEq), cl.lits.init, Seq(uniLitInfo))(state)
       // 1 if not unifiable, check if uni constraints can be simplified
       // if it can be simplified, return simplified constraints
       // if it cannot be simplied, drop clause
@@ -1139,7 +1145,9 @@ package inferenceControl {
         assert(!uniLit2.equational)
         (uniLit2.left, LitFalse()) /* in case a False was substituted in factor */
       }
-      val uniResult0 = doUnify0(cl0, freshVarGen, Vector(uniEq1, uniEq2), cl.lits.init.init)(state)
+      val uniLit1Info = UniLitInfo(cl.lits.length -1,uniLit1)
+      val uniLit2Info = UniLitInfo(cl.lits.length - 2,uniLit2)
+      val uniResult0 = doUnify0(cl0, freshVarGen, Vector(uniEq1, uniEq2), cl.lits.init.init,Seq(uniLit1Info,uniLit2Info))(state)
       // 1 if not unifiable, check if uni constraints can be simplified
       // if it can be simplified, return simplified constraints
       // if it cannot be simplied, drop clause
@@ -1178,7 +1186,7 @@ package inferenceControl {
         // add the information about the kind of unification
         uniResult foreach { aCl =>
           val addInfo = aCl.furtherInfo
-          addInfo.addInfoUniRule = ("uniAfterFactoring", (uniLit1, uniLit2))
+          addInfo.addInfoUniRule = ("uniAfterFactoring", (uniLit1, uniLit2)) //todo do not blindly take all of the properties
           newResult = newResult + AnnotatedClause(aCl.id, aCl.cl, aCl.role, aCl.annotation, aCl.properties, addInfo)
         }
         newResult
@@ -1188,19 +1196,22 @@ package inferenceControl {
 
     private final def defaultUnify0(freshVarGen: FreshVarGen, cl: AnnotatedClause)(state: LocalState): Set[AnnotatedClause] = {
 //      val sig: Signature = state.signature
-      val litIt = cl.cl.lits.iterator
+      val litIt = cl.cl.lits.iterator.zipWithIndex
       var uniLits: UniLits = Vector()
+      var uniLitsInfo: Vector[UniLitInfo] = Vector()
       var otherLits:OtherLits = Vector()
       while(litIt.hasNext) {
-        val lit = litIt.next()
+        val litIdx = litIt.next()
+        val (lit, idx) = litIdx
         if (lit.equational && !lit.polarity) {
           uniLits = (lit.left,lit.right) +: uniLits
+          uniLitsInfo = UniLitInfo(idx,lit) +: uniLitsInfo
         } else {
-          otherLits = lit +: otherLits
+          otherLits = otherLits :+ lit
         }
       }
       if (uniLits.nonEmpty) {
-        doUnify0(cl, freshVarGen, uniLits, otherLits)(state)
+        doUnify0(cl, freshVarGen, uniLits, otherLits, uniLitsInfo)(state)
       } else Set.empty
     }
     private final def defaultUnify(freshVarGen: FreshVarGen, cl: AnnotatedClause)(state: LocalState): Set[AnnotatedClause] = {
@@ -1217,10 +1228,10 @@ package inferenceControl {
 
 
     protected[control] final def doUnify0(cl: AnnotatedClause, freshVarGen: FreshVarGen,
-                               uniLits: UniLits, otherLits: OtherLits)(state: LocalState):  Set[AnnotatedClause] = {
+                               uniLits: UniLits, otherLits: OtherLits, uniLitInfo: Seq[UniLitInfo])(state: LocalState):  Set[AnnotatedClause] = {
       val sig = state.signature
       if (isAllPattern(uniLits)) {
-        val result = doUnifyAllPattern(cl, freshVarGen, uniLits, otherLits)(sig)
+        val result = doUnifyAllPattern(cl, freshVarGen, uniLits, otherLits, uniLitInfo)(sig)
         if (result == null) Set.empty
         else {
           leo.Out.finest(s"doUnify0 result: ${result.pretty(sig)}")
@@ -1229,17 +1240,19 @@ package inferenceControl {
       } else {
         val uniResultIterator = PreUni(freshVarGen, uniLits, otherLits, state.runStrategy.uniDepth)(sig)
         val uniResult = uniResultIterator.take(state.runStrategy.unifierCount).toSet
-        val result = uniResult.map(annotate(cl, _, PreUni)(sig))
+        val result = uniResult.map(annotate(cl, _, PreUni, Seq.empty, LiteralTransformation())(sig)) //todo: also track the swapped literals
         leo.Out.finest(s"doUnify0 result:\n${result.map(_.pretty(sig)).mkString("\n")}")
         result
       }
     }
 
     protected[control] final def doUnifyAllPattern(cl: AnnotatedClause, freshVarGen: FreshVarGen,
-                                          uniLits: UniLits, otherLits: OtherLits)(sig: Signature):  AnnotatedClause = {
-      val result = PatternUni.apply(freshVarGen, uniLits, otherLits)(sig)
+                                          uniLits: UniLits, otherLits: OtherLits, uniLitInfo: Seq[UniLitInfo])(sig: Signature):  AnnotatedClause = {
+      val (result, flippedIds) = PatternUni.apply(freshVarGen, uniLits, otherLits)(sig)
       if (result.isEmpty) null
-      else annotate(cl, result.get, PatternUni)(sig)
+      else {
+        annotate(cl, result.get, PatternUni, uniLitInfo, flippedIds.get)(sig)
+      }
     }
 
     private final def isAllPattern(uniLits: UniLits): Boolean = {
@@ -1254,11 +1267,14 @@ package inferenceControl {
 
     private final def annotate(origin: AnnotatedClause,
                                uniResult: UniResult,
-                               rule: CalculusRule)(sig: Signature): AnnotatedClause = {
+                               rule: CalculusRule,
+                               uniLitsInfo: Seq[UniLitInfo],
+                               flippedIds: LiteralTransformation)(sig: Signature): AnnotatedClause = {
       val (clause, subst) = uniResult
       val (tPTPRepresent, addInfoUnification0) = ToTHF.apply_andTrack(subst._1, subst._2, origin.cl.implicitlyBound, origin.cl.typeVars)(sig)
       val addInfoUnification = FurtherInfo()
-      addInfoUnification.addInfoUni = addInfoUnification0
+      val uniLitSubst = uniLitsInfo.map(uniLit => UniLitInfo(uniLit.position, uniLit.literal.substitute(subst._1, subst._2)))
+      addInfoUnification.addInfoUni = AddInfoUni(addInfoUnification0, uniLitSubst, flippedIds)
       val res = AnnotatedClause(clause, Role_Plain, InferredFrom(rule, Seq((origin, tPTPRepresent))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,origin.properties | ClauseAnnotation.PropUnified),addInfoUnification)
       res
     }
@@ -1414,7 +1430,7 @@ package inferenceControl {
               val eligibleConstants = sig.uninterpretedSymbolsOfType(ty).map(Term.mkAtom)
               eligibleConstants.map{c =>
                 val subst = Subst.singleton(idx, c)
-                (cw.cl.substituteOrdered(subst),subst)}
+                (cw.cl.substituteOrdered(subst)._1,subst)}
             }
             if (level > 2) {
               primsubstResult = primsubstResult union ps_vars.flatMap(h => PrimSubst(cw.cl, Set(h), sig.uninterpretedSymbols.filter(id => sig(id)._ty.funParamTypesWithResultType.last == HOLSignature.o).map(Term.mkAtom)))
@@ -1816,7 +1832,7 @@ package inferenceControl {
       collectedSpecs.foreach {case (hd, specs) =>
         val a = SolveFuncSpec.apply(hd.ty, specs)(sig)
         val hdIdx = Term.Bound.unapply(hd).get._2
-          result = result + AnnotatedClause(cl.substituteOrdered(Subst.singleton(hdIdx, a))(sig), FromSystem("choice instance", Seq.empty), cw.properties)
+          result = result + AnnotatedClause(cl.substituteOrdered(Subst.singleton(hdIdx, a))(sig)._1, FromSystem("choice instance", Seq.empty), cw.properties)
       }
       Out.trace(s"FunSpec result:\n\t${result.map(_.pretty(sig)).mkString("\n\t")}")
 
@@ -1912,15 +1928,20 @@ package inferenceControl {
         leo.Out.finest(s"[ExtPreprocessUnify] On ${cl.id}")
         leo.Out.finest(s"${cl.pretty(sig)}")
         var uniLits: Seq[Literal] = Vector.empty
+        var uniLitsInfo: Seq[UniLitInfo] = Vector.empty
         var nonUniLits: Seq[Literal] = Vector.empty
         var boolExtLits: Seq[Literal] = Vector.empty
         var nonBoolExtLits: Seq[Literal] = Vector.empty
 
-        val litIt = cl.cl.lits.iterator
+        val litIt = cl.cl.lits.iterator.zipWithIndex
 
         while(litIt.hasNext) {
-          val lit = litIt.next()
-          if (!lit.polarity && lit.equational) uniLits = lit +: uniLits
+          val litIdx = litIt.next()
+          val (lit, idx) = litIdx
+          if (!lit.polarity && lit.equational) {
+            uniLits = lit +: uniLits
+            uniLitsInfo = UniLitInfo(idx, lit) +: uniLitsInfo
+          }
           else nonUniLits = lit +: nonUniLits
           if (BoolExt.canApply(lit)) boolExtLits = lit +: boolExtLits
           else nonBoolExtLits = lit +: nonBoolExtLits
@@ -1930,14 +1951,19 @@ package inferenceControl {
         // and add it to the solutions
         // (B) if also boolean extensionality literals present, add (BE/cnf) treated clause to result set, else
         // insert the original clause.
-        if (uniLits.nonEmpty) result = result union doUnify0(cl, freshVarGen(cl.cl), uniLits.map(l => (l.left, l.right)), nonUniLits)(state)
+        if (uniLits.nonEmpty) result = result union doUnify0(cl, freshVarGen(cl.cl), uniLits.map(l => (l.left, l.right)), nonUniLits, uniLitsInfo)(state)
 
         val furtherInfo = FurtherInfo(addInfoSimpRule = Some("uniLitSimp"))
         if (boolExtLits.isEmpty) {
           val (tySubst, res) = Simp.uniLitSimp(uniLits)(sig)
           if (res == uniLits) result = result + cl
           else {
-            val newCl = AnnotatedClause(Clause(res ++ nonUniLits.map(_.substituteOrdered(Subst.id, tySubst))), InferredFrom(Simp, cl), cl.properties, furtherInfo)
+            val substLits = nonUniLits.map(_.substituteOrdered(Subst.id, tySubst))
+            //val flippedLitIds0 = substLits.zipWithIndex.collect { case ((_, LiteralInfo(true, _)), idx) => idx }
+            //val flippedLitIds = flippedLitIds0.map(_ + res.length)
+            //val normalizedLits0 = substLits.zipWithIndex.collect { case ((_, LiteralInfo(_, Some(mode))), idx) => (idx, mode) }
+            //val normalizedLits = normalizedLits0.map(_ + res.length)
+            val newCl = AnnotatedClause(Clause(res ++ substLits.map(_._1)), InferredFrom(Simp, cl), cl.properties, furtherInfo)
             val simpNewCl = Control.simp(newCl)
             result = result + cl + simpNewCl
           }
@@ -1950,12 +1976,15 @@ package inferenceControl {
           while (liftedIt.hasNext) {
             val liftedCl = Control.simp(liftedIt.next())
             result = result + liftedCl
-            val (liftedClUniLits, liftedClOtherLits) = liftedCl.cl.lits.partition(_.uni)
-            val liftedUnified = doUnify0(cl, freshVarGen(liftedCl.cl), liftedClUniLits.map(l => (l.left, l.right)), liftedClOtherLits)(state)
+            val (liftedClUniLitsIdx, liftedClOtherLitsIdx) = liftedCl.cl.lits.zipWithIndex.partition(_._1.uni)
+            val liftedClOtherLits = liftedClOtherLitsIdx.map(_._1)
+            val liftedClUniLits = liftedClUniLitsIdx.map(_._1)
+            val uniLitsInfo = liftedClUniLitsIdx.map(litIdx => UniLitInfo(litIdx._2,litIdx._1))
+            val liftedUnified = doUnify0(cl, freshVarGen(liftedCl.cl), liftedClUniLits.map(l => (l.left, l.right)), liftedClOtherLits, uniLitsInfo)(state)
             if (liftedUnified.isEmpty) {
               val (tySubst, res) = Simp.uniLitSimp(liftedClUniLits)(sig)
               if (res != liftedClUniLits) {
-                val newCl = AnnotatedClause(Clause(res ++ liftedClOtherLits.map(_.substituteOrdered(Subst.id, tySubst))), InferredFrom(Simp, cl), cl.properties)
+                val newCl = AnnotatedClause(Clause(res ++ liftedClOtherLits.map(_.substituteOrdered(Subst.id, tySubst)._1)), InferredFrom(Simp, cl), cl.properties)
                 val simpNewCl = Control.simp(newCl)
                 result = result + simpNewCl
               }
@@ -2287,7 +2316,7 @@ package inferenceControl {
       rewriteClause(cl, state.groundRewriteRules, state.nonGroundRewriteRules)(state.signature)
     }
     private def rewriteLit(vargen: FreshVarGen, lit: Literal, groundRewriteTable: RewriteTable, nonGroundRewriteTable: RewriteTable, rewriteRulesUsed: mutable.Set[AnnotatedClause])(sig: Signature): Literal = {
-      if (lit.equational) Literal.mkOrdered(rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), rewriteTerm(vargen, lit.right, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), lit.polarity)(sig)
+      if (lit.equational) Literal.mkOrdered(rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), rewriteTerm(vargen, lit.right, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), lit.polarity)(sig)._1
       else Literal.apply(rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), lit.polarity)
     }
 

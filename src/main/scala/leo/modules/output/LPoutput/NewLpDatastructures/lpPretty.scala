@@ -78,10 +78,9 @@ object Renderer {
     case Rewrite(pattern, rule, side) =>
       val sside = side match {
         case Side.Left => " left ";
-        case Side.Right => " right ";
-        case Side.Any => " "
+        case Side.Right => " "
       }
-      val pat = pattern.fold("") { p => s".[${p.hole.value} in ${termP(p.LpTerm, ro, 0, sig)}] " }
+      val pat = pattern.fold("") { p => s".[${termP(p.hole, ro, 0, sig)} in ${termP(p.LpTerm, ro, 0, sig)}] " }
       s"rewrite$sside$pat${renderTerm(rule, ro, sig)};"
     case Reflexivity => "reflexivity;"
     case Simplify(ns,onlyBeta) =>
@@ -133,6 +132,10 @@ object Renderer {
       case Wildcard() => "_"
       case Obj(t) => termP(t, ro, Prec.Atom, sig)
       case TptpInt(n) => qname(QName.in(Prefix.Sig, nameInt(n)), ro)
+      case LpString(t) => s"\"${renderTerm(t,  ro, sig)}\""
+      case LpInt(n) => n.toString()
+      case RewritePattern(pattern, hole) => s".[${termP(hole, ro, Prec.Atom, sig)} in ${termP(pattern, ro, Prec.Atom, sig)}]"
+      case LpList(els) => if (els.isEmpty) "□" else s"(${els.map(renderTerm(_, ro, sig)).mkString(" ⸬ ")} ⸬ □)"
     }
   }
 
@@ -145,7 +148,7 @@ object Renderer {
     * @param sig Lambdapi Signature
     * @return The object level term as a string
     * */
-  private def termP(t: LpTerm[Level.Obj], ro: RenderOptions, ctx: Int, sig: LpSig): String = {
+  def termP(t: LpTerm[Level.Obj], ro: RenderOptions, ctx: Int, sig: LpSig): String = {
     t match {
 
       // ** Binary connectives
@@ -252,6 +255,8 @@ object Renderer {
       case TptpInt(n) => qname(QName.in(Prefix.Sig,nameInt(n)),ro)
       case TptpRational(n0, n1) => qname(QName.in(Prefix.Sig,nameRational(n0, n1)),ro)
       case TptpReal(n0, n1, n2) => qname(QName.in(Prefix.Sig,nameReal(n0, n1, n2)),ro)
+      case LpInt(n) => n.toString()
+      case LpList(els) => if (els.isEmpty) "□" else s"(${els.map(termP(_, ro, Prec.Not, sig)).mkString(" ⸬ ")} ⸬ □)"
     }
   }
 

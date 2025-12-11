@@ -48,7 +48,7 @@ object DefExpSimp extends CalculusRule {
     while (litsIt.hasNext) {
       val lit = litsIt.next()
       if (lit.equational) {
-        newLits = newLits :+ Simp(Literal.mkOrdered(apply(lit.left), apply(lit.right), lit.polarity)(sig))
+        newLits = newLits :+ Simp(Literal.mkOrdered(apply(lit.left), apply(lit.right), lit.polarity)(sig)._1)
       } else {
         newLits = newLits :+ Simp(Literal(apply(lit.left), lit.polarity))
       }
@@ -517,11 +517,11 @@ object LiftEq extends CalculusRule {
     assert(l.isBetaNormal, s"${l.pretty(sig)} // ${l.toString}")
     assert(r.isBetaNormal, s"${r.pretty(sig)} // ${r.toString}")
     if (lift == POS_LIFT) {
-      Literal.mkOrdered(l,r,polarity)(sig)
+      Literal.mkOrdered(l,r,polarity)(sig)._1
     } else {
       // lift == NEG_LIFT
       Literal.mkOrdered(l,r,!polarity)(sig)
-    }
+    }._1
 
   }
 }
@@ -570,7 +570,7 @@ object ReplaceLeibnizEq extends CalculusRule {
   def apply(cl: Clause, bindings: Map[Int, Term])(implicit sig: Signature): (Clause, Subst) = {
     val gbMap = bindings.view.mapValues(t => Term.mkTermAbs(t.ty, ===(t.substitute(Subst.shift(1)), Term.mkBound(t.ty, 1)))).toMap
     val subst = Subst.fromMap(gbMap)
-    val newLits = cl.lits.map(_.substituteOrdered(subst)(sig))
+    val newLits = cl.lits.map(_.substituteOrdered(subst)(sig)._1)
     (Clause(newLits), subst)
   }
 }
@@ -615,7 +615,7 @@ object ReplaceAndrewsEq extends CalculusRule {
   def apply(cl: Clause, vars: Map[Int, Type])(implicit sig: Signature): (Clause, Subst) = {
     val gbMap = vars.view.mapValues {ty => Term.λ(ty,ty)(===(Term.mkBound(ty,2), Term.mkBound(ty,1)))}.toMap
     val subst = Subst.fromMap(gbMap)
-    val newLits = cl.lits.map(_.substituteOrdered(subst)(sig))
+    val newLits = cl.lits.map(_.substituteOrdered(subst)(sig)._1)
     (Clause(newLits), subst)
   }
 }
@@ -678,7 +678,7 @@ object RewriteSimp extends CalculusRule {
       val rightConfs = confs.getOrElse(Literal.rightSide, Set())
       val newRight = rightConfs.foldLeft(right) {case (curTerm, (pos, replaceBy)) => curTerm.replaceAt(pos, replaceBy)}
 
-      val newLit = Literal.mkOrdered(newLeft, newRight, lit.polarity)(sig)
+      val newLit = Literal.mkOrdered(newLeft, newRight, lit.polarity)(sig)._1
       lits = lits.updated(litIndex, newLit)
     }
 
@@ -750,7 +750,7 @@ object ACSimp extends CalculusRule {
       val rightAC = lit.right.symbols.distinct intersect allACSymbols
       val newRight = if (rightAC.isEmpty) lit.right else apply(lit.right, rightAC)
       if (newLeft == lit.left && newRight == lit.right) lit
-      else Literal.mkOrdered(newLeft, newRight, lit.polarity) // TODO: Orient?
+      else Literal.mkOrdered(newLeft, newRight, lit.polarity) ._1// TODO: Orient?
     } else {
       if (leftAC.isEmpty) lit
       else {
@@ -928,7 +928,7 @@ object Simp extends CalculusRule {
     var curSubst: Subst = Subst.id
     val litIt = lits.iterator
     while (litIt.hasNext) {
-      val lit0 = litIt.next().substituteOrdered(curSubst)
+      val lit0 = litIt.next().substituteOrdered(curSubst)._1
       val lit = apply(lit0)(sig)
 
       if (!Literal.isFalse(lit)) {
@@ -948,7 +948,7 @@ object Simp extends CalculusRule {
       Out.debug(s"It happend!")
       Out.debug(s"Old lits: ${Clause(lits).pretty(sig)}")
       Out.debug(s"Subst: ${curSubst.normalize.pretty}")
-      newLits = newLits.map(l => l.substituteOrdered(curSubst.normalize))
+      newLits = newLits.map(l => l.substituteOrdered(curSubst.normalize)._1)
       Out.debug(s"New lits post: ${Clause(newLits).pretty(sig)}")
     }
 
@@ -1042,7 +1042,7 @@ object Simp extends CalculusRule {
     val (posLits, negLits) = (cl.posLits, cl.negLits)
     val (processedNegLits,subst) =  detUniInferences0(negLits, Vector(Vector.empty), Subst.id)(sig)
     val normSubst = subst.normalize
-    val substPosLits = posLits.map(_.substituteOrdered(normSubst))
+    val substPosLits = posLits.map(_.substituteOrdered(normSubst)._1)
     val res = processedNegLits.map(nLits => Clause(substPosLits ++ nLits))
     leo.modules.myAssert(res.forall(Clause.wellTyped),
       s"Not well typed: ${res.filterNot(Clause.wellTyped).map(_.pretty(sig)).mkString("\n")}"
@@ -1071,7 +1071,7 @@ object Simp extends CalculusRule {
           val subst = HuetsPreUnification.BindRule.apply((left, right), leftAbstractions.size, canApplyBind)
           leo.Out.finest(s"[UniLitSimp] Bind subst: ${subst.pretty}")
           val newPartialSubst = partialSubst.comp(subst)
-          detUniInferences0(literals.tail.map(_.substituteOrdered(subst)(sig)), acc.map(lits => lits.map(_.substituteOrdered(subst)(sig))), newPartialSubst)(sig)
+          detUniInferences0(literals.tail.map(_.substituteOrdered(subst)(sig)._1), acc.map(lits => lits.map(_.substituteOrdered(subst)(sig)._1)), newPartialSubst)(sig)
         } else {
           val canApplyDecomp = HuetsPreUnification.DecompRule.canApply((leftBody, rightBody), leftAbstractions.size)
           if (canApplyDecomp._1) {

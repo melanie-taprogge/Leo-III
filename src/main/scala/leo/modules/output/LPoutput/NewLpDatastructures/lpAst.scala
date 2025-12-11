@@ -2,7 +2,7 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.modules.HOLSignature
-import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
+import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Var}
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures.lpProofScriptStep
 
 
@@ -85,11 +85,17 @@ object LpTerm {
   final case class App[L <: Level](f: LpTerm[L], args: Seq[Arg[L]]) extends LpTerm[L]
   /** Placeholder in Lambdapi */
   final case class Wildcard[L <: Level]() extends LpTerm[L]
+
+  final case class LpString(contents: LpTerm[Level.Meta]) extends LpTerm[Level.Meta]
   final case class Obj(t: LpTerm[Level.Obj]) extends LpTerm[Level.Meta] // todo: change?
   final case class TptpInt[L <: Level](n: BigInt) extends LpTerm[L]
 
+  final case class LpInt[L <: Level](n: BigInt) extends LpTerm[L]
+
   final case class TptpRational[L <: Level](n0: BigInt, n1: BigInt) extends LpTerm[L]
   final case class TptpReal[L <: Level](n0: BigInt, n1: BigInt, n2: BigInt) extends LpTerm[L]
+
+  final case class LpList[L <: Level](els: Seq[LpTerm[L]]) extends LpTerm[L]
 }
 /** Argument supplied in an application, can either be a term or a type argument and can either be explicit or implicit */
 sealed trait Arg[L <: Level]
@@ -133,7 +139,7 @@ object LpProofScript {
     * @param pattern Apply (only) at a specified position
     * @param side "left" allows to instead rewrite occurrences of the RHS with the LHS
     * */
-  final case class Rewrite(pattern: Option[RewritePattern], rule: LpTerm[Level.Meta], side: Side = Side.Any) extends LpProofScript
+  final case class Rewrite(pattern: Option[RewritePattern], rule: LpTerm[Level.Meta], side: Side = Side.Right) extends LpProofScript
   /** Resolve goals of the shape `x=x` */
   case object Reflexivity extends LpProofScript
   /**
@@ -157,8 +163,8 @@ object LpProofScript {
   // additional Information providable for rewrite tactic
   /** Direction to apply the rewrite tactic */
   sealed trait Side
-  object Side { case object Left extends Side; case object Right extends Side; case object Any extends Side }
-  final case class RewritePattern(LpTerm: LpTerm[Level.Obj], hole: Name = Name("x"))
+  object Side { case object Left extends Side; case object Right extends Side}
+  final case class RewritePattern(LpTerm: LpTerm[Level.Obj], hole: LpTerm[Level.Obj] = Const[Level.Obj](SymRef.LP(QName.local("x")))) extends LpTerm[Level.Meta]
 }
 
 

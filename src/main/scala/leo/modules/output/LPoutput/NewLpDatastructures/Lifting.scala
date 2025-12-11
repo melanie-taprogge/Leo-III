@@ -17,7 +17,7 @@ object Lifting {
     }
   }
 
-  private object OlVarM {
+  object OlVarM {
     def apply(v: Var[Level.Obj]): Var[Level.Meta] = {
       Var(v.name, v.ty)
     }

@@ -14,12 +14,14 @@ object ND {
     val witnessStr = "el"
     val emStr = "em"
 
-    val allAscii = Seq(witnessStr, emStr)
+    // proven standard library theorems
+    val eqSymStr = "=_sym"
+
+    val allAscii = Seq(witnessStr, emStr, eqSymStr)
 
     // ND rules
     val lpLorelimS: SymRef  = SymRef.LP(QName.local("∨ₑ"))
     val lpLorIntro1S: SymRef  = SymRef.LP(QName.local("∨ᵢ₁"))
-    val lpLorIntro2S: SymRef  = SymRef.LP(QName.local("¬¬ₑ"))
     // ...
 
 
@@ -31,19 +33,26 @@ object ND {
     // non-emptiness of sets
     private[ND] val lpWitnessConS: SymRef = SymRef.LP(QName.local(witnessStr))
 
+    // symmetry of equality
+    private[ND] val eqSymS: SymRef = SymRef.LP(QName.local(eqSymStr))
+
   }
 
-  object MlTerms {
+  object Terms {
     import Names._
 
-    val lpDne = LpTerm.Const[Level.Meta](lpDneS)
-    val lpWitnessCon = LpTerm.Const[Level.Meta](lpWitnessConS)
+    def lpDne[L <: Level]: LpTerm.Const[L] =
+      LpTerm.Const[L](lpDneS)
+    def lpWitnessCon[L <: Level]: LpTerm.Const[L] =
+      LpTerm.Const[L](lpWitnessConS)
+    def eqSym[L <: Level]: LpTerm.Const[L] =
+      LpTerm.Const[L](eqSymS)
 
     // ...
   }
 
   object Inst {
-    import  MlTerms._
+    import  Terms._
 
     /*
     def lpWitness(ty : OlType): LpTerm[Level.Obj] = {

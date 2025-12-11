@@ -216,8 +216,32 @@ case class UniTypeByVar(targetIndex: Int) extends UniTypeRhs
 case class UniTypeByType(typ: Type) extends UniTypeRhs
 
 case class UniTypeSubst(sourceIndex: Int, rhs: UniTypeRhs)
-case class AddInfoUni(termSubsts: Seq[UniTermSubst] = Seq.empty,
-                      typeSubsts: Seq[UniTypeSubst] = Seq.empty)
+
+case class UniSubst(termSubsts: Seq[UniTermSubst] = Seq.empty,
+                    typeSubsts: Seq[UniTypeSubst] = Seq.empty)
+
+sealed trait LitNorm
+
+object LitNorm {
+  case object TopL extends LitNorm;
+  case object TopR extends LitNorm;
+
+  case object BotL extends LitNorm;
+
+  case object BotR extends LitNorm
+}
+
+case class UniLitInfo(position: Int,
+                      literal: Literal)
+case class AddInfoUni(subst: UniSubst = UniSubst(),
+                      uniLits: Seq[UniLitInfo] = Seq.empty,
+                      literalTransformations: LiteralTransformation = LiteralTransformation()) //todo currently affected Lit is only used for pattern uni - also use for preuni
+
+case class LiteralInfo(flip: Boolean,
+                       normalize: Option[LitNorm])
+
+case class LiteralTransformation(flippedLits: Seq[Int] = Seq.empty,
+                                 normalizedEq: Seq[(Int, LitNorm)] = Seq.empty)
 
 
 case class FurtherInfo (val addInfoSimpRule: Option[String] = None,

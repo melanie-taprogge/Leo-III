@@ -95,15 +95,15 @@ trait Literal extends Pretty with Prettier {
   }
   /** Apply substitution `(termSubst, typeSubst)` to literal (i.e. to both sides of the equation).
     * Result it beta-normalized and oriented if possible. */
-  @inline final def substituteOrdered(termSubst : Subst, typeSubst: Subst = Subst.id)(implicit sig: Signature) : Literal = {
-    if (termSubst == Subst.id && typeSubst == Subst.id) this
+  @inline final def substituteOrdered(termSubst : Subst, typeSubst: Subst = Subst.id)(implicit sig: Signature) : (Literal, LiteralInfo) = {
+    if (termSubst == Subst.id && typeSubst == Subst.id) (this, LiteralInfo(false,None))
     else {
       val lsubst = left.substitute(termSubst, typeSubst)
       if (equational) {
         val rsubst = right.substitute(termSubst, typeSubst)
         Literal.mkOrdered(lsubst, rsubst, polarity)
       } else {
-        Literal.mkLit(lsubst, polarity)
+        (Literal.mkLit(lsubst, polarity),LiteralInfo(false,None)) //todo: probably things can also happen here (like a double negation elimination)
       }
     }
   }
@@ -161,7 +161,7 @@ object Literal {
     * t1 will be used as left and t2 as right.
     * Note that the resulting literal is only
     * equational if both terms t1 and t2 and not equivalent to $true/$false. */
-  @inline final def mkOrdered(t1: Term, t2: Term, pol: Boolean)(implicit sig: Signature): Literal = {
+  @inline final def mkOrdered(t1: Term, t2: Term, pol: Boolean)(implicit sig: Signature): (Literal, LiteralInfo) = {
     assert(Term.wellTyped(t1), s"Left side of literal not well-typed: ${t1.pretty(sig)}")
     assert(Term.wellTyped(t2), s"Right side of literal not well-typed: ${t2.pretty(sig)}")
     assert(t1.ty == t2.ty)
@@ -187,7 +187,7 @@ object Literal {
     * t1 will be used as left and t2 as right.
     * Note that the resulting literal is only
     * equational if neither `left` nor `right` are `$true/$false`. */
-  @inline final def mkPosOrdered(t1: Term, t2: Term)(implicit sig: Signature): Literal = mkOrdered(t1,t2,true)(sig)
+  @inline final def mkPosOrdered(t1: Term, t2: Term)(implicit sig: Signature): Literal = mkOrdered(t1,t2,true)(sig)._1
   /** Create new (equational) literal with equation `left = right`
     * and negative polarity. During construction, the method
     * tries to order the two terms into and ordered equation left=right,
@@ -195,7 +195,7 @@ object Literal {
     * t1 will be used as left and t2 as right.
     * Note that the resulting literal is only
     * equational if neither `left` nor `right` are `$true/$false`.*/
-  @inline final def mkNegOrdered(t1: Term, t2: Term)(implicit sig: Signature): Literal = mkOrdered(t1,t2,false)(sig)
+  @inline final def mkNegOrdered(t1: Term, t2: Term)(implicit sig: Signature): Literal = mkOrdered(t1,t2,false)(sig)._1
   // Apply method redirections
   /** Create new unordered (equational) literal with equation `left = right`
     * and polarity `pol`. Note that the resulting literal is only

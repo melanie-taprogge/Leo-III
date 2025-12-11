@@ -32,7 +32,10 @@ trait Clause extends Pretty with Prettier with HasCongruence[Clause] {
 
   // Operations on clauses
   def substitute(termSubst: Subst, typeSubst: Subst = Subst.id): Clause = Clause(lits.map(_.substitute(termSubst, typeSubst)))
-  def substituteOrdered(termSubst: Subst, typeSubst: Subst = Subst.id)(implicit sig: Signature): Clause = Clause(lits.map(_.substituteOrdered(termSubst, typeSubst)(sig)))
+  def substituteOrdered(termSubst: Subst, typeSubst: Subst = Subst.id)(implicit sig: Signature): (Clause, Seq[LiteralInfo]) = {
+    val substitutedLits = lits.map(_.substituteOrdered(termSubst, typeSubst)(sig))
+    (Clause(substitutedLits.map(_._1)), substitutedLits.map(_._2))
+  }
 
   @inline final def map[A](f: Literal => A): Seq[A] = lits.map(f)
   @inline final def mapLit(f: Literal => Literal): Clause = Clause(lits.map(f), Derived)

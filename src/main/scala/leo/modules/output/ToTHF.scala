@@ -190,9 +190,9 @@ object ToTHF {
     //override def apply(): String = apply_andTrack(termsubst, typesubst, implicitlyBound, tyVars)(sig)._1
     apply_andTrack(termsubst, typesubst, implicitlyBound, tyVars)(sig)._1
   }
-  final def apply_andTrack(termsubst: Subst, typesubst: Subst, implicitlyBound: Seq[(Int, Type)], tyVars: Seq[Int])(implicit sig: Signature): (Output, AddInfoUni) = {
+  final def apply_andTrack(termsubst: Subst, typesubst: Subst, implicitlyBound: Seq[(Int, Type)], tyVars: Seq[Int])(implicit sig: Signature): (Output, UniSubst) = {
     var sb = new StringBuilder
-    var addInfo = AddInfoUni()
+    var addInfo = UniSubst()
     if (termsubst.length > 0) {
       val (_, varmap) = clauseImplicitsToTPTPQuantifierList(implicitlyBound)(sig)
       val varmapMaxKey = if (varmap.nonEmpty) varmap.keySet.max else 0

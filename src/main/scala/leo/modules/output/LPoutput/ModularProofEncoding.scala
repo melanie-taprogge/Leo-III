@@ -2115,8 +2115,8 @@ object ModularProofEncoding {
       val encParentLiterals = encParent.args
 
       // Encode the actual unification and possibly the following simplification
-      val typeUnification = addInfoUni.typeSubsts
-      val termUnification = addInfoUni.termSubsts
+      val typeUnification = addInfoUni.subst.typeSubsts
+      val termUnification = addInfoUni.subst.termSubsts
 
       if (termUnification.length != unboundVarsParent.length) {
         //throw new Exception(s"trying to encode the unification that does not bind all free variables, this is implemented but untested, make sure this is done correctly") //todo
