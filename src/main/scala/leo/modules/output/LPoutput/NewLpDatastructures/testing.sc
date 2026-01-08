@@ -8,7 +8,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpTerm, Renderer}
 
 val t: LpTerm[Level.Obj] = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("p")))
 val emptyOrigSig = Signature.freshWithHOL()
-implicit val emptySig = LpSigBuilder.build(emptyOrigSig)
+implicit val emptySig = LpSig.fromLeo(emptyOrigSig)
 Renderer.LpTermObj(t,emptySig) // or t.pp
 t.pretty
 
