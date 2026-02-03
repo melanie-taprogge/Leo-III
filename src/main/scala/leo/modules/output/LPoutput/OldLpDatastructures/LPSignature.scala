@@ -23,17 +23,11 @@ object LPSignature {
 
     
   }
+  case object lpLorIntroMulti extends lpNameRef {
+    override def name: lpConstantTerm = lpConstantTerm("∨ᵢₙ")
 
-  case object lpLorIntroMulti2 extends lpNameRef {
-    override def name: lpConstantTerm = lpConstantTerm("∨ᵢₙ₂")
-    def instanciate(c0: Seq[lpOlTerm],c1: Seq[lpOlTerm]): lpFunctionApp = lpFunctionApp(name,Seq(lpList(c0),lpList(c1)))
-    
-  }
+    def instanciate(c0: Seq[lpOlTerm], c1: Seq[lpOlTerm], c2: Seq[lpOlTerm]): lpFunctionApp = lpFunctionApp(name, Seq(lpList(c0), lpList(c1), lpList(c2)))
 
-  case object lpLorIntroMulti1 extends lpNameRef {
-    override def name: lpConstantTerm = lpConstantTerm("∨ᵢₙ₁")
-    def instanciate(c0: Seq[lpOlTerm],c1: Seq[lpOlTerm]): lpFunctionApp = lpFunctionApp(name,Seq(lpList(c0),lpList(c1)))
-    
   }
 
   case object lpLorElimMulti extends lpNameRef {

@@ -702,7 +702,7 @@ object LPoutput {
     Out.info("Writing the Lambdapi files")
 
     // todo: only require what we need
-    lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List",s"Stdlib.Epsilon",calcRuleLibStr,permLibStr)
+    lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.Epsilon","Stdlib.Disj","Stdlib.Conj",calcRuleLibStr,permLibStr)
     lazy val reqString = reqList.map(s => s"require open $s;\n").mkString("")
     var additions = ""
     val singleProof: mutable.StringBuilder = new StringBuilder()

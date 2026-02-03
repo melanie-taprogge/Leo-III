@@ -12,7 +12,7 @@ import leo.modules.output.LPoutput.SimplificationEncoding._
 import leo.modules.calculus.Simp.normalize
 import leo.modules.output.LPoutput.CNFEncoding.{cnfTacQuantifiers, lpMoveExists, lpMoveUniv, lpSkolemizeExists, lpSkolemizeUniv, onlyBoolRulesTermName}
 import leo.modules.output.LPoutput.CommonProofSteps.ScriptBuilders.assumeClauseVars
-import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{eqImp, lpEm, lpLorElimMulti, lpLorIntro2, lpLorIntroMulti1, lpLorIntroMulti2, lpLorelim}
+import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{eqImp, lpEm, lpLorElimMulti, lpLorIntro2, lpLorIntroMulti, lpLorelim}
 import leo.modules.output.LPoutput.LPoutput.{ParentInfo, abbreviationFormulaeFile}
 import leo.modules.saturatedUserSignature
 
@@ -1076,7 +1076,7 @@ object ModularProofEncoding {
     private def branchUniLitFalse(childCl: ParaChildClause) = {
       val nameUniLit = lpConstantTerm("uniLitInEq")
       val assumeUniLit = lpAssume(Seq(nameUniLit))
-      val orIntro: lpTerm = if (childCl.enc.lits.length > 2) lpLorIntroMulti2.instanciate((childCl.enc.lits.init), Seq(childCl.encUniLit)) else lpLorIntro2.name
+      val orIntro: lpTerm = if (childCl.enc.lits.length > 2) lpLorIntroMulti.instanciate(childCl.enc.lits.init, Seq(childCl.encUniLit), Seq.empty) else lpLorIntro2.name
       lpProofScript(Seq(assumeUniLit, lpRefine(lpFunctionApp(orIntro, Seq(nameUniLit)))))
     }
 
@@ -1094,7 +1094,7 @@ object ModularProofEncoding {
       val rewriteWithUniLit = lpRewrite(Some(childIntoTermPattern), nameUniConsT, flipUniLit)
 
       // regardless of the length of the withClause, we need to instanciate disjunction introduction to combine the intoClause literals and the uniLit
-      val vIntro1_intoClause_uniLit = lpFunctionApp(lpLorIntroMulti1.instanciate(intoCl.enc.lits, Seq(childCl.encUniLit)), Seq(intoCl.currentRef))
+      val vIntro1_intoClause_uniLit = lpFunctionApp(lpLorIntroMulti.instanciate(Seq.empty,intoCl.enc.lits, Seq(childCl.encUniLit)), Seq(intoCl.currentRef))
       (assumeUniConsT, rewriteWithUniLit, vIntro1_intoClause_uniLit)
     }
 
@@ -1111,7 +1111,7 @@ object ModularProofEncoding {
       // like in the base case, we can not rewrite with the with-Lit
       val rewriteWithWithLit = lpRewrite(Some(childIntoTermPattern), nameWithLit, info.withSide)
       // use disjunction introduction to account for the other lits in the withClause
-      val vIntroWithClause = lpLorIntroMulti2.instanciate(ctxt.withC.otherLits, ctxt.intoC.enc.lits :+ ctxt.childC.encUniLit)
+      val vIntroWithClause = lpLorIntroMulti.instanciate(ctxt.withC.otherLits, ctxt.intoC.enc.lits :+ ctxt.childC.encUniLit, Seq.empty)
       val refineStepCaseWithLit = lpRefine(lpFunctionApp(vIntroWithClause, Seq(vIntro1_intoClause_uniLit)))
       // combine all of these steps into one step
       val caseWithLit = lpProofScript((assumeWithLit +: transformIntoLitSteps) ++ maybeFlipIntoLitStep ++ Seq(lpProofScriptCommentLine("Rewrite parent with with-literal"), rewriteWithWithLit, lpProofScriptCommentLine("Rewrite parent with unification constraint"), rewriteWithUniLit, refineStepCaseWithLit))
@@ -1120,7 +1120,7 @@ object ModularProofEncoding {
       val nameWithClauseWithoutLit = lpConstantTerm("otherLitsWithClause")
       val assumeWithClauseWithoutLit = Seq(lpAssume(Seq(nameWithClauseWithoutLit)))
       // refine with disjunction introduction based on the literals
-      val vIntro_withClauseWithoutLit = lpLorIntroMulti1.instanciate(ctxt.withC.otherLits, ctxt.childC.enc.lits.drop(ctxt.withC.otherLits.length))
+      val vIntro_withClauseWithoutLit = lpLorIntroMulti.instanciate(Seq.empty,ctxt.withC.otherLits, ctxt.childC.enc.lits.drop(ctxt.withC.otherLits.length))
       val refineStepCaseWithClauseWithoutLit = lpRefine(lpFunctionApp(vIntro_withClauseWithoutLit, Seq(nameWithClauseWithoutLit)))
       val caseWithClauseWithoutLit = lpProofScript(assumeWithClauseWithoutLit :+ refineStepCaseWithClauseWithoutLit)
 
