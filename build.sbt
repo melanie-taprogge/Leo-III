@@ -2,16 +2,16 @@ lazy val leo = (project in file("."))
   .settings(
     name := "Leo-III",
     description := "A Higher-Order Theorem Prover.",
-    version := "1.7.19",
+    version := "1.7.20",
     organization := "org.leo",
-    scalaVersion := "2.13.15",
+    scalaVersion := "2.13.16",
     licenses += "BSD-3-Clause" -> url("https://opensource.org/licenses/BSD-3-Clause"),
 
     logLevel := Level.Warn,
 
     Compile/mainClass := Some("leo.Main"),
     assembly/mainClass := Some("leo.Main"),
-    assembly/assemblyJarName := "leo3.jar",
+    assembly/assemblyJarName := s"leo3-${version.value}.jar",
     assembly/logLevel := Level.Error,
     assembly/test := {},
 
