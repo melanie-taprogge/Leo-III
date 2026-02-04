@@ -94,6 +94,7 @@ object LPoutput {
   }
 
   def toProofStep(stepName: String, encStep: LpType, ruleName: String, proofTerm: Either[LpProofScript, lpProofScriptStep], notEncoded: Option[String]): Option[(LpProofScript.Comment, LpProofScript)] = {
+    // todo: use the new trait for results rather than optional stirngs
     if (notEncoded.isDefined) {
       // if the step is actually new, we want to add it to the output
       // add substeps for which the encoding is not implemented using the "admit" tactic
@@ -349,7 +350,10 @@ object LPoutput {
 
             case leo.modules.calculus.PatternUni =>
               val encProof = encodePatternUni(cl.annotation.parents.head,cl,Name(parentInLpEncID.head.name),sig)
-              (toProofStepOld(stepName, encStep, rule.name, Left(encProof), None),outputInfo)
+              encProof match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, rule.name, Left(scripts), None),outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, rule.name, Left(Seq.empty), Some(reason)),outputInfo)
+              }
 
             case _ =>
               val parentIDs = parentInLpEncID.map(id => id.name)
