@@ -237,6 +237,18 @@ case class AddInfoUni(subst: UniSubst = UniSubst(),
                       uniLits: Seq[UniLitInfo] = Seq.empty,
                       literalTransformations: LiteralTransformation = LiteralTransformation()) //todo currently affected Lit is only used for pattern uni - also use for preuni
 
+case class TaggedLit(originId: OriginId, lit: Literal)
+
+sealed trait OriginId
+case class Orig(idx: Int) extends OriginId
+case class DecompOf(idx: Int, k: Int) extends OriginId
+
+case class DecompInfo(OrigIdx: Int, hdTy: Type, LitTransf: Seq[LiteralInfo])
+case class BranchState(lits: Vector[TaggedLit] = Vector.empty, // accumulated kept literals (tagged)
+                        //deleted: scala.collection.immutable.BitSet, // original indices deleted by DeleteRule
+                        decomp: Vector[DecompInfo] = Vector.empty) // origIdx -> produced ids (in decomposed branch))
+case class AddInfoDetUni(uniSubst: UniSubst = UniSubst(),
+                         branchState: BranchState = BranchState())
 case class LiteralInfo(flip: Boolean,
                        normalize: Option[LitNorm])
 
@@ -259,6 +271,7 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
   var addInfoUniRule: (String,(Literal,Literal)) = ("",(Literal(LitFalse(),false),Literal(LitFalse(),false))) // todo for now I am doing it this way but maybe if i do not need this for other rules as well it would be better to use tuples
   //var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
   var addInfoUni: AddInfoUni = AddInfoUni()
+  var addInfoDetUni: AddInfoDetUni = AddInfoDetUni()
   var addInfoRewriting: Option[Clause] = None
   var addInfoLiftEq: Seq[Seq[Int]] = Seq.empty
 }

@@ -45,3 +45,52 @@ object EqRules {
 
 }
 
+object FunRules {
+
+  object Names {
+
+    // ** Names as Strings
+    private val decomp_step = "Decomp_step"
+    private val decomp_single = "Decomp_single"
+
+    val allAscii = Seq(decomp_step,decomp_single)
+
+    private[FunRules] val decomp_step_S: SymRef = SymRef.LP(QName.local(decomp_step))
+    private[FunRules] val decomp_single_S: SymRef = SymRef.LP(QName.local(decomp_single))
+  }
+
+  object AsTerms {
+
+    import Names._
+
+    def decompStep[L <: Level] = LpTerm.Const[L](decomp_step_S)
+    def mkDecompStepObj(a: OlType, b: OlType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], g: LpTerm[Level.Obj], h0: Option[LpTerm[Level.Obj]]): LpTerm[Level.Obj] = {
+      val maybeH: Seq[Arg.Explicit[Level.Obj]] = h0 match {
+        case Some(term) => Seq(Arg.Explicit(term))
+        case None => Seq.empty
+      }
+      LpTerm.App(decompStep[Level.Obj], Seq(Arg.ImplicitTypeArg[Level.Obj](a), Arg.ImplicitTypeArg[Level.Obj](b), Arg.Explicit(s), Arg.Explicit(t), Arg.Explicit(f), Arg.Explicit(g)) ++ maybeH)
+    }
+
+    def DecompStepRes(a: OlType, b: OlType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], g: LpTerm[Level.Obj]): (LpTerm[Level.Obj],LpTerm[Level.Obj]) = {
+      val newEqLit = LogicConst.Not(LogicConst.Eq(a,s,t))
+      val newAppHdEq = LogicConst.Not(LogicConst.Eq(b,f,g))
+      (newAppHdEq,newEqLit)
+    }
+
+    def decompSingle[L <: Level] = LpTerm.Const[L](decomp_single_S)
+    def mkDecompSingleObj(a: OlType, b: OlType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], h0: Option[LpTerm[Level.Obj]]): LpTerm[Level.Obj] = {
+      val maybeH: Seq[Arg.Explicit[Level.Obj]] = h0 match {
+        case Some(term) => Seq(Arg.Explicit(term))
+        case None => Seq.empty
+      }
+      LpTerm.App(decompSingle[Level.Obj], Seq(Arg.ImplicitTypeArg[Level.Obj](a), Arg.ImplicitTypeArg[Level.Obj](b), Arg.Explicit(s), Arg.Explicit(t), Arg.Explicit(f)) ++ maybeH)
+    }
+
+    def DecompSingleResult(a: OlType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj]): LpTerm[Level.Obj] = {
+      LogicConst.Not(LogicConst.Eq(a,s,t))
+    }
+  }
+
+}
+

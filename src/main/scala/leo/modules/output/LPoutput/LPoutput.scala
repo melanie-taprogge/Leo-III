@@ -4,6 +4,7 @@ import leo.{Out, modules}
 import leo.datastructures.Term.Integer
 import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
 import leo.modules.HOLSignature.{HOLDifference, HOLGreater, HOLGreaterEq, HOLLess, HOLLessEq, HOLProduct, HOLQuotient, HOLSum, HOLUnaryMinus}
+import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
 import leo.modules.prover.LocalState
 import leo.modules.{numbersInProof, saturatedUserSignature, symbolsInProof}
@@ -33,7 +34,7 @@ import leo.modules.output.LPoutput.UnificationEncding.encodePatternUni
 
 object LPoutput {
 
-  val outputSingleFile = false
+  val outputSingleFile = true
 
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
@@ -327,7 +328,13 @@ object LPoutput {
                     val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, Seq(cl.annotation.parents.head.cl.lits.length - 1))
                     (toProofStepOld(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None), outputInfo)
                   }
-                }else {
+                }else if (cl.furtherInfo.addInfoSimpRule.get == "detUniInferences") {
+                  val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,Name(parentInLpEncID.head.name),sig)
+                  encProof match {
+                    case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "DetUniSimp", Left(scripts), None), outputInfo)
+                    case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some(reason)), outputInfo)
+                  }
+                } else {
                   val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
                   (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
                 }

@@ -195,7 +195,7 @@ object Literal {
     * t1 will be used as left and t2 as right.
     * Note that the resulting literal is only
     * equational if neither `left` nor `right` are `$true/$false`.*/
-  @inline final def mkNegOrdered(t1: Term, t2: Term)(implicit sig: Signature): Literal = mkOrdered(t1,t2,false)(sig)._1
+  @inline final def mkNegOrdered(t1: Term, t2: Term)(implicit sig: Signature): (Literal, LiteralInfo) = mkOrdered(t1,t2,false)(sig)
   // Apply method redirections
   /** Create new unordered (equational) literal with equation `left = right`
     * and polarity `pol`. Note that the resulting literal is only

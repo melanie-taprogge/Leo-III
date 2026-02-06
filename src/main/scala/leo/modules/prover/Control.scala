@@ -1029,8 +1029,10 @@ package inferenceControl {
           s"Not well typed: ${cl.pretty(state.signature)}"
         )
         val results = Simp.detUniInferences(cl.cl)(state.signature)
-        val furtherInfo = FurtherInfo(addInfoSimpRule = Some("detUniInferences"))
-        val results0 = results.filter(c => c != cl.cl).map(c => AnnotatedClause(c, InferredFrom(Simp, cl), cl.properties, furtherInfo)).toSet
+        val results0 = results.filter(c => c._1 != cl.cl).map{c =>
+          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("detUniInferences"))
+          furtherInfo.addInfoDetUni = c._2
+          AnnotatedClause(c._1, InferredFrom(Simp, cl), cl.properties, furtherInfo)}.toSet
         Out.trace(s"[detUni] Results: ${results0.map(_.pretty(state.signature)).mkString("\n")}")
         results0
       }
@@ -1953,8 +1955,8 @@ package inferenceControl {
         // insert the original clause.
         if (uniLits.nonEmpty) result = result union doUnify0(cl, freshVarGen(cl.cl), uniLits.map(l => (l.left, l.right)), nonUniLits, uniLitsInfo)(state)
 
-        val furtherInfo = FurtherInfo(addInfoSimpRule = Some("uniLitSimp"))
         if (boolExtLits.isEmpty) {
+          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("uniLitSimp1"))
           val (tySubst, res) = Simp.uniLitSimp(uniLits)(sig)
           if (res == uniLits) result = result + cl
           else {
@@ -1969,7 +1971,7 @@ package inferenceControl {
           }
         } else {
           leo.Out.finest(s"Detecting Boolean extensionality literals, inserted expanded clauses...") //todo: apply the ext. rule in encoding here
-          val boolExtResult = BoolExt.apply(cl.cl, boolExtLits, nonBoolExtLits).map(AnnotatedClause(_, InferredFrom(BoolExt, cl),cl.properties | ClauseAnnotation.PropBoolExt, furtherInfo))
+          val boolExtResult = BoolExt.apply(cl.cl, boolExtLits, nonBoolExtLits).map(AnnotatedClause(_, InferredFrom(BoolExt, cl),cl.properties | ClauseAnnotation.PropBoolExt))
           val cnf = CNFControl.cnfSet(boolExtResult)
           val lifted = cnf.map(Control.liftEq)
           val liftedIt = lifted.iterator
@@ -2099,7 +2101,7 @@ package inferenceControl {
 //      else AnnotatedClause(simpResult, cl.annotation, addProp(ClauseAnnotation.PropShallowSimplified,cl.properties))
 
       else {
-        val furtherInfo = FurtherInfo(addInfoSimpRule = Some("uniLitSimp"))
+        val furtherInfo = FurtherInfo(addInfoSimpRule = Some("uniLitSimp2"))
         AnnotatedClause(simpResult, InferredFrom(Simp, cl), addProp(ClauseAnnotation.PropShallowSimplified,cl.properties),furtherInfo)
       }
 
@@ -2118,9 +2120,8 @@ package inferenceControl {
         val result0 = if (simpResult == cl.cl) cl
 //        else AnnotatedClause(simpResult, cl.annotation, addProp(ClauseAnnotation.PropShallowSimplified,cl.properties))
         else {
-          val addInfoSimp = new FurtherInfo()
           //addInfoSimp.addInfoSimp = ...
-          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("uniLitSimp"))
+          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("uniLitSimp3"))
           AnnotatedClause(simpResult, InferredFrom(Simp, cl), addProp(ClauseAnnotation.PropShallowSimplified,cl.properties),furtherInfo)
         }
         val result = rewriteClause(result0)(state)

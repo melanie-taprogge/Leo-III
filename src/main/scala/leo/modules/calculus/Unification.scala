@@ -273,19 +273,19 @@ object HuetsPreUnification extends Unification {
         zipWithAbstractions(termArgs1, termArgs2, abstractions)
       case _ => throw new IllegalArgumentException("impossible")
     }
-    final def canApply(e: UEq, depth: Depth): (Boolean, Option[TypeSubst]) = e match {
+    final def canApply(e: UEq, depth: Depth): (Boolean, Option[TypeSubst], Option[Type]) = e match {
       case (hd1 ∙ args1, hd2 ∙ args2) if hd1 == hd2 && !isFlexible(hd1, depth) =>
-        if (!hd1.ty.isPolyType) (true, Some(Subst.id))
+        if (!hd1.ty.isPolyType) (true, Some(Subst.id),Some(hd1.ty))
         else {
           val typeArgs1 = typeArgs(args1)
           val typeArgs2 = typeArgs(args2)
           val uniConstraints: Seq[UTEq] = typeArgs1.zip(typeArgs2)
           val uniResult = TypeUnification(uniConstraints)
           if (uniResult.isDefined) {
-            (true, uniResult)
-          } else (true, None) // This encodes: Applicable but not successful
+            (true, uniResult, Some(hd1.ty))
+          } else (true, None, Some(hd1.ty)) // This encodes: Applicable but not successful
       }
-      case _ => (false, None)
+      case _ => (false, None, None)
     }
   }
 

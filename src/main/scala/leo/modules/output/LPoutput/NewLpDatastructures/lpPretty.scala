@@ -104,7 +104,7 @@ object Renderer {
     * @param sig Lambdapi Signature
     * @return The type as a string
     * */
-  private def renderTerm(t: LpTerm[Level.Meta], ro: RenderOptions, sig: LpSig): String = {
+  def renderTerm(t: LpTerm[Level.Meta], ro: RenderOptions, sig: LpSig): String = {
     t match {
       case Var(n, _) => n.value
       case Const(SymRef.LP(qn)) => qname(qn, ro)

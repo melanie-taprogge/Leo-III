@@ -604,8 +604,8 @@ object OrderedEqFac extends CalculusRule {
     /* We cannot delete an element from the list, thats way we replace it by a trivially false literal,
     * that is later eliminated using Simp. */
     val lits_without_maxLit = cl.lits.updated(maxLitIndex, Literal.mkLit(LitTrue(),false))
-    val unification_task1: Literal = Literal.mkNegOrdered(maxLitSide1, withLitSide1)(sig)
-    val unification_task2: Literal = Literal.mkNegOrdered(maxLitSide2, withLitSide2)(sig)
+    val unification_task1: Literal = Literal.mkNegOrdered(maxLitSide1, withLitSide1)(sig)._1
+    val unification_task2: Literal = Literal.mkNegOrdered(maxLitSide2, withLitSide2)(sig)._1
 
     val newlitsSimp = Simp.shallowSimp(lits_without_maxLit)(sig):+ unification_task1 :+ unification_task2
     Clause(newlitsSimp)
@@ -628,8 +628,8 @@ object OrderedEqFac extends CalculusRule {
     /* We cannot delete an element from the list, thats way we replace it by a trivially false literal,
     * that is later eliminated using Simp. */
     val lits_without_maxLit = cl.lits.updated(maxLitIndex, Literal.mkLit(LitTrue(), false))
-    val unification_task1: Literal = Literal.mkNegOrdered(maxLitSide1, withLitSide1)(sig)
-    val unification_task2: Literal = Literal.mkNegOrdered(maxLitSide2, withLitSide2)(sig)
+    val unification_task1: Literal = Literal.mkNegOrdered(maxLitSide1, withLitSide1)(sig)._1
+    val unification_task2: Literal = Literal.mkNegOrdered(maxLitSide2, withLitSide2)(sig)._1
 
     val newlitsSimp = Simp.shallowSimp(lits_without_maxLit)(sig) :+ unification_task1 :+ unification_task2
     val wasSimplified = (newlitsSimp == lits_without_maxLit)
@@ -704,7 +704,7 @@ object OrderedParamod extends CalculusRule {
     /* unification literal between subterm of intoLiteral (in findWithin side) and right side of withLiteral. */
     Out.finest(s"withClause.maxImpBound: ${Clause.maxImplicitlyBound(withClause)}")
     Out.finest(s"intoSubterm: ${intoSubterm.pretty(sig)}")
-    val unificationLit = Literal.mkNegOrdered(toFind.etaExpand, intoSubterm.etaExpand)(sig)
+    val unificationLit = Literal.mkNegOrdered(toFind.etaExpand, intoSubterm.etaExpand)(sig)._1
     Out.finest(s"unificationLit: ${unificationLit.pretty(sig)}")
 
     val withoutUniLit = withLits_without_withLiteral ++ rewrittenIntoLits
