@@ -34,7 +34,7 @@ import leo.modules.output.LPoutput.UnificationEncding.encodePatternUni
 
 object LPoutput {
 
-  val outputSingleFile = true
+  val outputSingleFile = false
 
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
@@ -560,7 +560,7 @@ object LPoutput {
         val axName0 = if (tptpName == "introduced(axiom_of_choice)") "axiom_of_choice" else s"${tptpName.dropRight(1).split(",", 2)(1)}"
         val axName = if (gdv_mode) axName0 else axName0 + s"_p$axCounter"
         val safeAxName = lpEscapeName(axName,sig.orig,false)
-        problemEncSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration(Name(safeAxName),Seq.empty,encClause.asMl),sig,RenderOptions(true,false,monomorphic)))
+        problemEncSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration(Name(safeAxName),Seq.empty,encClause.asMl),sig,RenderOptions(!outputSingleFile,false,monomorphic)))
         identicalSteps += (stepId -> QName.in(Prefix.Formula, safeAxName))
         Out.lp_debug_info(s"linking to axiom $safeAxName (id: $stepId)")
         axCounter = axCounter + 1
