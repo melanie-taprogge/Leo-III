@@ -24,7 +24,7 @@ import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, DefEncoding, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef, TermEncoding, TypeEncoding}
-import leo.modules.output.LPoutput.UnificationEncding.encodePatternUni
+import leo.modules.output.LPoutput.UnificationEncoding.encodePatternUni
 
 /**
   * Generation of the various files making up the Lambdapi encoding
