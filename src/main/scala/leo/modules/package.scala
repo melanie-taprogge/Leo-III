@@ -1,8 +1,9 @@
 package leo
 
-import java.io.{PrintWriter, StringWriter}
+import leo.datastructures.Clause.asTerm
 
-import leo.datastructures._
+import java.io.{PrintWriter, StringWriter}
+import leo.datastructures.{Literal, _}
 import leo.modules.calculus.CalculusRule
 import leo.modules.output.{DataformSZS, Output, StatusSZS, ToTHF}
 import leo.modules.proof_object.CompressProof
@@ -232,6 +233,10 @@ package object modules {
 
   final def symbolsInProof(p: Proof): Set[Signature.Key] = {
     p.flatMap(cl => cl.cl.lits.flatMap(l => l.left.symbols.distinct ++ l.right.symbols.distinct)).toSet
+  }
+
+  final def numbersInProof(p: Proof): Set[Term] = {
+    p.flatMap(cl => cl.cl.lits.flatMap(l => l.left.numbers.distinct ++ l.right.numbers.distinct)).toSet
   }
 
   final def axiomsInProof(p: Proof): Set[ClauseProxy] = {

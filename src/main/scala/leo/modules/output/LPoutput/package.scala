@@ -1,12 +1,14 @@
 package leo.modules.output
 
 import leo.Out
+import leo.datastructures.Signature.Key
 import leo.datastructures.Term.{:::>, TypeLambda, ∙}
 import leo.datastructures.{Clause, Literal, Position, Signature, Subst, Term, Type}
 import leo.modules.HOLSignature._
-import leo.modules.output.LPoutput.Encodings.{term2LP, type2LP}
+import leo.modules.output.LPoutput.OldLpDatastructures.Encodings.{term2LP, type2LP}
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
-import leo.modules.output.LPoutput.lpDatastructures.{PrettyConfig, lpAnd, lpChoice, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpImp, lpInEq, lpLambdaTerm, lpNot, lpOlBinder, lpOlBot, lpOlBoundTerm, lpOlConnective, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlTerm, lpOlTop, lpOlTyVar, lpOlType, lpOlTypedBinaryConnective, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnappliedConnective, lpOlUnaryConnective, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnective, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
+import leo.modules.output.LPoutput.NewLpDatastructures.{LpSig, Prefix, QName}
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures.{PrettyConfig, lpAnd, lpChoice, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpImp, lpInEq, lpLambdaTerm, lpNot, lpOlBinder, lpOlBot, lpOlBoundTerm, lpOlConnective, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlTerm, lpOlTop, lpOlTyVar, lpOlType, lpOlTypedBinaryConnective, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnappliedConnective, lpOlUnaryConnective, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnective, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
 
@@ -33,8 +35,18 @@ package object LPoutput {
     lpConstantTerm(s"step${number}")
   }
 
-  @inline def nameSkDef(sko: Signature.Key, sig: Signature): String = {
-    s"${sig(sko).name}_def"
+  def nameStep_new(number: Long): QName = {
+    QName.local(s"step${number}")
+  }
+
+  def nameDefn(name: Key, sig: LpSig): QName = {
+    val baseName = sig.termNames(name)
+    QName.in(Prefix.Formula,s"${baseName.local.value}_def")
+  }
+
+  @inline def nameSkDef(sko: Signature.Key, sig: Signature): QName = {
+    val baseName = s"${sig(sko).name}_def"
+    QName.local(baseName)
   }
 
   val lambdapiNames = Set(
@@ -175,19 +187,6 @@ package object LPoutput {
     }
   }
 
-  def nestedLorIlApp(lhs: Seq[lpOlTerm], rhs: Seq[lpOlTerm], prfRhs: lpTerm): lpFunctionApp = {
-    // iterativeley construct the proofs for disjunctions of literals based on a proof for the rhs. This is necessary to avoid errors in cases where (a \lor b) \lor (c \lor d ( ...
-    // would otherwise been proven
-    if (lhs.length == 0) throw new Exception("trying to pass empty lhs to nestedLorIlApp")
-    if (lhs.length == 1) NaturalDeductionRules.orIr().instanciate(lhs.head, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, rhs), Some(prfRhs))
-    else {
-      val currentVar = lhs.last
-      val newLhs = lhs.init
-      val newRhs = Seq(currentVar) ++ rhs
-      val newProof = NaturalDeductionRules.orIr().instanciate(currentVar, lpOlUntypedBinaryConnectiveTerm_multi(lpOr, rhs), Some(prfRhs))
-      nestedLorIlApp(newLhs, newRhs, newProof)
-    }
-  }
 
   def clauseRuleQuantification(parent: Clause, bVarMap: Map[Int, String], sig: Signature): (Seq[lpTypedVar], Seq[lpUntypedVar]) = {
     //throw new Exception("CHANGE clauseRuleQuantification")

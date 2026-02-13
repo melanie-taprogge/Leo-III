@@ -1,6 +1,6 @@
 package leo.datastructures.impl
 
-import leo.datastructures.{Term, Literal, Signature}
+import leo.datastructures.{LitNorm, Literal, LiteralInfo, Signature, Term}
 import leo.modules.HOLSignature.{LitFalse, LitTrue}
 
 protected[impl] sealed abstract class LiteralImpl extends Literal {
@@ -33,25 +33,25 @@ object LiteralImpl {
     * t1 will be used as left and t2 as right.
     * Note that the resulting literal is only
     * equational if both terms t1 and t2 and not equivalent to $true/$false. */
-  final def mkOrdered(t1: Term, t2: Term, pol: Boolean)(implicit sig: Signature): Literal = {
+  final def mkOrdered(t1: Term, t2: Term, pol: Boolean)(implicit sig: Signature): (Literal,LiteralInfo) = {
        if (t1 == LitFalse()) {
-      NonEqLiteral(t2, !pol)
+      (NonEqLiteral(t2, !pol), LiteralInfo(false, Some(LitNorm.BotL)))
     } else if (t2 == LitFalse()) {
-      NonEqLiteral(t1, !pol)
+      (NonEqLiteral(t1, !pol), LiteralInfo(false, Some(LitNorm.BotR)))
     } else if (t1 == LitTrue()) {
-      NonEqLiteral(t2, pol)
+      (NonEqLiteral(t2, pol), LiteralInfo(false, Some(LitNorm.TopL)))
     } else if (t2 == LitTrue()) {
-      NonEqLiteral(t1, pol)
+      (NonEqLiteral(t1, pol), LiteralInfo(false, Some(LitNorm.TopR)))
     } else {
       import leo.Configuration.{TERM_ORDERING => ord}
       import leo.datastructures.{CMP_EQ, CMP_GT, CMP_LT}
       val cmpResult = ord.compare(t1,t2)(sig)
       if (cmpResult == CMP_EQ || cmpResult == CMP_GT)
-        EqLiteral(t1,t2,pol,true)
+       (EqLiteral(t1,t2,pol,true), LiteralInfo(false, None))
       else if (cmpResult == CMP_LT)
-        EqLiteral(t2,t1,pol,true)
+        (EqLiteral(t2,t1,pol,true), LiteralInfo(true, None))
       else  /* else not comparable */
-        EqLiteral(t1,t2,pol,false)
+       (EqLiteral(t1,t2,pol,false), LiteralInfo(false, None))
     }
   }
 

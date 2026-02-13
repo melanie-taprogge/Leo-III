@@ -38,7 +38,7 @@ trait TypeEncoder {
 }
 
 /////////////////////////
-// Simple Encoder
+// Simple lpEncoding
 /////////////////////////
 
 protected[encoding] object MonoNativeEncoder extends TypeEncoder {

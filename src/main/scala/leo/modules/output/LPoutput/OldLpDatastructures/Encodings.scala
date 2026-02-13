@@ -1,18 +1,15 @@
-package leo.modules.output.LPoutput
+package leo.modules.output.LPoutput.OldLpDatastructures
 
-import leo.datastructures.Term.{Integer, Rational, Real}
-import leo.datastructures.{Clause, ClauseProxy, Literal, Signature, Term, Type}
-import leo.datastructures.Type._
 import leo.datastructures.Term._
-import leo.modules.HOLSignature
+import leo.datastructures.Type._
+import leo.datastructures._
 import leo.modules.HOLSignature._
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
-import leo.modules.output._
-import leo.modules.output.LPoutput.lpDatastructures._
+import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
+import leo.modules.output.LPoutput.{applyPartiallyAppliedConnective, lpEscapeName, lpEscapeTerm}
 import leo.modules.output.ToTHF.{collectChoice, collectForallTys}
+import leo.modules.output._
 import leo.modules.output.logger.Out
-
-import scala.collection.mutable
 
 ////////////// ENCODING OF TYPES, TERMS, CLAUSES, DEFINITIONS AND PROOF STEPS
 
@@ -137,24 +134,7 @@ object Encodings {
   }
 
 
-  def def2LP(t:Term,sig:Signature,usedSymbols:Set[lpStatement], encAsRewriteRule: Boolean): (lpOlTerm,Set[lpStatement],Seq[(String, Type)])={
-    // Definitions must be handled differently because we want to translate them to rules in LP.
-    // Therefore we need to extract the used variable symbols and proceed them with a "$"
-
-      t match {
-        case _ :::> _ =>
-          // In case of an abstraction the definition defines a function.
-          // todo: other forms of defintion that have to be treated seperateley?
-          val (bVarTys, body) = collectLambdasLP(t)
-          val newBVars = if (encAsRewriteRule) makeDefBVarList(bVarTys, 0) else makeBVarList(bVarTys,0)
-          val (encbody, updatedUsedSymbols0) = term2LP(body, fusebVarListwithMap(newBVars, Map()), sig, usedSymbols)
-          val updatedUsedSymbols = updatedUsedSymbols0
-          (encbody, updatedUsedSymbols, newBVars)
-        case _ => throw new Exception(s"encountered unexpected definition format when trying to encode ${t.pretty} in LP")
-      }
-  }
-
-  final def clauseVars2LP(fvs: Seq[(Int, Type)], sig: Signature, usedSymbols0: Set[lpStatement]): (Seq[lpOlTypedVar], Map[Int, String],Set[lpStatement]) = {
+  final def clauseVars2LP(fvs: Seq[(Int, Type)], sig: Signature, usedSymbols0: Set[lpOlTerm]): (Seq[lpOlTypedVar], Map[Int, String],Set[lpOlTerm]) = {
     val fvCount = fvs.size
     var boundVars: Seq[lpOlTypedVar] = Seq.empty
     var usedSymbols = usedSymbols0
@@ -175,7 +155,7 @@ object Encodings {
     }
     (boundVars, resultBindingMap, usedSymbols)
   }
-  def clause2LP0(cl: Clause, bVarMap: Map[Int, String],sig: Signature, usedSymbols0: Set[lpStatement], prefix: Boolean = true): (lpOlUntypedBinaryConnectiveTerm_multi,Set[lpStatement]) = {
+  def clause2LP0(cl: Clause, bVarMap: Map[Int, String],sig: Signature, usedSymbols0: Set[lpOlTerm], prefix: Boolean = true): (lpOlUntypedBinaryConnectiveTerm_multi,Set[lpOlTerm]) = {
     //val encodedClause = new StringBuilder
     var encodedClause: lpOlUntypedBinaryConnectiveTerm_multi = lpOlUntypedBinaryConnectiveTerm_multi(lpOr,Seq(lpOlNothing))
     var usedSymbols = usedSymbols0
@@ -219,7 +199,7 @@ object Encodings {
     }
 
 
-  final def clause2LP_unquantified(cl: Clause, usedSymbols0: Set[lpStatement], sig: Signature): (Seq[Either[lpOlTypedVar,lpOlTyVar]],lpOlUntypedBinaryConnectiveTerm_multi, Set[lpStatement]) = {
+  final def clause2LP_unquantified(cl: Clause, usedSymbols0: Set[lpOlTerm], sig: Signature): (Seq[Either[lpOlTypedVar,lpOlTyVar]],lpOlUntypedBinaryConnectiveTerm_multi, Set[lpOlTerm]) = {
     val freeVarsExist = cl.implicitlyBound.nonEmpty || cl.typeVars.nonEmpty
     var usedSymbols = usedSymbols0
     if (freeVarsExist) {
@@ -244,12 +224,12 @@ object Encodings {
     }
   }
 
-  final def clause2LP(cl: Clause, usedSymbols0: Set[lpStatement], sig: Signature): (lpClause, Set[lpStatement]) = {
+  final def clause2LP(cl: Clause, usedSymbols0: Set[lpOlTerm], sig: Signature): (lpClause, Set[lpOlTerm]) = {
     val (quantifiedVars,encClause,usedSymbols) = clause2LP_unquantified(cl, usedSymbols0, sig)
     (lpClause(quantifiedVars,encClause.args),usedSymbols)
   }
 
-  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature): (lpOlTerm,Set[lpStatement]) = {
+  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature): (lpOlTerm,Set[lpOlTerm]) = {
     term2LP(t,bVars,sig,Set.empty)
   }
   def var2Lp(boundVars: Seq[(Int, Type)], bVars: Map[Int, String], sig: Signature, prefix: Boolean = true): Seq[lpOlTypedVar] = {
@@ -260,7 +240,7 @@ object Encodings {
     assert(bVars.contains(scope), s"Error in Lambdapi encoding: Trying to encode var of scope $scope that is not in bVars Map ($bVars)")
     (lpOlTypedVar(lpOlConstantTerm(bVars(scope)), encType))
   }
-  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpStatement], supressReduction:Boolean = false, prefix: Boolean = true): (lpOlTerm,Set[lpStatement]) = {
+  def term2LP(t: Term, bVars: Map[Int,String], sig:Signature, usedSymbols:Set[lpOlTerm], supressReduction:Boolean = false, prefix: Boolean = true): (lpOlTerm,Set[lpOlTerm]) = {
     //todo: dont i need the offset? was it an oversight not to use it in term2lp?
 
     // todo: combine cases for encoding binders

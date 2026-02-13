@@ -7,9 +7,10 @@ import leo.datastructures.Term.local._
 import leo.datastructures.{Clause, Literal, Subst, Type, _}
 import leo.modules.HOLSignature.{!===, &, ===, Choice, Exists, Forall, Impl, LitFalse, LitTrue, Not, TyForall, |||}
 import leo.modules.calculus.FullCNF.{FVs, multiply}
-import leo.modules.output.{SZS_EquiSatisfiable, SZS_Theorem, SuccessSZS}
+import leo.modules.output.{SZS_EquiSatisfiable, SZS_Theorem, SuccessSZS, ToTHF}
 
 import scala.annotation.{switch, tailrec}
+import scala.collection.immutable.BitSet
 import scala.collection.mutable
 
 /**
@@ -48,7 +49,7 @@ object DefExpSimp extends CalculusRule {
     while (litsIt.hasNext) {
       val lit = litsIt.next()
       if (lit.equational) {
-        newLits = newLits :+ Simp(Literal.mkOrdered(apply(lit.left), apply(lit.right), lit.polarity)(sig))
+        newLits = newLits :+ Simp(Literal.mkOrdered(apply(lit.left), apply(lit.right), lit.polarity)(sig)._1)
       } else {
         newLits = newLits :+ Simp(Literal(apply(lit.left), lit.polarity))
       }
@@ -517,11 +518,11 @@ object LiftEq extends CalculusRule {
     assert(l.isBetaNormal, s"${l.pretty(sig)} // ${l.toString}")
     assert(r.isBetaNormal, s"${r.pretty(sig)} // ${r.toString}")
     if (lift == POS_LIFT) {
-      Literal.mkOrdered(l,r,polarity)(sig)
+      Literal.mkOrdered(l,r,polarity)(sig)._1
     } else {
       // lift == NEG_LIFT
       Literal.mkOrdered(l,r,!polarity)(sig)
-    }
+    }._1
 
   }
 }
@@ -570,7 +571,7 @@ object ReplaceLeibnizEq extends CalculusRule {
   def apply(cl: Clause, bindings: Map[Int, Term])(implicit sig: Signature): (Clause, Subst) = {
     val gbMap = bindings.view.mapValues(t => Term.mkTermAbs(t.ty, ===(t.substitute(Subst.shift(1)), Term.mkBound(t.ty, 1)))).toMap
     val subst = Subst.fromMap(gbMap)
-    val newLits = cl.lits.map(_.substituteOrdered(subst)(sig))
+    val newLits = cl.lits.map(_.substituteOrdered(subst)(sig)._1)
     (Clause(newLits), subst)
   }
 }
@@ -615,7 +616,7 @@ object ReplaceAndrewsEq extends CalculusRule {
   def apply(cl: Clause, vars: Map[Int, Type])(implicit sig: Signature): (Clause, Subst) = {
     val gbMap = vars.view.mapValues {ty => Term.λ(ty,ty)(===(Term.mkBound(ty,2), Term.mkBound(ty,1)))}.toMap
     val subst = Subst.fromMap(gbMap)
-    val newLits = cl.lits.map(_.substituteOrdered(subst)(sig))
+    val newLits = cl.lits.map(_.substituteOrdered(subst)(sig)._1)
     (Clause(newLits), subst)
   }
 }
@@ -678,7 +679,7 @@ object RewriteSimp extends CalculusRule {
       val rightConfs = confs.getOrElse(Literal.rightSide, Set())
       val newRight = rightConfs.foldLeft(right) {case (curTerm, (pos, replaceBy)) => curTerm.replaceAt(pos, replaceBy)}
 
-      val newLit = Literal.mkOrdered(newLeft, newRight, lit.polarity)(sig)
+      val newLit = Literal.mkOrdered(newLeft, newRight, lit.polarity)(sig)._1
       lits = lits.updated(litIndex, newLit)
     }
 
@@ -750,7 +751,7 @@ object ACSimp extends CalculusRule {
       val rightAC = lit.right.symbols.distinct intersect allACSymbols
       val newRight = if (rightAC.isEmpty) lit.right else apply(lit.right, rightAC)
       if (newLeft == lit.left && newRight == lit.right) lit
-      else Literal.mkOrdered(newLeft, newRight, lit.polarity) // TODO: Orient?
+      else Literal.mkOrdered(newLeft, newRight, lit.polarity) ._1// TODO: Orient?
     } else {
       if (leftAC.isEmpty) lit
       else {
@@ -928,7 +929,7 @@ object Simp extends CalculusRule {
     var curSubst: Subst = Subst.id
     val litIt = lits.iterator
     while (litIt.hasNext) {
-      val lit0 = litIt.next().substituteOrdered(curSubst)
+      val lit0 = litIt.next().substituteOrdered(curSubst)._1
       val lit = apply(lit0)(sig)
 
       if (!Literal.isFalse(lit)) {
@@ -948,7 +949,7 @@ object Simp extends CalculusRule {
       Out.debug(s"It happend!")
       Out.debug(s"Old lits: ${Clause(lits).pretty(sig)}")
       Out.debug(s"Subst: ${curSubst.normalize.pretty}")
-      newLits = newLits.map(l => l.substituteOrdered(curSubst.normalize))
+      newLits = newLits.map(l => l.substituteOrdered(curSubst.normalize)._1)
       Out.debug(s"New lits post: ${Clause(newLits).pretty(sig)}")
     }
 
@@ -1038,61 +1039,93 @@ object Simp extends CalculusRule {
     (Clause(simpLits), addInfo)
   }
 
-  final def detUniInferences(cl: Clause)(implicit sig: Signature): Seq[Clause] = {
-    val (posLits, negLits) = (cl.posLits, cl.negLits)
-    val (processedNegLits,subst) =  detUniInferences0(negLits, Vector(Vector.empty), Subst.id)(sig)
+  final def detUniInferences(cl: Clause)(implicit sig: Signature): Seq[(Clause, AddInfoDetUni)] = {
+    val taggedLits = cl.lits.zipWithIndex.map { case (l, i) => TaggedLit(Orig(i), l) }.toVector
+    val (posLits, negLits) = taggedLits.partition(_.lit.polarity)
+    //val (posLits, negLits) = (cl.posLits, cl.negLits)
+    // val taggedNegLits = negLits.zipWithIndex.map { case (l, i) => TaggedLit(Orig(i), l) }.toVector
+    val init = BranchState(Vector.empty) //val init = BranchState(Vector.empty, BitSet.empty, Vector.empty)
+    val (branches, subst) = detUniInferences0(negLits, Vector(init), Subst.id)(sig)
+    //val (processedNegLits,subst) = detUniInferences0(taggedNegLits, Vector(init), Subst.id)(sig)
+    val processedNegLits = branches
     val normSubst = subst.normalize
-    val substPosLits = posLits.map(_.substituteOrdered(normSubst))
-    val res = processedNegLits.map(nLits => Clause(substPosLits ++ nLits))
-    leo.modules.myAssert(res.forall(Clause.wellTyped),
-      s"Not well typed: ${res.filterNot(Clause.wellTyped).map(_.pretty(sig)).mkString("\n")}"
+    // todo: replace condition with flag
+    val addinfoUnification0 = if (true) ToTHF.apply_andTrack(normSubst, Subst.id, cl.implicitlyBound, cl.typeVars)(sig)._2 else UniSubst()
+    val substPosLits = posLits.map(lit => lit.copy(lit = lit.lit.substituteOrdered(normSubst)._1))
+    val res = processedNegLits.map(nLits => (Clause(substPosLits.map(_.lit) ++ nLits.lits.map(_.lit)), AddInfoDetUni(addinfoUnification0,BranchState(substPosLits ++ nLits.lits,nLits.decomp))))
+    leo.modules.myAssert(res.map(_._1).forall(Clause.wellTyped),
+      s"Not well typed: ${res.map(_._1).filterNot(Clause.wellTyped).map(_.pretty(sig)).mkString("\n")}"
     )
     res
   }
-  private final def detUniInferences0(literals: Seq[Literal], acc: Seq[Seq[Literal]], partialSubst: TermSubst)(sig: Signature): (Seq[Seq[Literal]], TermSubst) = {
-    leo.modules.myAssert(acc.forall(_.forall(Literal.wellTyped)),
-      s"Not well typed: ${acc.filterNot(_.forall(Literal.wellTyped)).map(_.map(_.pretty(sig)).mkString(",")).mkString("\n")}"
+  private final def detUniInferences0(literals: Seq[TaggedLit], acc: Vector[BranchState], partialSubst: TermSubst)(sig: Signature): (Seq[BranchState], TermSubst) = {
+    leo.modules.myAssert(acc.forall(_.lits.map(_.lit).forall(Literal.wellTyped)),
+      s"Not well typed: ${acc.filterNot(_.lits.map(_.lit).forall(Literal.wellTyped)).map(_.lits.map(_.lit.pretty(sig)).mkString(",")).mkString("\n")}"
     )
     if (literals.isEmpty) (acc,partialSubst)
     else {
       val hd = literals.head
-      val left = hd.left; val right = hd.right
+      val left = hd.lit.left; val right = hd.lit.right
       val (leftBody, leftAbstractions) = collectLambdas(left)
       val (rightBody, rightAbstractions) = collectLambdas(right)
       assert(leftAbstractions == rightAbstractions, s"Abstraction count does not match:\n\t${left.pretty(sig)}\n\t${right.pretty(sig)}")
       val canApplyDelete = HuetsPreUnification.DeleteRule.canApply((leftBody, rightBody))
       if (canApplyDelete) {
-        leo.Out.finest(s"[UniLitSimp] Can apply Delete on ${hd.pretty(sig)}")
+        leo.Out.finest(s"[UniLitSimp] Can apply Delete on ${hd.lit.pretty(sig)}")
+//        val delId = hd.originId match {
+//          case Orig(idx) => idx
+//          case DecompOf(idx, _) => idx // fallback, should be unreachable
+//        }
+        //val newAcc = acc.map(a => a.copy(deleted = a.deleted + delId))
         detUniInferences0(literals.tail, acc, partialSubst)(sig)
       } else {
         val canApplyBind = HuetsPreUnification.BindRule.canApply(leftBody, rightBody, leftAbstractions.size)
         if (canApplyBind != HuetsPreUnification.BindRule.CANNOT_APPLY) {
-          leo.Out.finest(s"[UniLitSimp] Can apply Bind on ${hd.pretty(sig)}")
+          leo.Out.finest(s"[UniLitSimp] Can apply Bind on ${hd.lit.pretty(sig)}")
           val subst = HuetsPreUnification.BindRule.apply((left, right), leftAbstractions.size, canApplyBind)
           leo.Out.finest(s"[UniLitSimp] Bind subst: ${subst.pretty}")
           val newPartialSubst = partialSubst.comp(subst)
-          detUniInferences0(literals.tail.map(_.substituteOrdered(subst)(sig)), acc.map(lits => lits.map(_.substituteOrdered(subst)(sig))), newPartialSubst)(sig)
+          val newTail = literals.tail.map(tl => tl.copy(lit = tl.lit.substituteOrdered(subst)(sig)._1))
+          // todo: but we do not delete literals that become trivially false now, do we?
+//          val delId = hd.originId match {
+//            case Orig(idx) => idx
+//            case DecompOf(idx, _) => idx // fallback, should be unreachable
+//          }
+          //val newAcc = acc.map(a => a.copy(lits = a.lits.map(tl => tl.copy(lit = tl.lit.substituteOrdered(subst)(sig)._1)), deleted = a.deleted + delId))
+          val newAcc = acc.map(a => a.copy(lits = a.lits.map(tl => tl.copy(lit = tl.lit.substituteOrdered(subst)(sig)._1))))
+          detUniInferences0(newTail, newAcc, newPartialSubst)(sig)
         } else {
           val canApplyDecomp = HuetsPreUnification.DecompRule.canApply((leftBody, rightBody), leftAbstractions.size)
-          if (canApplyDecomp._1) {
-            leo.Out.finest(s"[UniLitSimp] Can apply Decomp on ${hd.pretty(sig)}")
+          if (canApplyDecomp._1 && canApplyDecomp._3.isDefined) {
+            leo.Out.finest(s"[UniLitSimp] Can apply Decomp on ${hd.lit.pretty(sig)}")
             if (canApplyDecomp._2.isDefined) {
               val tySubst = canApplyDecomp._2.get
               if (tySubst == Subst.id) {
                 // not need to apply tySubst
                 val newEqs = HuetsPreUnification.DecompRule((leftBody, rightBody), leftAbstractions)
-                val newLits = newEqs.map {case (l,r) => Literal.mkNegOrdered(l,r)(sig)}
-                detUniInferences0(literals.tail, acc.map(lits => lits :+ hd) ++ acc.map(lits => lits ++ newLits), partialSubst)(sig)
+                val hdId = hd.originId match {
+                  case Orig(idx) => idx
+                  case DecompOf(idx, _) => idx // fallback, should be unreachable
+                }
+                val newLits = newEqs.zipWithIndex.map {case ((l,r), idx) =>
+                  val newId =  DecompOf(hdId,idx) // fallback, should be unreachable
+                  val newLit = Literal.mkNegOrdered(l,r)(sig)
+                  (TaggedLit(newId,newLit._1),newLit._2)
+                }
+
+                val branchKeepHd = acc.map(a => a.copy(lits = a.lits :+ hd))
+                val branchAddEqs = acc.map(a => a.copy(lits = a.lits ++ newLits.map(_._1), decomp = a.decomp :+ DecompInfo(hdId,canApplyDecomp._3.get,newLits.map(_._2))))
+                detUniInferences0(literals.tail, branchKeepHd ++ branchAddEqs, partialSubst)(sig)
               } else {
-                detUniInferences0(literals.tail, acc.map(lits => lits :+ hd), partialSubst)(sig)
+                detUniInferences0(literals.tail, acc.map(a => a.copy(lits = a.lits :+ hd)), partialSubst)(sig)
                 // TODO
               }
             } else {
               leo.Out.finest(s"[UniLitSimp] Could apply Decomp but typed are non-unifiable")
-              detUniInferences0(literals.tail, acc.map(lits => lits :+ hd), partialSubst)(sig)
+              detUniInferences0(literals.tail, acc.map(a => a.copy(lits = a.lits :+ hd)), partialSubst)(sig)
             }
           } else {
-            detUniInferences0(literals.tail, acc.map(lits => lits :+ hd), partialSubst)(sig)
+            detUniInferences0(literals.tail, acc.map(a => a.copy(lits = a.lits :+ hd)), partialSubst)(sig)
           }
         }
       }
@@ -1102,7 +1135,7 @@ object Simp extends CalculusRule {
   final def uniLitSimp(l: Seq[Literal])(implicit sig: Signature): (TypeSubst, Seq[Literal]) = {
     leo.modules.myAssert(l.forall(a => !a.polarity))
     val (subst, simpRes) = uniLitSimp0(Vector.empty, l.map(lit => (lit.left, lit.right)).toVector, Subst.id)(sig)
-    val simpResAsLits = simpRes.map(eq => Literal.mkNegOrdered(eq._1, eq._2)(sig))
+    val simpResAsLits = simpRes.map(eq => Literal.mkNegOrdered(eq._1, eq._2)(sig)._1)
     (subst, simpResAsLits)
   }
   /** Given a unification literal `l` where `l = [a,b]^f`
@@ -1112,12 +1145,12 @@ object Simp extends CalculusRule {
   final def uniLitSimp(l: Literal)(implicit sig: Signature): (TypeSubst, Seq[Literal]) = {
     assert(!l.polarity)
     val (subst, simpRes) = uniLitSimp0(Vector.empty, Vector((l.left, l.right)), Subst.id)(sig)
-    val simpResAsLits = simpRes.map(eq => Literal.mkNegOrdered(eq._1, eq._2)(sig))
+    val simpResAsLits = simpRes.map(eq => Literal.mkNegOrdered(eq._1, eq._2)(sig)._1)
     (subst, simpResAsLits)
   }
   final def uniLitSimp(left: Term, right: Term)(implicit sig: Signature): (TypeSubst, Seq[Literal]) = {
     val (subst, simpRes) = uniLitSimp0(Vector.empty, Vector((left, right)), Subst.id)(sig)
-    val simpResAsLits = simpRes.map(eq => Literal.mkNegOrdered(eq._1, eq._2)(sig))
+    val simpResAsLits = simpRes.map(eq => Literal.mkNegOrdered(eq._1, eq._2)(sig)._1)
     (subst, simpResAsLits)
   }
 

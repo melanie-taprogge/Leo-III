@@ -28,11 +28,11 @@ object HOLSignature {
   ////////////////////
   // Systematic enumeration f signature symbols for easier changes later on
   ////////////////////
-  private final val oKey = 1
-  private final val iKey = 2
-  private final val realKey = 3
-  private final val ratKey = 4
-  private final val intKey = 5
+  final val oKey = 1
+  final val iKey = 2
+  final val realKey = 3
+  final val ratKey = 4
+  final val intKey = 5
   private final val trueKey = 6
   private final val falseKey = trueKey + 1
   private final val notKey = falseKey + 1

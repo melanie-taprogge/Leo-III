@@ -1,6 +1,6 @@
-package leo.modules.output.LPoutput
+package leo.modules.output.LPoutput.OldLpDatastructures
 
-import leo.datastructures.{Int0, termArgs}
+import leo.datastructures.Int0
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
 
 /**
@@ -22,9 +22,9 @@ object lpDatastructures {
     def pretty (implicit prefix : PrettyConfig = PrettyConfig(false,false)): String
   }
 
-  abstract class lpKeyword extends lpStatement
+  abstract class lpModifier extends lpStatement
 
-  case object lpOpaque extends lpKeyword {
+  case object lpOpaque extends lpModifier {
     override def pretty (implicit prefix : PrettyConfig): String = "opaque"
   }
 
@@ -72,7 +72,7 @@ object lpDatastructures {
     }
   }
 
-  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], maybeTyping: Option[lpMlType], proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier: Seq[lpKeyword]= Seq.empty) extends lpStatement {
+  case class lpDefinition(name: lpConstantTerm, variables: Seq[lpTerm], maybeTyping: Option[lpMlType], proof: lpStatement, implicitArgs: Seq[lpTerm]= Seq.empty, modifier: Seq[lpModifier]= Seq.empty) extends lpStatement {
     override def pretty (implicit prefix : PrettyConfig): String = {
 
       val proofEnc = proof match {
@@ -120,11 +120,17 @@ object lpDatastructures {
 
   }
 
-  abstract class lpSimpRuleVersion extends lpStatement {
-    def term: lpTerm
-    def rwLeft: Boolean
+  abstract class lpNameRef extends lpStatement {
 
-    override def pretty (implicit prefix : PrettyConfig): String = term.pretty
+    def name: lpConstantTerm
+
+    override def pretty(implicit prefix : PrettyConfig) = name.pretty
+
+  }
+
+  abstract class lpSimpRuleVersion extends lpStatement {
+    def name: lpTerm
+    override def pretty (implicit prefix : PrettyConfig): String = name.pretty
   }
 
 
@@ -403,6 +409,8 @@ object lpDatastructures {
   case object lpIntType extends lpOlMonoType {
     val baseName = "tptp_int"
     override def pretty (implicit prefix : PrettyConfig): String = if (prefix.sigPrefix) s"${abbreviationSignatureFile}$baseName" else baseName
+    //override def pretty (implicit prefix : PrettyConfig): String =  s"${abbreviationSignatureFile}$baseName"
+
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpIntType)
     override def lift2Meta: lpMlType = lpliftedObjectType(lpIntType)
   }
@@ -770,7 +778,7 @@ object lpDatastructures {
 
     def toProofScrips : lpProofScript
 
-    private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig) : String
+    private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig) : String
 
   }
 
@@ -782,7 +790,7 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = throw new Exception(s"Error: trying to convert the single comment `$comment` to a proof script")
 
     override def pretty (implicit prefix : PrettyConfig): String = s"$tabs// $comment"
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{// $comment"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"$tabs{// $comment"
   }
 
   case class lpProofScriptStringProof(proof: String, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
@@ -795,7 +803,7 @@ object lpDatastructures {
 
     override def pretty (implicit prefix : PrettyConfig): String = s"$tabs$proof"
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{$proof"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"$tabs{$proof"
   }
 
   case class lpProofScriptAdmit(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
@@ -808,7 +816,7 @@ object lpDatastructures {
 
     override def pretty (implicit prefix : PrettyConfig): String = s"${tabs}admit"
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{admit"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"$tabs{admit"
   }
 
   case class lpSimplify(symbolsToUnfold: Set[lpConstantTerm], tab: Int = 0)  extends lpProofScriptStep(tab: Int) {
@@ -831,7 +839,7 @@ object lpDatastructures {
       s"${steps.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
     }
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = {
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = {
       if (steps.length == 1) s"${steps.head.addTab(tab).openCurlyBracket}"
       else if (steps.length == 0) "there shoudl be nothing here" //throw new Exception(s"trying to give curly brackets to empty list")
       else s"${steps.head.addTab(tab).openCurlyBracket};\n${steps.tail.map(step => s"${step.addTab(tab).pretty}").mkString(";\n")}"
@@ -857,7 +865,7 @@ object lpDatastructures {
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = {
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = {
       // s"$tabs{${lpRefine(t).pretty}" (old version)
       // s"${tabs}{have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}" (haveStep for reference)
       s"${tabs}{refine ${t.pretty}${subproofs.map(prf => s"\n${prf.addTab(tab+1).prettyCurlyBrackets}").mkString("")}"
@@ -876,7 +884,7 @@ object lpDatastructures {
     }
 
     val tabs = "\t" * tab
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}" //s"$tabs{${lpHave(name,ty, proofScript).pretty}"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"${tabs}{have $name : ${ty.pretty}\n${proofScript.addTab(tab + 1).prettyCurlyBrackets}" //s"$tabs{${lpHave(name,ty, proofScript).pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpHave(name,ty, proofScript, tab)))
   }
@@ -892,7 +900,7 @@ object lpDatastructures {
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{eval ${tacticTerm.pretty}"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"${tabs}{eval ${tacticTerm.pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm, tab)))
   }
@@ -940,7 +948,7 @@ object lpDatastructures {
     }
 
     val tabs = "\t" * tab
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm, rwRhs).pretty}"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm, rwRhs).pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab)))
   }
@@ -953,7 +961,7 @@ object lpDatastructures {
     }
 
     val tabs = "\t" * tab
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{${lpReflexivity()}"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"$tabs{${lpReflexivity()}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpReflexivity(tab)))
   }
@@ -976,7 +984,7 @@ object lpDatastructures {
       s"${tabs}assume ${vars.map(var0 => var0.pretty).mkString(" ")}"
     }
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{${lpAssume(vars).pretty}"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"$tabs{${lpAssume(vars).pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpAssume(vars, tab)))
   }
@@ -994,7 +1002,7 @@ object lpDatastructures {
       s"${tabs}${lpSetTac(name, dfn, tab).pretty0}"
     }
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{${lpSetTac(name, dfn, tab).pretty0}"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"${tabs}{${lpSetTac(name, dfn, tab).pretty0}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpSetTac(name, dfn, tab)))
   }
@@ -1009,7 +1017,7 @@ object lpDatastructures {
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"${tabs}{simplify"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"${tabs}{simplify"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpTacSimplify(tab)))
   }
@@ -1036,7 +1044,7 @@ object lpDatastructures {
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket (implicit prefix : PrettyConfig): String = s"$tabs{repeat ${stepToRepeat.pretty}"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"$tabs{repeat ${stepToRepeat.pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRepeat(stepToRepeat, tab)))
   }

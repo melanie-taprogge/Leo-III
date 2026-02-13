@@ -100,11 +100,13 @@ trait GeneralState[T <: ClauseProxy] extends Pretty with StateStatistics {
 
   def renamingCash : mutable.Map[Term, (Term, Boolean, Boolean)]
   def resetCash() : Unit
+
+  def needsTrackAddInfo: Boolean
 }
 
 object GeneralState {
-  def fresh[T <: ClauseProxy](sig : Signature) : GeneralState[T] = new GeneralStateImp[T](sig)
-  def fresh[T <: ClauseProxy](sig : Signature, strategy : RunStrategy) : GeneralState[T] = {
+  def freshk[T <: ClauseProxy](sig : Signature) : GeneralState[T] = new GeneralStateImp[T](sig)
+  def freshk[T <: ClauseProxy](sig : Signature, strategy : RunStrategy) : GeneralState[T] = {
     val s = new GeneralStateImp[T](sig)
     s.setRunStrategy(strategy)
     s
@@ -121,6 +123,7 @@ protected[modules] class GeneralStateImp[T <: ClauseProxy](sig : Signature) exte
   protected var current_externalProvers: Set[TPTPProver[T]] = Set()
   protected var initialProblem0: Set[T] = Set()
   protected var poly: Boolean = false
+  protected var trackAddInfo: Boolean = false
   protected var derivationCl: Option[T] = None
   protected var choiceFunctions0: Map[Type, Set[Term]] = Map()
   protected var timeout0: Int = _
@@ -185,6 +188,8 @@ protected[modules] class GeneralStateImp[T <: ClauseProxy](sig : Signature) exte
 
   final def isPolymorphic: Boolean = poly
   final def setPolymorphic(): Unit = {poly = true}
+
+  final def needsTrackAddInfo: Boolean = trackAddInfo
 
   final def szsStatus: StatusSZS = current_szs
   final def setSZSStatus(szs: StatusSZS): Unit =  {current_szs = szs}

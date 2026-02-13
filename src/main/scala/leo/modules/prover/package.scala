@@ -341,10 +341,12 @@ package object prover {
         assert(FlexFlexUni.canApply(effectiveEmptyClause))
         val (solvedFlexFlexClause0, subst) = FlexFlexUni.apply(effectiveEmptyClause)
         val substAsOutput: Output = ToTHF(subst, Subst.id, effectiveEmptyClause.implicitlyBound, effectiveEmptyClause.typeVars)(state.signature)
+        Out.lp_debug_info(s"substitution \noriginal: ${subst}\n pretty: $substAsOutput")
         val solvedFlexFlexClause = AnnotatedClause(solvedFlexFlexClause0, InferredFrom(FlexFlexUni, Seq((emptyClause, substAsOutput))), ClauseAnnotation.PropNoProp)
         val simplifiedClause = Control.simp(solvedFlexFlexClause)(state)
         simplifiedClause
       }
+      Out.lp_debug_info(s"eff. empty clause empty now? ${Clause.empty(derivationClause.cl)}")
       state.setDerivationClause(derivationClause)
       val proof = proofOf(derivationClause)
       state.setProof(proof)

@@ -331,6 +331,14 @@ object Configuration extends DefaultConfiguration {
     path
   }
 
+  lazy val TRACK_LP: Boolean = {
+    LPOUTPUTPATH match {
+      case None => false
+      case Some(_) => true
+    }
+  }
+
+
   /*
   val v = configMap.get(PARAM_VERBOSITY) match {
     case None => DEFAULT_VERBOSITY
