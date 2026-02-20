@@ -15,6 +15,7 @@ object EqRules {
     private val orBot = "∨⊥"
     private val eqTop = "=⊤"
     private val eqBot = "=⊥"
+    private val negEqBot = "=⊥'"
 
 
     // Standard Library Theorems of Equality
@@ -26,6 +27,7 @@ object EqRules {
     private[EqRules] val orBot_S: SymRef = SymRef.LP(QName.local(orBot))
     private[EqRules] val eqTop_S: SymRef = SymRef.LP(QName.local(eqTop))
     private[EqRules] val eqBot_S: SymRef = SymRef.LP(QName.local(eqBot))
+    private[EqRules] val negEqBot_S: SymRef = SymRef.LP(QName.local(negEqBot))
 
     private[EqRules] val eqImp_S: SymRef = SymRef.LP(QName.local(eqImpS))
 
@@ -38,6 +40,7 @@ object EqRules {
     def lpSimp_orBot[L <: Level] = LpTerm.Const[L](orBot_S)
     def lpSimp_eqTop[L <: Level] = LpTerm.Const[L](eqTop_S)
     def lpSimp_eqBot[L <: Level] = LpTerm.Const[L](eqBot_S)
+    def lpSimp_negEqBot[L <: Level] = LpTerm.Const[L](negEqBot_S)
     def eqImp[L <: Level] = LpTerm.Const[L](eqImp_S)
 
   }

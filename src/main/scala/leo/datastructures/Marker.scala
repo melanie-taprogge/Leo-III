@@ -229,6 +229,10 @@ object LitNorm {
   case object BotL extends LitNorm;
 
   case object BotR extends LitNorm
+
+  case object NegBotL extends LitNorm;
+
+  case object NegBotR extends LitNorm
 }
 
 case class UniLitInfo(position: Int,

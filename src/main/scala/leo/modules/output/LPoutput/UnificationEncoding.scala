@@ -5,6 +5,7 @@ import leo.datastructures.Clause.{effectivelyEmpty, vars}
 import leo.datastructures.Type.{ComposedType, ProductType, ∀}
 import leo.datastructures._
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
+import leo.modules.output.LPoutput.ImplicitTransformationUtil.{LiteralInfo2LiteralTransforamtion, verifySubstitutionLiteralNormalisazion}
 import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms._
 import leo.modules.output.LPoutput.LpLibs.FunRules.AsTerms.{DecompSingleResult, DecompStepRes, mkDecompSingleObj, mkDecompStepObj}
 import leo.modules.output.LPoutput.LpLibs.LeoTactics.EvalApp.removeBot
@@ -127,7 +128,7 @@ object UnificationEncoding {
     val UniCtx(termSubst, typeSubst, deletedUniLits, litTransf) = initUniCtxt(child)
 
     // construct the parent post-substitution (but prior to the deletion of the literals) and a mapping of the child literal indices to the ones in this parent
-    val (encSubstParent, old2NewIdx): (LpTerm[Level.Obj], Map[Int, Int]) = reconstructSubstUniParent(deletedUniLits, encChild, childVarMap)
+    val (encSubstParent, old2NewIdx) = reconstructSubstUniParent(deletedUniLits, encChild, childVarMap)
 
 
     ////////////////////////////
@@ -198,48 +199,6 @@ object UnificationEncoding {
     }
   }
 
-  // generate the rewrite rules necessary to verify normalisazion by reverse-engineering
-  // goalLits = child.cl.lits
-  private def verifyLiteralNormalisazion(addInfo: LiteralTransformation, old2NewIdx: Map[Int, Int], goalLits: Seq[Literal], clauseLen: Int) = {
-
-    def generatePatternInfo(id: Int) = PatternBuilder.PatternInfo(old2NewIdx.getOrElse(id, id), None, goalLits(id).polarity)
-
-    var newFlipSteps: Seq[Int] = Seq.empty
-    val maybeNormalizeSteps: Seq[Rewrite] = if (addInfo.normalizedEq.nonEmpty) {
-      Out.lp_debug_info(s"need to normalize: ${addInfo.normalizedEq}")
-      addInfo.normalizedEq.map { pair =>
-        val (pos, normMode) = pair
-        val rule: LpTerm[Level.Meta] = normMode match {
-          case LitNorm.TopL => newFlipSteps = newFlipSteps :+ pos; lpSimp_eqTop
-          case LitNorm.TopR => lpSimp_eqTop
-          case LitNorm.BotL => newFlipSteps = newFlipSteps :+ pos; lpSimp_eqBot
-          case LitNorm.BotR => lpSimp_eqBot
-        }
-        val patternInfo = generatePatternInfo(pos)
-        val pattern = PatternBuilder.generateClausePattern(Seq(patternInfo), clauseLen)
-        Rewrite(Some(pattern),rule,Side.Left)
-      }
-    } else Seq.empty
-
-    // sanity check: we ony need to flip literals that are equational and we only need to rewrite literals to an euational form if they are non-equational. Therefore, there can never be an overlap between the two
-    assert(addInfo.flippedLits.intersect(newFlipSteps).isEmpty, s"Error in Lambdapi Encoding: Trying to verify literal-normalisazion, but found contradicroty input (${addInfo.flippedLits.intersect(newFlipSteps)})")
-
-    val allFlipSteps = (addInfo.flippedLits ++ newFlipSteps).sorted
-
-    val maybeFlipStep: Seq[Rewrite] = if (allFlipSteps.nonEmpty) {
-      Out.lp_debug_info(s"the following literals need to be flipped: $allFlipSteps") //todo: kann es sein, dass auch das abgespeicherte uni lit geflippt wurde? in dem fall muss ich die Operation umkehren
-      // the indices refer to the positions of the literals in the child, as we re-inserted the uni Lits, we may need to shift them
-      val flipInfo = allFlipSteps.map(generatePatternInfo)
-      val flipPattern = PatternBuilder.generateClausePattern(flipInfo, clauseLen)
-
-      Seq(Rewrite(Some(flipPattern), eqSym))
-    } else Seq.empty
-
-    maybeNormalizeSteps ++ maybeFlipStep
-  }
-  
-  // general mode of encoding: apply substitution, show that unification literal is now trivially false, remove it
-
   private final case class UniCtx(termSubst: Seq[UniTermSubst], typeSubst: Seq[UniTypeSubst], deletedUniLits: Seq[UniLitInfo], litTransf: LiteralTransformation)
 
   private def initUniCtxt(child:ClauseProxy)={
@@ -282,10 +241,10 @@ object UnificationEncoding {
       }.toMap
     }
 
-    (nAry.disjunction(newLits), old2NewIdx)
+    (newLits, old2NewIdx)
   }
 
-  private def constructSubstStep(parentVars: Seq[(Int, Type)], childVars: Seq[(Int, Type)], termToApply: Map[Int, Arg[Level.Obj]], maybeFlipStep: Seq[Rewrite], sharedVarMap: Map[Int, String], parentNameLpEnc: LpTerm[Level.Obj]): Refine = {
+  private def constructSubstStep(parentVars: Seq[(Int, Type)], childVars: Seq[(Int, Type)], termToApply: Map[Int, Arg[Level.Obj]], sharedVarMap: Map[Int, String], parentNameLpEnc: LpTerm[Level.Obj]): Refine = {
     assert(termToApply.nonEmpty)
     // todo: should i not instead test for the non-emptiness of parent.cl.implicitlyBound ?
 
@@ -302,7 +261,9 @@ object UnificationEncoding {
     Refine(Obj(appliedParentName))
   }
 
-  private def encodeSubstitutionSubstep(ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, old2NewIdx: Map[Int, Int], childVarNames: Seq[Name], encSubstParent: LpTerm[Level.Obj], childCl: Clause, parentImpB : Seq[(Int, Type)]):(LpTerm[Level.Obj], Seq[Have]) = {
+  // prove the parent after the substitution and the normalisazion of non-uf literals as a result of the substitution,
+  // but prior to the deletion of the now trivially false unification constraints produce a have step proving this
+  private def encodeSubstitutionSubstep(ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, old2NewIdx: Map[Int, Int], childVarNames: Seq[Name], encSubstParent: Seq[LpTerm[Level.Obj]], childCl: Clause, parentImpB : Seq[(Int, Type)]):(LpTerm[Level.Obj], Seq[Have]) = {
     // based on the additional information, construct the terms in the lambdapi encoidng that need to be applied to the parent to verify the substitution
     // this is a mapping of the id of the free variable to the encoded term that it is instanciated with
     val termToApply: Map[Int, Arg[Level.Obj]] =
@@ -318,22 +279,23 @@ object UnificationEncoding {
     if (termToApply.nonEmpty) {
       // todo: should i not instead test for the non-emptiness of parent.cl.implicitlyBound ?
 
-      // detect potential flipping of literals that may be necessary in this step
-      val maybeFlipStep: Seq[Rewrite] = verifyLiteralNormalisazion(litTransf, old2NewIdx, childCl.lits, ctxt.substClauseLen)
+      // detect potential flipping or normalisazion of literals that may be necessary in this step
+      val idxFun = old2NewIdx.withDefault(identity)
+      val maybeFlipStep: Seq[Rewrite] = verifySubstitutionLiteralNormalisazion(litTransf, childCl.lits, ctxt.substClauseLen, idxFun)
       // construct the refine step carrying out the substitution
-      val refineStep = constructSubstStep(parentImpB, childCl.implicitlyBound, termToApply, maybeFlipStep, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
+      val refineStep = constructSubstStep(parentImpB, childCl.implicitlyBound, termToApply, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
 
       // have substitution step
       val nameSubst = Name("Subst") // todo: add to names to keep safe, maybe make them parameters of the class
-      val haveSubstStep = Have(nameSubst, Prf(encSubstParent), (maybeFlipStep :+ refineStep).map(Left(_)))
+      val haveSubstStep = Have(nameSubst, Prf(nAry.disjunction(encSubstParent)), (maybeFlipStep :+ refineStep).map(Left(_)))
 
       (Const[Level.Obj](SymRef.LP(QName.local(nameSubst.value))), Seq(haveSubstStep))
 
     } else (LpTerm.App(ctxt.parentNameLpEnc, childVarNames.map(varName => Arg.Explicit(LpTerm.Var(varName, None)))), Seq.empty)
   }
 
-  private def constructRemoveStep(nameHaveRemoveStep: Name, encSubstParent: LpTerm[Level.Obj], encChildLits: Seq[LpTerm[Level.Obj]], deletedUniLits: Seq[UniLitInfo],  substClauseLen: Int, childCl: Clause) = {
-    val impToProve = Prf(LogicConst.Eq(HolBaseTypes.O, encSubstParent, nAry.disjunction(encChildLits)))
+  private def constructRemoveStep(nameHaveRemoveStep: Name, encSubstParent: Seq[LpTerm[Level.Obj]], encChildLits: Seq[LpTerm[Level.Obj]], deletedUniLits: Seq[UniLitInfo],  substClauseLen: Int, childCl: Clause) = {
+    val impToProve = Prf(LogicConst.Eq(HolBaseTypes.O, nAry.disjunction(encSubstParent), nAry.disjunction(encChildLits)))
     val proofScript: Seq[LpProofScript] = deletedUniLits.map(litInfo => {
       Out.lp_debug_info(s"orig pos is ${litInfo.position}")
       val posInSubs = litInfo.position
@@ -492,7 +454,7 @@ object DetUniSimpEncoding {
 
     ////////////////////////////
     // 4) Decomposition subproof (optional)
-    val decompStage: DetUniStage = verifyDecomp(decompInfo, deleteStage) match {
+    val decompStage: DetUniStage = verifyDecomp(decompInfo, deleteStage, child.cl.lits) match {
       case StageResult.Ok(stage) => stage
       case StageResult.Fail(reason) => return NotEncodable(reason)
     }
@@ -577,18 +539,16 @@ object DetUniSimpEncoding {
     * Preconditions / Encoding Invariants:
     *   - The decomposed literal must have the shape ¬(f(args…) = f(args…))
     */
-  private def verifyDecomp(decompInfo: Vector[DecompInfo], currentStage: DetUniStage): StageResult = {
+  private def verifyDecomp(decompInfo: Vector[DecompInfo], currentStage: DetUniStage, goalLits: Seq[Literal]): StageResult = {
     if (decompInfo.length > 1) return StageResult.Fail("DetUniSimp: Decomp on mulitple literals!")
-    //val impTransf = decompInfo.flatMap(_.LitTransf.map(_.flip)).contains(true) || decompInfo.flatMap(_.LitTransf.map(_.normalize.isDefined)).contains(true)
-    val impTransf = decompInfo.exists(_.LitTransf.exists(t => t.flip || t.normalize.isDefined))
-    if (impTransf) return StageResult.Fail("DetUniSimp: implicit transformation in decomposition")
 
     // go over the individual tracked decompositions and apply the necessary steps to encode them
-    val scriptsRes: StageResult = decompInfo.foldLeft[Either[String, Vector[LpProofScript]]](Right(Vector.empty)) {
+    // todo: maybe encforce computation in the order of the literals in the current goal by sorting according to DecompInfo.idx modulo mapping
+    val scriptsRes: StageResult = decompInfo.foldLeft[Either[String, (Vector[LpProofScript],Int)]](Right(Vector.empty, 0)) {
       // if the accumulator already inlcudes an error, abort
       case (Left(err), _) => Left(err)
       // else, continue
-      case (Right(acc), mapping) =>
+      case (Right((acc,alreadyAddedLitCount)), mapping) =>
         val idxInParent = mapping.OrigIdx
 
         if (!currentStage.clauseLits.isDefinedAt(idxInParent))
@@ -598,7 +558,8 @@ object DetUniSimpEncoding {
           Out.lp_debug_info(s"handling literal at pos $idxInParent: $litInParent")
 
           // generate the new proof steps necessary to encode the given decomposition
-          val newScriptsE: Either[String, Vector[LpProofScript]] = litInParent match {
+          val newScriptsE_numAddedSteps: Either[String, (Vector[LpProofScript], Int)] = litInParent match {
+            // expected case: Equation enclosed by negation
             case LogicConst.Not(LogicConst.Eq(_, LpTerm.App(f0, args0), LpTerm.App(f1, args1))) if f0 == f1 =>
               // ensure that the number of arguemtns is appropriate
               val n = args0.length
@@ -619,10 +580,13 @@ object DetUniSimpEncoding {
                           case (Left(NotEncodable(r)), _) => Left(r)
                           case (_, Left(NotEncodable(r))) => Left(r)
                           case (Right(lhsArgs), Right(rhsArgs)) =>
-                            val instanciatedRules =
-                              stepwiseInstDecompRule(f0, lhsArgs, rhsArgs, fullTypeSpine, currentStage.clauseLits, idxInParent)
+                            val instanciatedRules = stepwiseInstDecompRule(f0, lhsArgs, rhsArgs, fullTypeSpine, currentStage.clauseLits, idxInParent)
                             // reverse application of the rule makes up the proof script
-                            Right(instanciatedRules.reverse.map(transfRule => Refine(Obj(transfRule))))
+                            val decompSteps = instanciatedRules.reverse.map(transfRule => Refine(Obj(transfRule)))
+                            
+                            val verifyInitialTransformationSteps = decompLitNormalisazion(mapping,alreadyAddedLitCount,goalLits)
+
+                            Right(verifyInitialTransformationSteps ++ decompSteps, n)
                         }
                     }
                   }
@@ -634,11 +598,11 @@ object DetUniSimpEncoding {
 
             case _ => Left(s"Error in encoding of DetUniSimp: trying to encode decomp, could not match")
           }
-          newScriptsE.map(acc ++ _)
+          (newScriptsE_numAddedSteps.map(pair => (acc ++ pair._1, alreadyAddedLitCount + pair._2)))
         }
     } match {
       case Left(err) => StageResult.Fail(err)
-      case Right(scripts) => StageResult.Ok(currentStage.add(Comment("Verification of Decomp steps") +: scripts))
+      case Right(scripts) => StageResult.Ok(currentStage.add(Comment("Verification of Decomp steps") +: scripts._1))
     }
     scriptsRes
   }
@@ -725,6 +689,42 @@ object DetUniSimpEncoding {
       val res = DecompStepRes(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun)
 
       transform_n(l, c0, c2, Seq(res._1, res._2), instRule, Wildcard[Level.Obj]()) +: stepwiseInstDecompRule(hd, lLeadingArgs, rLeadingArgs, typeEls, c0 ++ Seq(res._1, res._2) ++ c2, curPos) // idx does not change because the hd stays on the lhs
+    }
+  }
+
+  /**
+    * decompLitNormalisazion — Generate rewrite steps for implicit transformations invoked by  Decomp
+    *
+    * During decomposition, Leo may implicitly:
+    * • Flip equational literals
+    * • Normalise equalities (polarity adjustments/ changing equalities with $false or $true to non-eq literals)
+    *
+    * decompLitNormalisazion constructs the clause-level rewrite rules required to justify these implicit
+    * literal transformations.
+    *
+    * Behaviour:
+    * • Detects whether any transformations are required.
+    * • Translates decomposition-local transformation metadata into global
+    *   clause indices via LiteralInfo2LiteralTransformation.
+    * • Delegates rewrite construction to
+    *   verifySubstitutionLiteralNormalisazion.
+    *
+    * @param decompInfo           Tracked decomposition metadata
+    * @param alreadyAddedLitCount Number of literals inserted before this step
+    * @param goalLits             Clause literals after reconstruction
+    * @return Rewrite steps justifying transformations
+    */
+  private def decompLitNormalisazion(decompInfo: DecompInfo, alreadyAddedLitCount: Int, goalLits: Seq[Literal]): Vector[Rewrite] = {
+    // first check if we need any additional transformations
+    val impTransf = decompInfo.LitTransf.exists(t => t.flip || t.normalize.isDefined)
+    if (impTransf) {
+      Out.lp_debug_info(s"needed transformations: ${decompInfo.LitTransf}")
+      val idxInGoal = decompInfo.OrigIdx // todo: once we also do other steps, this will need to be mapped
+      // transform the currently handled additional information
+      val addInfoAsLiteralTransformation = LiteralInfo2LiteralTransforamtion(decompInfo.LitTransf, idxInGoal + alreadyAddedLitCount)
+      verifySubstitutionLiteralNormalisazion(addInfoAsLiteralTransformation, goalLits, goalLits.length).toVector
+    } else {
+      Vector.empty
     }
   }
 

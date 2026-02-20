@@ -35,9 +35,9 @@ object LiteralImpl {
     * equational if both terms t1 and t2 and not equivalent to $true/$false. */
   final def mkOrdered(t1: Term, t2: Term, pol: Boolean)(implicit sig: Signature): (Literal,LiteralInfo) = {
        if (t1 == LitFalse()) {
-      (NonEqLiteral(t2, !pol), LiteralInfo(false, Some(LitNorm.BotL)))
+      (NonEqLiteral(t2, !pol), LiteralInfo(false, if (pol) Some(LitNorm.BotL) else Some(LitNorm.NegBotL)))
     } else if (t2 == LitFalse()) {
-      (NonEqLiteral(t1, !pol), LiteralInfo(false, Some(LitNorm.BotR)))
+      (NonEqLiteral(t1, !pol), LiteralInfo(false, if (pol) Some(LitNorm.BotR) else Some(LitNorm.NegBotR)))
     } else if (t1 == LitTrue()) {
       (NonEqLiteral(t2, pol), LiteralInfo(false, Some(LitNorm.TopL)))
     } else if (t2 == LitTrue()) {
