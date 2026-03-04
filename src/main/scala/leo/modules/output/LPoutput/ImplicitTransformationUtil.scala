@@ -2,11 +2,12 @@ package leo.modules.output.LPoutput
 
 import leo.Out
 import leo.datastructures.{LitNorm, Literal, LiteralInfo, LiteralTransformation}
-import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.{lpSimp_eqBot, lpSimp_eqTop, lpSimp_negEqBot}
+import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.{lpSimp_botEq, lpSimp_eqBot, lpSimp_eqTop, lpSimp_negBotEq, lpSimp_negEqBot, lpSimp_topEq}
+import leo.modules.output.LPoutput.LpLibs.EqRules._
 import leo.modules.output.LPoutput.LpLibs.ND.Terms.eqSym
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Rewrite, Side}
-import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpTerm}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpTerm, lpLiteralInst}
 
 object ImplicitTransformationUtil {
 
@@ -39,6 +40,22 @@ object ImplicitTransformationUtil {
   }
 
   /**
+    * Take as an argument the tracked normalisazion mode applied to a literal and return the corresponding encoded
+    * Lambdapi rule
+    *
+    * @param normMode The tracked normalisazion mode
+    * @return The encoded Lambpdai rule name as a meta-level term
+    */
+  def litNorm2lpRule(normMode: LitNorm) = normMode match {
+    case LitNorm.TopL => TopEq
+    case LitNorm.TopR => EqTop
+    case LitNorm.BotL => BotEq
+    case LitNorm.BotR => EqBot
+    case LitNorm.NegBotL => NegBotEq
+    case LitNorm.NegBotR => NegEqBot
+  }
+
+  /**
     * verifyLiteralNormalisazion — generate Lambdapi rewrite tactic applications to verify Leo’s
     * literal normalisation as implicit transformations during other steps.
     *
@@ -62,11 +79,11 @@ object ImplicitTransformationUtil {
     * 1) For each entry in `addInfo.normalizedEq`, emit a rewrite using the corresponding theorem
     * (`lpSimp_eqTop` / `lpSimp_eqBot`). If the normalisation mode requires a symmetry flip
     * (TopL/BotL), record that position in `newFlipSteps`.
-    * 2) Combine recorded flips (`addInfo.flippedLits`) with flips induced by normalisation
+    * 2) Carry out recorded flips (`addInfo.flippedLits`) with flips induced by normalisation
     * (`newFlipSteps`). Assert that these sets do not overlap (they correspond to disjoint
     * normalisation scenarios).
-    * 3) If flips are required, emit a single clause-level rewrite using `eqSym`, targeting all
-    * relevant positions at once.
+    * 3) If flips are required, emit clause-level rewrite tactic applications using `eqSym`, targeting all
+    * relevant positions in sequence.
     *
     * Indexing / bookkeeping:
     * - The transformation info refers to literal positions in the *child* clause.
@@ -75,25 +92,28 @@ object ImplicitTransformationUtil {
     * - `goalLits` is the child clause used to recover the polarity for pattern generation.
     *
     * @param addInfo   Literal-level transformation info recorded by DetUniSimp (normalisations + flips).
-    * @param goalLits  The target clause literals (typically `child.cl.lits`) used for polarity lookup.
-    *                  These are the literals that are in the goal, i.e. the one that the rewrite tactic
-    *                  is to be applied to.
+    * @param goalLitPolarities  The polarities of the target clause literals (typically `child.cl.lits`)
+    *                           used for polarity lookup. These are the literals that are in the goal,
+    *                           i.e. the one that the rewrite tactic is to be applied to.
     * @param clauseLen Total number of literals in the clause at the point the rewrites will be applied
     *                  (e.g. `ctxt.substClauseLen` in the substitution subproof).
-    * @param idxMap    The literal-Indices given in addInfo still refer to the index in the orginal
+    * @param idxMap    The literal-Indices given in addInfo refer to the index in the orginal
     *                  child clause. As previous steps in the verification may already have changed
     *                  the positions, it may be necessary to map the original position to the new one.
     *                  If no operations have been performed that effected the position, an identity map
     *                  can simply be used here.
     * @return Sequence of `Rewrite` scripts to be inserted before the substitution refine step.
     */
-  def verifySubstitutionLiteralNormalisazion(addInfo: LiteralTransformation, goalLits: Seq[Literal], clauseLen: Int, idxMap: Int => Int = identity): Seq[Rewrite] = {
+  def verifySubstitutionLiteralNormalisazion(addInfo: LiteralTransformation, goalLitPolarities:  Seq[Boolean], clauseLen: Int, idxMap: Int => Int = identity): Seq[Rewrite] = {
     // todo: maybe change to not take a list of goal lits but just a map of the indices to the polarities?
+
+    Out.lp_debug_info(s"polarity vec: $goalLitPolarities")
+    //val polarities = goalLits.map(_.polarity)
 
     // helper for looking up the mapped index and polarity of a given index
     def generatePatternInfo(id: Int): PatternBuilder.PatternInfo = {
       val idxInGoal = idxMap(id)
-      if (goalLits.isDefinedAt(idxInGoal)) PatternBuilder.PatternInfo(idxInGoal, None, goalLits(id).polarity)
+      if (goalLitPolarities.isDefinedAt(idxInGoal)) PatternBuilder.PatternInfo(idxInGoal, None, goalLitPolarities(idxInGoal))
       else {
         Out.lp_debug_info(s"Warning: trying to generate pattern for literal with index $id, which is out of bounds for goal literals. Using default polarity positive")
         PatternBuilder.PatternInfo(idxInGoal, None, true)
@@ -101,21 +121,14 @@ object ImplicitTransformationUtil {
     }
 
     // flipping may be necessary either in cases where normalisazion is applied, or in cases where only flipping was used
-    var newFlipSteps: Seq[Int] = Seq.empty
+    //var newFlipSteps: Seq[Int] = Seq.empty
 
     // first, handle the literals that need normalisazion
     val maybeNormalizeSteps: Seq[Rewrite] = if (addInfo.normalizedEq.nonEmpty) {
       Out.lp_debug_info(s"need to normalize: ${addInfo.normalizedEq}")
       addInfo.normalizedEq.map { pair =>
         val (pos, normMode) = pair
-        val rule: LpTerm[Level.Meta] = normMode match {
-          case LitNorm.TopL => newFlipSteps = newFlipSteps :+ pos; lpSimp_eqTop
-          case LitNorm.TopR => lpSimp_eqTop
-          case LitNorm.BotL => newFlipSteps = newFlipSteps :+ pos; lpSimp_eqBot
-          case LitNorm.BotR => lpSimp_eqBot
-          case LitNorm.NegBotL => newFlipSteps = newFlipSteps :+ pos; lpSimp_negEqBot
-          case LitNorm.NegBotR => lpSimp_negEqBot
-        }
+        val rule: LpTerm[Level.Meta] = litNorm2lpRule(normMode).lpConst
         val patternInfo = generatePatternInfo(pos)
         val pattern = PatternBuilder.generateClausePattern(Seq(patternInfo), clauseLen)
         Rewrite(Some(pattern), rule, Side.Left)
@@ -123,17 +136,17 @@ object ImplicitTransformationUtil {
     } else Seq.empty
 
     // sanity check: we ony need to flip literals that are equational and we only need to rewrite literals to an euational form if they are non-equational. Therefore, there can never be an overlap between the two
-    assert(addInfo.flippedLits.intersect(newFlipSteps).isEmpty, s"Error in Lambdapi Encoding: Trying to verify literal-normalisazion, but found contradicroty input (${addInfo.flippedLits.intersect(newFlipSteps)})")
+    //assert(addInfo.flippedLits.intersect(newFlipSteps).isEmpty, s"Error in Lambdapi Encoding: Trying to verify literal-normalisazion, but found contradicroty input (${addInfo.flippedLits.intersect(newFlipSteps)})")
 
-    // secondly, all the flip steps are carried out in one rewrite tactic application
-    val allFlipSteps = (addInfo.flippedLits ++ newFlipSteps).sorted
+    // secondly, all the flip steps are carried out in subsequent rewrite tactic applications
+    //val allFlipSteps = (addInfo.flippedLits ++ newFlipSteps).sorted
+    val allFlipSteps = (addInfo.flippedLits).sorted
     val maybeFlipStep: Seq[Rewrite] = if (allFlipSteps.nonEmpty) {
       Out.lp_debug_info(s"the following literals need to be flipped: $allFlipSteps")
       val flipInfo = allFlipSteps.map(generatePatternInfo)
-      val flipPattern = PatternBuilder.generateClausePattern(flipInfo, clauseLen)
-
-      Out.lp_debug_info(s"everything is still okay")
-      Seq(Rewrite(Some(flipPattern), eqSym))
+      Out.lp_debug_info(s"pattern info: $flipInfo")
+      val flipPatterns = flipInfo.map(flipInfo0 => PatternBuilder.generateClausePattern(Seq(flipInfo0), clauseLen))
+      flipPatterns.map(flipPattern0 => Rewrite(Some(flipPattern0), eqSym))
     } else Seq.empty
 
     maybeNormalizeSteps ++ maybeFlipStep

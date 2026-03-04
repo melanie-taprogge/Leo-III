@@ -550,7 +550,7 @@ object LPoutput {
         val (encConj, _) = clause2LP(step.cl, Set(), sig.orig)
         val (newEncConj) = ClauseEncoding.clause2LP(step.cl)
         identicalSteps += (stepId -> conjName)
-        conjecture = newEncConj.lits match {
+        conjecture = newEncConj.lits.map(_.term) match {
           case Seq(LogicConst.Not(conj)) => conj
           case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
         }

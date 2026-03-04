@@ -1,7 +1,8 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
 import LogicConst._
-import leo.datastructures.Clause
+import leo.Out
+import leo.datastructures.{Clause, fuseMaps}
 import leo.modules.output.LPoutput.NewLpDatastructures.Lifting.{ProofTerm, liftOlVars}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.Pi
@@ -49,6 +50,43 @@ object nAry {
     case _ => throw new Exception(s"Error in LP-Encoding: Trying to construct a binary connective term for 0 elements and connective $conn")
   }
 }
+/**
+  * A Lambdapi representation of a literal.
+  *
+  * @param term the literal represented as an `LpTerm`
+  * @param polarity the polarity of the literal
+  * @param eq a boolean indicating weather the literal is equational or not
+  */
+case class lpLiteralInst(term: LpTerm[Level.Obj], polarity: Boolean, eq: Boolean) {
+
+  private def stripLeadingNeg(term0: LpTerm[Level.Obj], n: Int = 0): (LpTerm[Level.Obj],Int) = {
+    term0 match {
+      case LogicConst.Not(body) => stripLeadingNeg(body,n + 1)
+      case _ => (term0,n)
+    }
+  }
+
+  private def wrapInNeg(term0: LpTerm[Level.Obj], n: Int): LpTerm[Level.Obj] ={
+    if (n > 0)  wrapInNeg(LogicConst.Not(term0),n-1)
+    else term0
+  }
+
+  def flipIfEq: lpLiteralInst = {
+    val strippedEq = stripLeadingNeg(term)
+    strippedEq._1 match {
+      case LogicConst.Eq(ty, lhs, rhs) =>
+        val flippedEq = LogicConst.Eq(ty, rhs, lhs)
+        val wrappedEq = wrapInNeg(flippedEq,strippedEq._2)
+        lpLiteralInst(wrappedEq,polarity,eq)
+      case _ => Out.lp_debug_info(s"could not flip: ${strippedEq._1}"); this
+    }
+  }
+}
+
+object lpLiteralInst {
+
+
+}
 
 /**
   * A Lambdapi representation of a clause.
@@ -58,7 +96,7 @@ object nAry {
   * @param vars the clause’s bound variables, each either a term variable or a type variable
   * @param asMl the clause encoded as a meta-level type (Dependant types for clause-variables and propositions encoded as types)
   */
-case class lpClauseInst(term: LpTerm[Level.Obj], lits: Seq[LpTerm[Level.Obj]], vars: Seq[Either[Var[Level.Obj],TyVar]], asMl: LpType) {
+case class lpClauseInst(term: LpTerm[Level.Obj], lits: Seq[lpLiteralInst], vars: Seq[Either[Var[Level.Obj],TyVar]], asMl: LpType) {
   /** Returns `vars` as a plain sequence of `lpOlTerm`. */
   def metaVars: Seq[Var[Level.Meta]] = vars.map(liftOlVars)
 }
@@ -75,11 +113,17 @@ object lpClauseInst {
     * @param vars the clause's object-level bound variables
     * @return the corresponding `lpClauseInst`
     */
-  def apply(lits: Seq[LpTerm[Level.Obj]], vars: Seq[Either[Var[Level.Obj], TyVar]]): lpClauseInst = { // used to translate -> now directly use
-    val disjunction = nAry.disjunction(lits)
+  def apply(lits: Seq[lpLiteralInst], vars: Seq[Either[Var[Level.Obj], TyVar]]): lpClauseInst = { // used to translate -> now directly use
+    val disjunction = nAry.disjunction(lits.map(_.term))
     val liftedVars = vars.map(liftOlVars)
     val mlTerm = if (liftedVars.nonEmpty) Pi(liftedVars,ProofTerm(disjunction)) else ProofTerm(disjunction)
     lpClauseInst(disjunction,lits,vars,mlTerm)
+  }
+
+  private def apply_to_single(cl: Clause, fullBvarsMap: Map[Int, String]) = {
+    val encCls = ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap)
+    val encVars = TermEncoding.vars2Lp(cl.implicitlyBound, fullBvarsMap).map(Left(_))
+    lpClauseInst(encCls,encVars)
   }
 
   /**
@@ -89,9 +133,16 @@ object lpClauseInst {
   def apply_to_set(cls: Seq[Clause]): (Map[Int, String], Seq[lpClauseInst]) = {
     val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
-    val encCls = cls.map(cl => ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap))
-    val encVars: Seq[Seq[Either[Var[Level.Obj], TyVar]]] = cls.map(cl => TermEncoding.vars2Lp(cl.implicitlyBound, fullBvarsMap).map(Left(_)))
-    (fullBvarsMap, encCls.zip(encVars).map(ecnCl => lpClauseInst(ecnCl._1, ecnCl._2)))
+    val encCls = cls.map(cl => apply_to_single(cl, fullBvarsMap))
+    (fullBvarsMap, encCls)
+  }
+
+  def apply_to_pair(cl0: Clause, cl1: Clause): (Map[Int, String], lpClauseInst, lpClauseInst) = {
+    val allImpBoundVars = Seq(cl0,cl1).flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
+    val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
+    val encCls0 = apply_to_single(cl0, fullBvarsMap)
+    val encCls1 = apply_to_single(cl1, fullBvarsMap)
+    (fullBvarsMap, encCls0, encCls1)
   }
 }
 

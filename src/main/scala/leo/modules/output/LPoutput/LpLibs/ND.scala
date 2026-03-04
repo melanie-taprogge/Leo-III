@@ -22,6 +22,7 @@ object ND {
     // ND rules
     val lpLorelimS: SymRef  = SymRef.LP(QName.local("∨ₑ"))
     val lpLorIntro1S: SymRef  = SymRef.LP(QName.local("∨ᵢ₁"))
+    val lpTopIntro: SymRef  = SymRef.LP(QName.local("⊤ᵢ"))
     // ...
 
 
@@ -47,6 +48,9 @@ object ND {
       LpTerm.Const[L](lpWitnessConS)
     def eqSym[L <: Level]: LpTerm.Const[L] =
       LpTerm.Const[L](eqSymS)
+
+    def topIntro[L <: Level]: LpTerm.Const[L] =
+      LpTerm.Const[L](lpTopIntro)
 
     // ...
   }

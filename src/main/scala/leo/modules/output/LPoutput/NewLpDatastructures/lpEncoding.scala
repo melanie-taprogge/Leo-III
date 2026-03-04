@@ -3,9 +3,10 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 import leo.Out
 import leo.datastructures.Signature.Key
 import leo.datastructures.{Clause, Literal, Term, Type}
-import leo.datastructures.Type._
+import leo.datastructures.Type.{∀, _}
 import leo.datastructures.Term._
 import leo.modules.HOLSignature._
+import leo.modules.output.LPoutput.EncodeResult.NotEncodable
 import leo.modules.output.LPoutput.LpLibs.ND.Terms.lpWitnessCon
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings.collectLambdasLP
 import leo.modules.output._
@@ -68,6 +69,33 @@ object TypeEncoding {
         val encBody = type2LP(bodyTy)
         LpType.Pi(variables, LpType.El(encBody))
       case _ => LpType.El(type2LP(ty))
+    }
+  }
+
+  /** Helper for Decomp steps:
+    * safe encoder of types that does not throw on poly types but just regurns a Not encodable mesage
+    */
+  def safeEncTy(ty: Type): Either[NotEncodable, OlType] = {
+    ty match {
+      case ComposedType(_, _) =>
+        Left(NotEncodable("Error: trying to encode ComposedType"))
+      case ProductType(_) =>
+        Left(NotEncodable("Error: trying to encode ProductType"))
+      case ∀(_) =>
+        Left(NotEncodable("Error: trying to encode quantified Type"))
+      case _ => Right(type2LP(ty))
+    }
+  }
+
+  def safeEncTypes(tys: Seq[Type]): Either[NotEncodable, Vector[OlType]] = {
+    tys.foldLeft[Either[NotEncodable, Vector[OlType]]](Right(Vector.empty)) {
+      case (Left(err), _) => Left(err)
+      // else, continue
+      case (Right(acc), nextTy) =>
+        safeEncTy(nextTy) match {
+          case Left(error) => Left(error)
+          case Right(encTy) => Right(acc :+ encTy)
+        }
     }
   }
 }
@@ -283,7 +311,7 @@ object ClauseEncoding {
     * @note Built-in equality and the meta-equality of equational literals are not
     *       differentiated in the encoding
     * */
-  def lit2Lp(lit: Literal, bVarMap: Map[Int, String], surpressReduction: Boolean = false, replaceUnknownVars: Boolean = false): LpTerm[Level.Obj] = {
+  def lit2Lp(lit: Literal, bVarMap: Map[Int, String], surpressReduction: Boolean = false, replaceUnknownVars: Boolean = false): lpLiteralInst = {
     if (lit.equational) {
       val (left, right) = (lit.left, lit.right)
       val lefEnc = term2LP(left, bVarMap, surpressReduction,replaceUnknownVars)
@@ -291,22 +319,22 @@ object ClauseEncoding {
       val encTyTl = type2LP(left.ty)
       val eqTerm = LogicConst.Eq(encTyTl, lefEnc, rigEnc)
       if (lit.polarity) {
-        eqTerm
+        lpLiteralInst(eqTerm,true,true)
       } else {
-        LogicConst.Not(eqTerm)
+        lpLiteralInst(LogicConst.Not(eqTerm),false,true)
       }
     } else {
       val termEnc = term2LP(lit.left, bVarMap, surpressReduction,replaceUnknownVars)
       if (lit.polarity) {
-        termEnc
+        lpLiteralInst(termEnc,true,false)
       } else {
-        LogicConst.Not(termEnc)
+        lpLiteralInst(LogicConst.Not(termEnc),false,false)
       }
     }
-  }
+  } // todo: potentially pattern match to also make literals negative that leo thinks are positive but have a leading negation?
 
   /** Encode a sequence of Leo-III literals to Lambdapi */
-  @inline def lits2Lp(lits: Seq[Literal], bVarMap: Map[Int, String]): Seq[LpTerm[Level.Obj]] = lits.map(lit2Lp(_, bVarMap))
+  @inline def lits2Lp(lits: Seq[Literal], bVarMap: Map[Int, String]): Seq[lpLiteralInst] = lits.map(lit2Lp(_, bVarMap))
 
   /**
     * Translate Leo-III clauses to the Lambdapi Encoding
