@@ -81,11 +81,10 @@ case class lpLiteralInst(term: LpTerm[Level.Obj], polarity: Boolean, eq: Boolean
       case _ => Out.lp_debug_info(s"could not flip: ${strippedEq._1}"); this
     }
   }
-}
 
-object lpLiteralInst {
-
-
+  def termEq(lit2: lpLiteralInst) = {
+    this.term == lit2.term
+  }
 }
 
 /**
@@ -99,6 +98,10 @@ object lpLiteralInst {
 case class lpClauseInst(term: LpTerm[Level.Obj], lits: Seq[lpLiteralInst], vars: Seq[Either[Var[Level.Obj],TyVar]], asMl: LpType) {
   /** Returns `vars` as a plain sequence of `lpOlTerm`. */
   def metaVars: Seq[Var[Level.Meta]] = vars.map(liftOlVars)
+
+  def termEq(cl2: lpClauseInst) = {
+    this.term == cl2.term
+  }
 }
 
 object lpClauseInst {

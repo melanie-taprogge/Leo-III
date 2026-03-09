@@ -138,25 +138,29 @@ object LPoutput {
 
   def identifySteps_new(cl: ClauseProxy, identicalSteps: mutable.HashMap[Long, QName], encStep: NewLpDatastructures.lpClauseInst): (Boolean, mutable.HashMap[Long, QName]) = {
     var encodeStep = false
+    val childId = cl.id
     cl.annotation.parents foreach { parent => // todo: save them rather than translating over and over again
       val encParent = NewLpDatastructures.ClauseEncoding.clause2LP(parent.cl)
-      if (encParent == encStep) { // case: any potential differences are abstracted away by rendering -> need not prove
-        if (identicalSteps.contains(cl.id)) {
-          if (identicalSteps(cl.id) != nameStep(parent.id)) {
-            throw new Exception(s"step $cl.id ($encStep) is equivalent to two parents: ${cl.id}, ${parent.id} ")
+      if (encParent.termEq(encStep)) { // case: any potential differences are abstracted away by rendering -> need not prove
+        if (identicalSteps.contains(childId)) {
+          if (identicalSteps(childId) != nameStep(parent.id)) {
+            throw new Exception(s"step $childId ($encStep) is equivalent to two parents: ${childId}, ${parent.id} ")
           }
         }
         if (identicalSteps.contains(parent.id)) {
           // in this case we already have the parent as a key and want to map the new child to the parents parent
           val exVal = identicalSteps(parent.id)
           Out.lp_debug_info(s"identical steps for parent ${parent.id} (maps to ${exVal})")
-          identicalSteps.update(cl.id, exVal)
+          identicalSteps.update(childId, exVal)
         } else {
           // in this case we just want to link the child to the parent
           val exVal = nameStep_new(parent.id)
-          identicalSteps.update(cl.id, exVal)
+          identicalSteps.update(childId, exVal)
         }
-      } else encodeStep = true
+      } else {
+        //Out.lp_debug_info(s"child (step$childId) and parent (step${parent.id}) differ: (upper line child, lower line parent):\n${encStep}\n${encParent}")
+        encodeStep = true
+      }
     }
     (encodeStep, identicalSteps)
   }

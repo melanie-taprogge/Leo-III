@@ -128,8 +128,8 @@ object TermEncoding {
   }
 
   /** Translate a sequence of arguments to Lambdapi and marks them as explicit */
-  @inline private def args2LP(args: Seq[Either[Term, Type]], bVars: Map[Int, String], supressReduction: Boolean = false, replaceUnknownVars: Boolean = false): Seq[Arg[Level.Obj]] = {
-    args.map(arg2LP(_, bVars, supressReduction, replaceUnknownVars))
+  @inline private def args2LP(args: Seq[Either[Term, Type]], bVars: Map[Int, String], supressReduction: Boolean = false, replaceUnknownVars: Boolean = false): List[Arg[Level.Obj]] = {
+    args.map(arg2LP(_, bVars, supressReduction, replaceUnknownVars)).toList
   }
 
   //todo: handle replacing unknown Vars differently... -> have a step that both does that and adjusts the numbers of the remaining variables -> check how this is done in Leo
