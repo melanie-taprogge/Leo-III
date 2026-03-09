@@ -50,7 +50,10 @@ object MetaTheorems {
       LpTerm.App[Level.Obj](transformNS_T,Seq(Arg.Implicit(initialLit), Arg.Explicit(LpList(clauseLhs)), Arg.Explicit(LpList(derivedLits)), Arg.Explicit(LpList(clauseRhs)), Arg.Explicit(ruleProof), Arg.Explicit(proofClauseOrig)))
 
     def transform_n(initialLit: lpLiteralInst, clauseLhs: Seq[lpLiteralInst], clauseRhs: Seq[lpLiteralInst], derivedLits: Seq[lpLiteralInst], ruleProof: LpTerm[Level.Obj], proofClauseOrig: LpTerm[Level.Obj]) =
-      transform_nTerms(initialLit.term,clauseLhs.map(_.term),clauseRhs.map(_.term),derivedLits.map(_.term),ruleProof,proofClauseOrig)
+      {
+        if (clauseLhs.isEmpty && clauseRhs.isEmpty) LpTerm.App(ruleProof,Seq(Arg.Explicit(proofClauseOrig)))
+        else transform_nTerms(initialLit.term,clauseLhs.map(_.term),clauseRhs.map(_.term),derivedLits.map(_.term),ruleProof,proofClauseOrig)
+      }
 
     def permute(σ: Seq[Int], origClauseLits: Seq[lpLiteralInst], prfBefore: LpTerm[Level.Obj]) = {
       permuteTerms(σ,origClauseLits.map(_.term),prfBefore)
