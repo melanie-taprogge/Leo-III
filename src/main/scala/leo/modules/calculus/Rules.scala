@@ -281,19 +281,29 @@ protected[calculus] abstract class AnyUni extends CalculusRule {
 object PreUni extends AnyUni {
   final val name = "pre_uni"
 
+  final case class PreUniResult(clause: Clause,
+                                termSubst: Unification#TermSubst,
+                                typeSubst: Unification#TypeSubst,
+                                literalTransformations: LiteralTransformation) {
+    def asUniResult: UniResult = (clause, (termSubst, typeSubst))
+  }
+
   final def canApply(l: Literal): Boolean = l.uni
 
   final def apply(vargen: FreshVarGen, uniLits: UniLits,
-                  otherLits: OtherLits, uniDepth: Int)(implicit sig: Signature): Iterator[UniResult] = {
+                  otherLits: OtherLits, uniDepth: Int)(implicit sig: Signature): Iterator[PreUniResult] = {
     import leo.modules.myAssert
     Out.trace(s"Unification on:\n\t${uniLits.map(eq => eq._1.pretty(sig) + " = " + eq._2.pretty(sig)).mkString("\n\t")}")
     myAssert(uniLits.forall{case (l,r) => Term.wellTyped(l) && Term.wellTyped(r) && l.ty == r.ty})
     val result = HuetsPreUnification.unifyAll(vargen, uniLits, uniDepth).iterator
     result.map {case (subst, flexflex) =>
       val newLiteralsFromFlexFlex = flexflex.map(eq => Literal.mkNeg(eq._1, eq._2))
-      val updatedOtherLits = otherLits.map(_.substituteOrdered(subst._1, subst._2)(sig)._1) // FIXME this one is slow
+      val updatedOtherLits0 = otherLits.map(_.substituteOrdered(subst._1, subst._2)(sig)) // FIXME this one is slow
+      val flippedLitIds = updatedOtherLits0.zipWithIndex.collect { case ((_, LiteralInfo(true, _)), idx) => idx }
+      val normalizedLits = updatedOtherLits0.zipWithIndex.collect { case ((_, LiteralInfo(_, Some(mode))), idx) => (idx, mode) }
+      val updatedOtherLits = updatedOtherLits0.map(_._1)
       val resultClause = Clause(updatedOtherLits ++ newLiteralsFromFlexFlex)
-      (resultClause, subst)
+      PreUniResult(resultClause, subst._1, subst._2, LiteralTransformation(flippedLitIds, normalizedLits))
     }
   }
 }

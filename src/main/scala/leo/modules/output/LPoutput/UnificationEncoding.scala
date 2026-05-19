@@ -156,7 +156,62 @@ object Util {
     } else (LpTerm.App(ctxt.parentNameLpEnc, ctxt.childVarNames.map(varName => Arg.Explicit(LpTerm.Var(varName, None)))), Seq.empty)
   }
 
-  // todo: actually, I think i shuold also add normalsiazion after substitution here
+  /**
+    * Reindex literal-transformation metadata through a clause-position map.
+    *
+    * Literal transformations are usually tracked in the clause produced by the
+    * calculus rule. If proof reconstruction temporarily reinserts deleted
+    * literals, the same transformations must be applied at the corresponding
+    * positions in the reconstructed parent.
+    */
+  def reindexLiteralTransformation(litTransf: LiteralTransformation, idxMap: Int => Int): LiteralTransformation = {
+    LiteralTransformation(
+      litTransf.flippedLits.map(idxMap),
+      litTransf.normalizedEq.map { case (idx, mode) => (idxMap(idx), mode) }
+    )
+  }
+
+  /**
+    * Reconstruct a parent clause after applying an original Leo substitution,
+    * including any recorded literal-level transformations.
+    *
+    * This is shared by DetUniSimp and PreUni: both need an explicit encoded
+    * clause as target type for the substitution subproof, and both can obtain
+    * it most robustly by applying the original substitution to the parent clause.
+    */
+  def reconstructSubstParent(origTermSubst: Subst, origTypeSubst: Subst, litTransf: LiteralTransformation, ctxt: EncUniCtx, parentCl: Clause): Option[Seq[lpLiteralInst]]= {
+    val substParent = parentCl.substitute(origTermSubst, origTypeSubst)
+    val encSubstParent = lits2Lp(substParent.lits, ctxt.sharedVarMap)
+    applyLiteralTransformations(encSubstParent, litTransf)
+  }
+
+  /**
+    * Apply recorded literal transformations to an encoded clause.
+    *
+    * The returned literals represent the post-substitution clause shape expected
+    * by the later proof target, while the rewrite proof for these transformations
+    * is still generated separately by `verifySubstitutionLiteralNormalisazion`.
+    */
+  def applyLiteralTransformations(encLits: Seq[lpLiteralInst], litTransf: LiteralTransformation): Option[Seq[lpLiteralInst]] = {
+    val normalisazionMap = litTransf.normalizedEq.toMap
+    if (litTransf.transforamtionsHappened) {
+      Some(encLits.zipWithIndex.map { taggedLit =>
+        val (lit, idx) = taggedLit
+        if (litTransf.flippedLits.contains(idx)) {
+          lit.flipIfEq
+        } else if (normalisazionMap.contains(idx)) {
+          val appliedRule = litNorm2lpRule(normalisazionMap(idx))
+          val transformedLit = appliedRule.applyTo(lit)
+          transformedLit match {
+            case Some(res) => res
+            case None => return None
+          }
+        } else {
+          lit
+        }
+      })
+    } else Some(encLits)
+  }
 
 }
 
@@ -519,30 +574,7 @@ object DetUniSimpEncoding {
     * @return
     */
   def reconstructSubstParentUniDetSubst(subst: AddInfoUniWithSubst, ctxt: EncUniCtx, parentCl: Clause): Option[Seq[lpLiteralInst]]= {
-    // carry out substitution
-    val substParent = parentCl.substitute(subst.origTermSubst)
-    // encode the resulting clause using the sharedVarMap
-    val encSubstParent = lits2Lp(substParent.lits, ctxt.sharedVarMap)
-    // extract the used normalisazions
-    val normalisazionMap = subst.literalTransformations.normalizedEq.toMap
-    // reconstruct the potential implicit transformations
-    if (subst.literalTransformations.transforamtionsHappened) {
-      Some(encSubstParent.zipWithIndex.map { taggedLit =>
-        val (lit, idx) = taggedLit
-        if (subst.literalTransformations.flippedLits.contains(idx)) {
-          lit.flipIfEq
-        } else if (normalisazionMap.contains(idx)) {
-          val appliedRule = litNorm2lpRule(normalisazionMap(idx))
-          val transformedLit = appliedRule.applyTo(lit)
-          transformedLit match {
-            case Some(res) => res
-            case None => return None
-          }
-        } else {
-          lit
-        }
-      })
-    } else Some(encSubstParent)
+    reconstructSubstParent(subst.origTermSubst, subst.origTypeSubst, subst.literalTransformations, ctxt, parentCl)
   }
 
   private def verifyDetUniSubstStep(previousStage: DetUniStage, subst: AddInfoUniWithSubst, ctxt: EncUniCtx, childCl: Clause, parentCl: Clause): StageResult = {
@@ -968,16 +1000,17 @@ object PreUniVerification {
     *    Introduce all free variables of the child clause.
     *
     * 1) Reconstruct the substituted parent
-    *    Rebuild the parent clause after applying the recorded PreUni
-    *    substitution, but before removing the EqFact unification constraints.
-    *    This reconstructed clause is used as the target type of the
+    *    Rebuild the parent clause with the shared reconstruction helper by
+    *    applying the original PreUni substitution and the recorded literal
+    *    transformations. This yields the clause before removing the EqFact
+    *    unification constraints and is used as the target type of the
     *    substitution subproof.
     *
     * 2) Substitution subproof
     *    Instantiate the encoded parent proof with the substitution terms.
-    *    If the remaining literals need implicit equality flips to match the
-    *    child clause, record those flips and let the shared substitution
-    *    encoder emit the corresponding rewrite steps.
+    *    Any recorded implicit literal transformations are delegated to the
+    *    shared substitution encoder, which emits the corresponding rewrite
+    *    steps before refining with the instantiated parent proof.
     *
     * 3) Constraint-elimination subproof
     *    The two trailing EqFact constraints are trivially false after
@@ -1014,7 +1047,7 @@ object PreUniVerification {
       return NotEncodable(s"the unification mode $mode is either not set or not encoded yet")
     }
 
-    val UnificationEncoding.UniCtx(termSubst, typeSubst, _, litTransf) = UnificationEncoding.initUniCtxt(addInfoUni)
+    val UnificationEncoding.UniCtx(termSubst, typeSubst, deletedUniLits, litTransf) = UnificationEncoding.initUniCtxt(addInfoUni)
 
     if (typeSubst.nonEmpty) {
       return NotEncodable("LP encoding of type unification not encoded yet")
@@ -1028,26 +1061,27 @@ object PreUniVerification {
     Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
     Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
 
-    // Identify the two EqFact unification constraints to be removed after substitution.
-    val deletePositions = preUniDeletePositions(parent.cl, addInfoUniRule) match {
-      case Left(reason) => return NotEncodable(reason)
-      case Right(positions) => positions
+    if (deletedUniLits.isEmpty) {
+      return NotEncodable("PreUni did not track any deleted unification constraints")
     }
+
+    val deletePositions = deletedUniLits.map(_.position)
+
+    val childToParentIdx = childToSubstitutedParentIdx(parent.cl.lits.length, deletePositions, encChild.lits.length) match {
+      case Left(reason) => return NotEncodable(reason)
+      case Right(idxMap) => idxMap
+    }
+    val childToParentIdxDefault = childToParentIdx.withDefault(identity)
+
+    // Literal transformations are tracked relative to the child clause.
+    // Reindex them to reconstruct the substituted parent before deletion.
+    val substParentLitTransf = reindexLiteralTransformation(litTransf, childToParentIdxDefault)
 
     // Reconstruct the parent after PreUni substitution, but before deleting constraints.
-    val rawSubstParent = reconstructPreUniSubstParent(parent.cl, termSubst, ctxt) match {
-      case Left(reason) => return NotEncodable(reason)
-      case Right(lits) => lits
+    val normalizedSubstParent = reconstructSubstParent(addInfoUni.origTermSubst, addInfoUni.origTypeSubst, substParentLitTransf, ctxt, parent.cl) match {
+      case Some(lits) => lits
+      case None => return NotEncodable("Trying to encode PreUni substitution substep, error when reconstructing substituted parent")
     }
-
-    // Align non-deleted literals with the child clause and collect implicit flips.
-    val normalizedSubstParent = normalizeRemainingPreUniLits(rawSubstParent, encChild.lits, deletePositions) match {
-      case Left(reason) => return NotEncodable(reason)
-      case Right(lits) => lits
-    }
-
-    val inferredFlips = flippedRemainingLitPositions(rawSubstParent, normalizedSubstParent)
-    val preUniLitTransf = LiteralTransformation(litTransf.flippedLits ++ inferredFlips, litTransf.normalizedEq)
 
     ////////////////////////////
     // 0) Assume free variables
@@ -1057,7 +1091,7 @@ object PreUniVerification {
     // 1) Substitution subproof
     val nameHaveSubstStep = Name("Substitution")
     val (substStepName, substStep) =
-      encodeSubstitutionSubstep(nameHaveSubstStep, ctxt, termSubst, preUniLitTransf, normalizedSubstParent, child.cl.implicitlyBound, parent.cl.implicitlyBound)
+      encodeSubstitutionSubstep(nameHaveSubstStep, ctxt, termSubst, litTransf, normalizedSubstParent, child.cl.implicitlyBound, parent.cl.implicitlyBound, childToParentIdxDefault)
 
     ////////////////////////////
     // 2) Constraint-elimination subproof
@@ -1074,127 +1108,32 @@ object PreUniVerification {
   // Helpers for EqFact unification-constraint deletion
 
   /**
-    * Determine the parent-clause positions of the EqFact unification constraints.
+    * Compute how child-clause literal positions embed into the substituted parent.
     *
-    * The old PreUni encoding assumes that EqFact stores two unification
-    * constraints as the last two parent literals. The same invariant is checked
-    * here before constructing the deletion proof, because deleteBots needs
-    * positions in the substituted parent clause.
+    * PreUni tracks deleted unification constraints as `UniLitInfo`, with
+    * positions in the parent before deletion. The substitution proof, however,
+    * receives literal-transformation metadata in child positions. This helper
+    * builds the required child-position to parent-position map.
     *
-    * @param parent         The parent clause before PreUni substitution
-    * @param addInfoUniRule Rule-specific additional info containing the two EqFact constraints
-    * @return the penultimate and last literal positions, or a NotEncodable reason
+    * Limitation: If the remaining parent positions do not match the child length, PreUni
+    * produced a different literal shape, for example by adding residual
+    * flex-flex constraints. That case is not currently encoded.
+    *
+    * @param parentLen       Number of literals in the parent clause
+    * @param deletePositions Parent positions deleted by PreUni
+    * @param childLen        Number of literals in the child clause
+    * @return map from child literal positions to reconstructed-parent positions
     */
-  private def preUniDeletePositions(parent: Clause, addInfoUniRule: (String, (Literal, Literal))): Either[String, Vector[Int]] = {
-    if (parent.lits.length < 2) {
-      Left("PreUni after factoring expected a parent with two trailing unification constraints")
-    } else {
-      val (uniC1, uniC2) = addInfoUniRule._2
-      val lastIdx = parent.lits.length - 1
-      val penultimateIdx = parent.lits.length - 2
-
-      if (parent.lits(lastIdx) != uniC1) {
-        Left("encoding unification following eqFactoring found unification constraint 1 in unexpected position")
-      } else if (parent.lits(penultimateIdx) != uniC2) {
-        Left("encoding unification following eqFactoring found unification constraint 2 in unexpected position")
-      } else {
-        Right(Vector(penultimateIdx, lastIdx))
-      }
-    }
-  }
-
-  // Helpers for Substitution reconstruction
-
-  /**
-    * Reconstruct the parent after applying the PreUni term substitution.
-    *
-    * The new shared substitution encoder proves substitution by instantiating
-    * the encoded parent proof. For the target type of that subproof we also
-    * need the resulting clause explicitly as encoded literals. The additional
-    * PreUni info stores substitutions in the LP-output-friendly `UniTermSubst`
-    * format, so this helper converts them back into a Leo `Subst`, applies it
-    * to the parent clause, and encodes the resulting literals with the shared
-    * child-variable map.
-    *
-    * Bound-variable RHS entries are preserved as bound-variable substitutions.
-    * Concrete term RHS entries are inserted directly.
-    *
-    * @param parent    The parent clause before PreUni substitution
-    * @param termSubst Recorded PreUni term substitutions
-    * @param ctxt      Shared unification encoding context
-    * @return encoded literals of the substituted parent, or a NotEncodable reason
-    */
-  private def reconstructPreUniSubstParent(parent: Clause, termSubst: Seq[UniTermSubst], ctxt: EncUniCtx): Either[String, Seq[lpLiteralInst]] = {
-    val parentVarTypes = parent.implicitlyBound.toMap
-    val termMap = scala.collection.mutable.Map.empty[Int, Term]
-    val boundMap = scala.collection.mutable.Map.empty[Int, Int]
-
-    termSubst.foreach {
-      case UniTermSubst(sourceIndex, UniTermByTerm(term, _, _)) =>
-        termMap += (sourceIndex -> term)
-      case UniTermSubst(sourceIndex, UniTermByBoundVar(targetIndex)) =>
-        if (!parentVarTypes.contains(targetIndex)) {
-          return Left(s"PreUni substitution targets unknown variable $targetIndex")
-        }
-        boundMap += (sourceIndex -> targetIndex)
-    }
-
-    val subst = Subst.fromMaps(termMap.toMap, boundMap.toMap)
-    val substParent = parent.substitute(subst)
-    Right(substParent.lits.map(lit => lit2Lp(lit, ctxt.childVarMap, surpressReduction = false, replaceUnknownVars = true)))
-  }
-
-  // Helpers for implicit literal transformations
-
-  /**
-    * Normalize the non-deleted substituted parent literals against the child.
-    *
-    * After substitution and deletion of the two EqFact constraints, the
-    * remaining literals should match the child clause. The only implicit
-    * transformation handled here is equality-side flipping.
-    * Only after `flipIfEq`, the flipped literal is placed into the reconstructed
-    * substituted parent and the flip is later recorded as a rewrite step.
-    *
-    * @param rawSubstParent  Substituted parent before implicit flips
-    * @param encChildLits    Encoded child literals
-    * @param deletePositions Positions of the EqFact constraints to be removed
-    * @return substituted parent with remaining literals aligned to the child
-    */
-  private def normalizeRemainingPreUniLits(rawSubstParent: Seq[lpLiteralInst], encChildLits: Seq[lpLiteralInst], deletePositions: Seq[Int]): Either[String, Seq[lpLiteralInst]] = {
+  private def childToSubstitutedParentIdx(parentLen: Int, deletePositions: Seq[Int], childLen: Int): Either[String, Map[Int, Int]] = {
     val deleteSet = deletePositions.toSet
-    val remainingParentPositions = rawSubstParent.indices.filterNot(deleteSet)
+    val remainingParentPositions = (0 until parentLen).filterNot(deleteSet)
 
-    if (remainingParentPositions.length != encChildLits.length) {
-      return Left("PreUni with residual flex-flex literals is not encoded yet")
-    }
-
-    val normalized = rawSubstParent.toArray
-    remainingParentPositions.zipWithIndex.foreach {
-      case (parentPos, childPos) =>
-        val parentLit = rawSubstParent(parentPos)
-        val childLit = encChildLits(childPos)
-        if (parentLit == childLit) {
-          ()
-        } else if (parentLit.flipIfEq == childLit) {
-          normalized(parentPos) = childLit
-        } else {
-          return Left(s"PreUni substituted parent literal at position $parentPos does not match child literal $childPos")
-        }
-    }
-
-    Right(normalized.toVector)
-  }
-
-  /**
-    * Recover positions where `normalizeRemainingPreUniLits` inserted flips.
-    *
-    * These positions are translated into `LiteralTransformation` metadata and
-    * passed to the shared substitution encoder. That keeps actual rewrite
-    * generation centralized in `verifySubstitutionLiteralNormalisazion`.
-    */
-  private def flippedRemainingLitPositions(rawSubstParent: Seq[lpLiteralInst], normalizedSubstParent: Seq[lpLiteralInst]): Seq[Int] = {
-    rawSubstParent.zip(normalizedSubstParent).zipWithIndex.collect {
-      case ((before, after), idx) if before != after && before.flipIfEq == after => idx
+    if (deletePositions.exists(pos => pos < 0 || pos >= parentLen)) {
+      Left(s"PreUni tracked deleted literal positions out of bounds: $deletePositions")
+    } else if (remainingParentPositions.length != childLen) {
+      Left("PreUni with residual flex-flex literals is not encoded yet")
+    } else {
+      Right(remainingParentPositions.zipWithIndex.map { case (parentIdx, childIdx) => childIdx -> parentIdx }.toMap)
     }
   }
 }

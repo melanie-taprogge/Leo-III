@@ -244,15 +244,19 @@ case class UniLitInfo(position: Int,
                       literal: Literal)
 
 /**
-  * Additional Information for Pattern Unification, where the literals resulting from substitution can directly be
-  * determined based on the produced child.
+  * Additional information for unification steps where the substituted and deleted literals
+  * can be tracked independently of interleaved simplification/decomposition steps.
   * @param subst
   * @param uniLits
   * @param literalTransformations
+  * @param origTermSubst Original term substitution, retained for proof reconstruction
+  * @param origTypeSubst Original type substitution, retained for proof reconstruction
   */
 case class AddInfoUni(subst: UniSubst = UniSubst(),
                       uniLits: Seq[UniLitInfo] = Seq.empty,
-                      literalTransformations: LiteralTransformation = LiteralTransformation()) //todo currently affected Lit is only used for pattern uni - also use for preuni
+                      literalTransformations: LiteralTransformation = LiteralTransformation(),
+                      origTermSubst: Subst = Subst.id,
+                      origTypeSubst: Subst = Subst.id)
 
 /**
   * Additional Information for Unification processes like DetUniSimp, where operations are applied in an interlaced fashion.
