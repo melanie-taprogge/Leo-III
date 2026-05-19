@@ -389,6 +389,7 @@ object DetUniSimpEncoding {
     *    If DetUniSimp reordered literals:
     *      - Apply the `permute` theorem in a dedicated substep to align
     *        the parent clause with the child clause ordering.
+    *
     * 3) Removal of trivially false literals (optional)
     *    Required when literals were deleted due to:
     *      - Deterministic unification constraints, or
@@ -943,4 +944,150 @@ object DetUniSimpEncoding {
     )
   }
 
+}
+
+object PreUniVerification {
+
+  import Util._
+
+  private val UniAfterFactoring = "uniAfterFactoring"
+
+  /**
+    * Encode PreUni instances (currently only support for instances produced after equality factoring).
+    *
+    * This is the new-datastructure counterpart of `ModularProofEncoding.encPreUni`.
+    */
+  def encodePreUni(parent: ClauseProxy, child: ClauseProxy, parentNameLpEnc0: Name, sig: LpSig): EncodeResult = {
+    Out.lp_debug_info(s"Encoding instance of PreUni")
+    val ro = RenderOptions()
+
+    val addInfoUni = child.furtherInfo.addInfoUni
+    val addInfoUniRule = child.furtherInfo.addInfoUniRule
+    val mode = addInfoUniRule._1
+
+    if (mode != UniAfterFactoring) {
+      return NotEncodable(s"the unification mode $mode is either not set or not encoded yet")
+    }
+
+    val UnificationEncoding.UniCtx(termSubst, typeSubst, _, litTransf) = UnificationEncoding.initUniCtxt(addInfoUni)
+
+    if (typeSubst.nonEmpty) {
+      return NotEncodable("LP encoding of type unification not encoded yet")
+    }
+    if (termSubst.isEmpty) {
+      return NotEncodable("no term unifications to encode")
+    }
+
+    val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
+    val EncUniCtx(encChild, encParent, _, _, childVarNames, _, _) = ctxt
+    Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
+    Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
+
+    val deletePositions = preUniDeletePositions(parent.cl, addInfoUniRule) match {
+      case Left(reason) => return NotEncodable(reason)
+      case Right(positions) => positions
+    }
+
+    val rawSubstParent = reconstructPreUniSubstParent(parent.cl, termSubst, ctxt) match {
+      case Left(reason) => return NotEncodable(reason)
+      case Right(lits) => lits
+    }
+
+    val normalizedSubstParent = normalizeRemainingPreUniLits(rawSubstParent, encChild.lits, deletePositions) match {
+      case Left(reason) => return NotEncodable(reason)
+      case Right(lits) => lits
+    }
+
+    val inferredFlips = flippedRemainingLitPositions(rawSubstParent, normalizedSubstParent)
+    val preUniLitTransf = LiteralTransformation(litTransf.flippedLits ++ inferredFlips, litTransf.normalizedEq)
+
+    val assumeStep = encAssumeStep(childVarNames)
+
+    val nameHaveSubstStep = Name("Substitution")
+    val (substStepName, substStep) =
+      encodeSubstitutionSubstep(
+        nameHaveSubstStep,
+        ctxt,
+        termSubst,
+        preUniLitTransf,
+        normalizedSubstParent,
+        child.cl.implicitlyBound,
+        parent.cl.implicitlyBound
+      )
+
+    val nameHaveRemoveStep = Name("RemoveUniConst")
+    val haveRemoveStep = constructRemoveStep(nameHaveRemoveStep, normalizedSubstParent, encChild.lits, deletePositions)
+    val appliedRemoveStep = applyRemoveStep(nameHaveRemoveStep, substStepName)
+
+    Encoded((assumeStep ++ substStep) :+ haveRemoveStep :+ Refine(Obj(appliedRemoveStep)))
+  }
+
+  private def preUniDeletePositions(parent: Clause, addInfoUniRule: (String, (Literal, Literal))): Either[String, Vector[Int]] = {
+    if (parent.lits.length < 2) {
+      Left("PreUni after factoring expected a parent with two trailing unification constraints")
+    } else {
+      val (uniC1, uniC2) = addInfoUniRule._2
+      val lastIdx = parent.lits.length - 1
+      val penultimateIdx = parent.lits.length - 2
+
+      if (parent.lits(lastIdx) != uniC1) {
+        Left("encoding unification following eqFactoring found unification constraint 1 in unexpected position")
+      } else if (parent.lits(penultimateIdx) != uniC2) {
+        Left("encoding unification following eqFactoring found unification constraint 2 in unexpected position")
+      } else {
+        Right(Vector(penultimateIdx, lastIdx))
+      }
+    }
+  }
+
+  private def reconstructPreUniSubstParent(parent: Clause, termSubst: Seq[UniTermSubst], ctxt: EncUniCtx): Either[String, Seq[lpLiteralInst]] = {
+    val parentVarTypes = parent.implicitlyBound.toMap
+    val termMap = scala.collection.mutable.Map.empty[Int, Term]
+    val boundMap = scala.collection.mutable.Map.empty[Int, Int]
+
+    termSubst.foreach {
+      case UniTermSubst(sourceIndex, UniTermByTerm(term, _, _)) =>
+        termMap += (sourceIndex -> term)
+      case UniTermSubst(sourceIndex, UniTermByBoundVar(targetIndex)) =>
+        if (!parentVarTypes.contains(targetIndex)) {
+          return Left(s"PreUni substitution targets unknown variable $targetIndex")
+        }
+        boundMap += (sourceIndex -> targetIndex)
+    }
+
+    val subst = Subst.fromMaps(termMap.toMap, boundMap.toMap)
+    val substParent = parent.substitute(subst)
+    Right(substParent.lits.map(lit => lit2Lp(lit, ctxt.childVarMap, surpressReduction = false, replaceUnknownVars = true)))
+  }
+
+  private def normalizeRemainingPreUniLits(rawSubstParent: Seq[lpLiteralInst], encChildLits: Seq[lpLiteralInst], deletePositions: Seq[Int]): Either[String, Seq[lpLiteralInst]] = {
+    val deleteSet = deletePositions.toSet
+    val remainingParentPositions = rawSubstParent.indices.filterNot(deleteSet)
+
+    if (remainingParentPositions.length != encChildLits.length) {
+      return Left("PreUni with residual flex-flex literals is not encoded yet")
+    }
+
+    val normalized = rawSubstParent.toArray
+    remainingParentPositions.zipWithIndex.foreach {
+      case (parentPos, childPos) =>
+        val parentLit = rawSubstParent(parentPos)
+        val childLit = encChildLits(childPos)
+        if (parentLit == childLit) {
+          ()
+        } else if (parentLit.flipIfEq == childLit) {
+          normalized(parentPos) = childLit
+        } else {
+          return Left(s"PreUni substituted parent literal at position $parentPos does not match child literal $childPos")
+        }
+    }
+
+    Right(normalized.toVector)
+  }
+
+  private def flippedRemainingLitPositions(rawSubstParent: Seq[lpLiteralInst], normalizedSubstParent: Seq[lpLiteralInst]): Seq[Int] = {
+    rawSubstParent.zip(normalizedSubstParent).zipWithIndex.collect {
+      case ((before, after), idx) if before != after && before.flipIfEq == after => idx
+    }
+  }
 }

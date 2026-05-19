@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets
 import scala.collection.mutable
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, DefEncoding, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef, TermEncoding, TypeEncoding}
 import leo.modules.output.LPoutput.UnificationEncoding.encodePatternUni
+import leo.modules.output.LPoutput.PreUniVerification.encodePreUni
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -348,8 +349,11 @@ object LPoutput {
               }
 
             case leo.modules.calculus.PreUni =>
-              val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig.orig)
-              (toProofStepOld(stepName, encStep, "PreUni", encodingPreUni._1, encodingPreUni._2),outputInfo)
+              val encProof = encodePreUni(cl.annotation.parents.head, cl, Name(parentInLpEncID.head.name), sig)
+              encProof match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "PreUni", Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", Left(Seq.empty), Some(reason)), outputInfo)
+              }
 
             case leo.modules.calculus.RewriteSimp =>
               val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig.orig)
