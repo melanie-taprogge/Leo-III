@@ -281,9 +281,13 @@ object HuetsPreUnification extends Unification {
           val typeArgs2 = typeArgs(args2)
           val uniConstraints: Seq[UTEq] = typeArgs1.zip(typeArgs2)
           val uniResult = TypeUnification(uniConstraints)
-          if (uniResult.isDefined) {
-            (true, uniResult, Some(hd1.ty))
-          } else (true, None, Some(hd1.ty)) // This encodes: Applicable but not successful
+          val instHdTy1 = hd1.ty.instantiate(typeArgs1)
+          uniResult match {
+            case Some(uni) =>
+              val substHdTy = instHdTy1.substitute(uni)
+              (true, uniResult, Some(substHdTy))
+            case None => (true, None, None) // This encodes: Applicable but not successful
+          }
       }
       case _ => (false, None, None)
     }

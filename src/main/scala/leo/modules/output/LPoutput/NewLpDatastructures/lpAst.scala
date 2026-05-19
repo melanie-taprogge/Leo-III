@@ -3,6 +3,7 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.modules.HOLSignature
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Var}
+import leo.modules.output.LPoutput.NewLpDatastructures.OlMonoType.TyVar
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures.lpProofScriptStep
 
 
@@ -55,7 +56,7 @@ object LpType {
   /** Meta universe */
   case object LpSet extends LpType
   /** encoded HOL Types as ML Types */
-  final case class El(ol: OlType) extends LpType
+  final case class El(ol: OlMonoType) extends LpType
   /** HOL propositions as ML Types */
   final case class Prf(tm: LpTerm[Level.Obj]) extends LpType
   /** Dependant types */
@@ -67,13 +68,25 @@ object LpType {
 }
 
 /** Object-logic (HOL) types */
-sealed trait OlType
-object OlType {
-  final case class Base(sym: SymRef) extends OlType
+sealed trait OlMonoType
+object OlMonoType {
+  final case class Base(sym: SymRef) extends OlMonoType
   /** Object level function types */
-  final case class Fun(args: Seq[OlType]) extends OlType
+  final case class Fun(args: Seq[OlMonoType]) extends OlMonoType
+
   /** Type variables */
-  final case class TyVar(name: Name) extends OlType
+  final case class TyVar(name: Name) extends OlMonoType
+
+  /** Type Application */
+  final case class TyApp(hd: SymRef, args: Seq[OlMonoType]) extends OlMonoType
+}
+
+sealed trait OlPolyType
+object OlPolyType {
+
+  /** Type Quantification (Allowed only in prefix position) */
+  final case class TyQuant(binders: Seq[TyVar], body: OlMonoType) extends OlPolyType
+  final case class LiftedMono(ty: OlMonoType) extends OlPolyType
 }
 
 /** LpTerms (parametric in Level) */
@@ -102,8 +115,8 @@ sealed trait Arg[L <: Level]
 object Arg {
   final case class Implicit[L <: Level](t: LpTerm[L]) extends Arg[L]
   final case class Explicit[L <: Level](t: LpTerm[L]) extends Arg[L]
-  final case class ImplicitTypeArg[L <: Level](ty: OlType) extends Arg[L]
-  final case class ExplicitTypeArg[L <: Level](ty: OlType) extends Arg[L]
+  final case class ImplicitTypeArg[L <: Level](ty: OlMonoType) extends Arg[L]
+  final case class ExplicitTypeArg[L <: Level](ty: OlMonoType) extends Arg[L]
 }
 
 /** Statements in Lambdapi can be Declarations, Definitions or Rewrite Rules */
@@ -188,11 +201,11 @@ object HolBaseTypes {
   val realTyN: SymRef.Leo = SymRef.Leo(HOLSignature.realKey)
 
   // ** encoding as Lambdapi types
-  val O: OlType.Base = OlType.Base(oTyN)
-  val I: OlType.Base = OlType.Base(iTyN)
-  val Int: OlType.Base = OlType.Base(intTyN)
-  val Rat: OlType.Base = OlType.Base(rationalTyN)
-  val Real: OlType.Base = OlType.Base(realTyN)
+  val O: OlMonoType.Base = OlMonoType.Base(oTyN)
+  val I: OlMonoType.Base = OlMonoType.Base(iTyN)
+  val Int: OlMonoType.Base = OlMonoType.Base(intTyN)
+  val Rat: OlMonoType.Base = OlMonoType.Base(rationalTyN)
+  val Real: OlMonoType.Base = OlMonoType.Base(realTyN)
 }
 
 // ** HOL Constants
@@ -281,10 +294,10 @@ object LogicConst {
   /** Equality */
   object Eq {
     private val head = cEq
-    def apply(ty: OlType, l: LpTerm[Level.Obj], r: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    def apply(ty: OlMonoType, l: LpTerm[Level.Obj], r: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
       LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(l), E(r)))
 
-    def unapply(t: LpTerm[Level.Obj]): Option[(OlType, LpTerm[Level.Obj], LpTerm[Level.Obj])] = t match {
+    def unapply(t: LpTerm[Level.Obj]): Option[(OlMonoType, LpTerm[Level.Obj], LpTerm[Level.Obj])] = t match {
       case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(t), Arg.Explicit(l), Arg.Explicit(r))) => Some((t,l,r))
       case _ => None
     }
@@ -350,10 +363,10 @@ object LogicConst {
     private val cInEq = LpTerm.Const[Level.Obj](inEqN)
     private val head = cInEq
 
-    def apply(ty: OlType, l: LpTerm[Level.Obj], r: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    def apply(ty: OlMonoType, l: LpTerm[Level.Obj], r: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
       LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(l), E(r)))
 
-    def unapply(t: LpTerm[Level.Obj]): Option[(OlType, LpTerm[Level.Obj], LpTerm[Level.Obj])] = t match {
+    def unapply(t: LpTerm[Level.Obj]): Option[(OlMonoType, LpTerm[Level.Obj], LpTerm[Level.Obj])] = t match {
       case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(t), Arg.Explicit(l), Arg.Explicit(r))) => Some((t, l, r))
       case _ => None
     }

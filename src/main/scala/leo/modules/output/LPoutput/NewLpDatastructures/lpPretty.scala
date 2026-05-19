@@ -351,11 +351,11 @@ object Renderer {
     * @param sig Lambdapi Signature
     * @return The type as a string
     * */
-  private def olTy(ol: OlType, ro: RenderOptions, sig: LpSig): String = ol match {
-    case OlType.Base(SymRef.LP(qn)) => qname(qn, ro)
-    case OlType.Base(SymRef.Leo(id)) => qname(sig.typeNames(id), ro)
-    case OlType.TyVar(n) => n.value
-    case OlType.Fun(args) => s"(${args.map(olTy(_, ro, sig)).mkString(s" $tyConStr ")})"
+  private def olTy(ol: OlMonoType, ro: RenderOptions, sig: LpSig): String = ol match {
+    case OlMonoType.Base(SymRef.LP(qn)) => qname(qn, ro)
+    case OlMonoType.Base(SymRef.Leo(id)) => qname(sig.typeNames(id), ro)
+    case OlMonoType.TyVar(n) => n.value
+    case OlMonoType.Fun(args) => s"(${args.map(olTy(_, ro, sig)).mkString(s" $tyConStr ")})"
   }
 }
 

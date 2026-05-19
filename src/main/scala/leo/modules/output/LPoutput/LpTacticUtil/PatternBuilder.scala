@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput.LpTacticUtil
 
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Wildcard
-import leo.modules.output.LPoutput.NewLpDatastructures.{HolBaseTypes, Level, LogicConst, LpTerm, OlType, QName, SymRef, nAry}
+import leo.modules.output.LPoutput.NewLpDatastructures.{HolBaseTypes, Level, LogicConst, LpTerm, OlMonoType, QName, SymRef, nAry}
 
 object PatternBuilder {
 
@@ -18,7 +18,7 @@ object PatternBuilder {
     *                 False: Literal is negative and pattern should target the body only.
     */
   case class PatternInfo(position: Int,
-                         sideIfEq: Option[(Side, OlType)],
+                         sideIfEq: Option[(Side, OlMonoType)],
                          polarity: Boolean)
 
   /**

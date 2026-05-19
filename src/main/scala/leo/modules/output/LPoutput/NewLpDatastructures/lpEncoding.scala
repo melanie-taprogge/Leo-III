@@ -3,7 +3,7 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 import leo.Out
 import leo.datastructures.Signature.Key
 import leo.datastructures.{Clause, Literal, Term, Type}
-import leo.datastructures.Type.{∀, _}
+import leo.datastructures.Type._
 import leo.datastructures.Term._
 import leo.modules.HOLSignature._
 import leo.modules.output.LPoutput.EncodeResult.NotEncodable
@@ -13,7 +13,8 @@ import leo.modules.output._
 import leo.modules.output.ToTHF.{collectForallTys, collectTyLambdas}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, LpSet}
-import leo.modules.output.LPoutput.NewLpDatastructures.OlType.{Base, Fun, TyVar}
+import leo.modules.output.LPoutput.NewLpDatastructures.OlMonoType.{Base, Fun, TyApp, TyVar}
+import leo.modules.output.LPoutput.NewLpDatastructures.OlPolyType.{LiftedMono, TyQuant}
 import leo.modules.output.LPoutput.{nameDefn, nameSkDef}
 
 
@@ -33,17 +34,27 @@ object TypeEncoding {
   /** Assign name to bound type variables */
   @inline def tyVar2LP(tv: Int): Name = nameTyVar(tv)
 
+  def polyType2LP(ty: Type): OlPolyType = ty match {
+    case ∀(_) =>
+      val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
+      val encBodyTy = type2LP(bodyTy)
+      val quantifiers = (1 to tyAbsCount).map(scope => OlMonoType.TyVar(tyVar2LP(scope)))
+      TyQuant(quantifiers, encBodyTy)
+    case _ => LiftedMono(type2LP(ty))
+  }
+
   /** Translate (Object-logical HOL) types to the Lambdapi Encoding */
-  def type2LP(ty: Type): OlType = {
+  def type2LP(ty: Type): OlMonoType = {
     ty match {
       case BaseType(id) =>
         Base(SymRef.Leo(id))
       case ComposedType(id, args) =>
-        args.map(type2LP)
-        throw new Exception(s"attempting to encode composed Type, this was never tested! \ninput was ${ty.pretty}")
+        val encHd = SymRef.Leo(id)
+        val encArgs = args.map(type2LP)
+        TyApp(encHd,encArgs)
       case BoundType(scope) =>
         val tyName = tyVar2LP(scope)
-        OlType.TyVar(tyName)
+        OlMonoType.TyVar(tyName)
       case tl -> tr =>
         val encodeTl = type2LP(tl)
         val encodeTr = type2LP(tr)
@@ -52,7 +63,8 @@ object TypeEncoding {
         throw new Error(s"ProductType not yet encoded, unable to do ${ty.pretty}")
       //todo
       case ∀(_) =>
-        throw new Error(s"Unexpected polymporphic type ${ty.pretty}")
+//        TyQuant
+        throw new Error(s"Error in LP Encoding: Found quantified type outside of prefix position")
       //todo
     }
   }
@@ -75,7 +87,7 @@ object TypeEncoding {
   /** Helper for Decomp steps:
     * safe encoder of types that does not throw on poly types but just regurns a Not encodable mesage
     */
-  def safeEncTy(ty: Type): Either[NotEncodable, OlType] = {
+  def safeEncTy(ty: Type): Either[NotEncodable, OlMonoType] = {
     ty match {
       case ComposedType(_, _) =>
         Left(NotEncodable("Error: trying to encode ComposedType"))
@@ -87,8 +99,8 @@ object TypeEncoding {
     }
   }
 
-  def safeEncTypes(tys: Seq[Type]): Either[NotEncodable, Vector[OlType]] = {
-    tys.foldLeft[Either[NotEncodable, Vector[OlType]]](Right(Vector.empty)) {
+  def safeEncTypes(tys: Seq[Type]): Either[NotEncodable, Vector[OlMonoType]] = {
+    tys.foldLeft[Either[NotEncodable, Vector[OlMonoType]]](Right(Vector.empty)) {
       case (Left(err), _) => Left(err)
       // else, continue
       case (Right(acc), nextTy) =>
@@ -128,7 +140,7 @@ object TermEncoding {
   }
 
   /** Translate a sequence of arguments to Lambdapi and marks them as explicit */
-  @inline private def args2LP(args: Seq[Either[Term, Type]], bVars: Map[Int, String], supressReduction: Boolean = false, replaceUnknownVars: Boolean = false): List[Arg[Level.Obj]] = {
+  @inline def args2LP(args: Seq[Either[Term, Type]], bVars: Map[Int, String], supressReduction: Boolean = false, replaceUnknownVars: Boolean = false): List[Arg[Level.Obj]] = {
     args.map(arg2LP(_, bVars, supressReduction, replaceUnknownVars)).toList
   }
 
@@ -369,7 +381,7 @@ object ClauseEncoding {
     import TermEncoding.term2LP
 
     /** Helper constructing the actual equality making up the definition */
-    private def constDfn(dnfName: QName, ty: OlType, hd: LpTerm[Level.Obj], defn: LpTerm[Level.Obj], freeVars: Seq[Var[Level.Obj]]): Stmt.Declaration = {
+    private def constDfn(dnfName: QName, ty: OlMonoType, hd: LpTerm[Level.Obj], defn: LpTerm[Level.Obj], freeVars: Seq[Var[Level.Obj]]): Stmt.Declaration = {
       val defAsEq = LogicConst.Eq(ty, hd, defn)
       val bindings: Seq[(Name, LpType)] = freeVars.map(v => (v.name, v.ty.get)) //todo: ensure all have type?
       Stmt.Declaration(dnfName.local, bindings, Lifting.ProofTerm(defAsEq))

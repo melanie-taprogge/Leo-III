@@ -149,7 +149,7 @@ object FunRules {
     import Names._
 
     def decompStep[L <: Level] = LpTerm.Const[L](decomp_step_S)
-    def mkDecompStepObj(a: OlType, b: OlType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], g: LpTerm[Level.Obj], h0: Option[LpTerm[Level.Obj]]): LpTerm[Level.Obj] = {
+    def mkDecompStepObj(a: OlMonoType, b: OlMonoType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], g: LpTerm[Level.Obj], h0: Option[LpTerm[Level.Obj]]): LpTerm[Level.Obj] = {
       val maybeH: Seq[Arg.Explicit[Level.Obj]] = h0 match {
         case Some(term) => Seq(Arg.Explicit(term))
         case None => Seq.empty
@@ -157,14 +157,14 @@ object FunRules {
       LpTerm.App(decompStep[Level.Obj], Seq(Arg.ImplicitTypeArg[Level.Obj](a), Arg.ImplicitTypeArg[Level.Obj](b), Arg.Explicit(s), Arg.Explicit(t), Arg.Explicit(f), Arg.Explicit(g)) ++ maybeH)
     }
 
-    def DecompStepRes(a: OlType, b: OlType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], g: LpTerm[Level.Obj]): (lpLiteralInst, lpLiteralInst) = {
+    def DecompStepRes(a: OlMonoType, b: OlMonoType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], g: LpTerm[Level.Obj]): (lpLiteralInst, lpLiteralInst) = {
       val newEqLit = lpLiteralInst(LogicConst.Not(LogicConst.Eq(a, s, t)), false, true)
       val newAppHdEq = lpLiteralInst(LogicConst.Not(LogicConst.Eq(b, f, g)), false, true)
       (newAppHdEq, newEqLit)
     }
 
     def decompSingle[L <: Level] = LpTerm.Const[L](decomp_single_S)
-    def mkDecompSingleObj(a: OlType, b: OlType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], h0: Option[LpTerm[Level.Obj]]): LpTerm[Level.Obj] = {
+    def mkDecompSingleObj(a: OlMonoType, b: OlMonoType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj], f: LpTerm[Level.Obj], h0: Option[LpTerm[Level.Obj]]): LpTerm[Level.Obj] = {
       val maybeH: Seq[Arg.Explicit[Level.Obj]] = h0 match {
         case Some(term) => Seq(Arg.Explicit(term))
         case None => Seq.empty
@@ -172,7 +172,7 @@ object FunRules {
       LpTerm.App(decompSingle[Level.Obj], Seq(Arg.ImplicitTypeArg[Level.Obj](a), Arg.ImplicitTypeArg[Level.Obj](b), Arg.Explicit(s), Arg.Explicit(t), Arg.Explicit(f)) ++ maybeH)
     }
 
-    def DecompSingleResult(a: OlType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj]): lpLiteralInst = {
+    def DecompSingleResult(a: OlMonoType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj]): lpLiteralInst = {
       lpLiteralInst(LogicConst.Not(LogicConst.Eq(a,s,t)),false,true)
     }
   }

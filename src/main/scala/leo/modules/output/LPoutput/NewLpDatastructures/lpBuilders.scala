@@ -6,7 +6,7 @@ import leo.datastructures.{Clause, fuseMaps}
 import leo.modules.output.LPoutput.NewLpDatastructures.Lifting.{ProofTerm, liftOlVars}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.Pi
-import leo.modules.output.LPoutput.NewLpDatastructures.OlType.TyVar
+import leo.modules.output.LPoutput.NewLpDatastructures.OlMonoType.TyVar
 
 //////////////////////////////////////////
 // smart constructors for things like clauses, conjunctions, disjunctions, etc.

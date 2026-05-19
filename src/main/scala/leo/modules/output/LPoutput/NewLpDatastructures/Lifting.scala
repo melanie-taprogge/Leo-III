@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{LpSet, Prf}
-import leo.modules.output.LPoutput.NewLpDatastructures.OlType.TyVar
+import leo.modules.output.LPoutput.NewLpDatastructures.OlMonoType.TyVar
 
 /** Constructors for Lambdapi meta-level Types and Terms based on object-level instances **/
 object Lifting {

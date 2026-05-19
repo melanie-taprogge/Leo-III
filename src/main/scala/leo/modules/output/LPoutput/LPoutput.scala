@@ -531,7 +531,6 @@ object LPoutput {
 
 
     // encode the clauses representing the steps
-    // todo: Also make it possible to just output one long lambda-term
     val compressedProof = proof
     var idClauseMap: mutable.HashMap[Long, ClauseProxy] = mutable.HashMap.empty
     val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty
