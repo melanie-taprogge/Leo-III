@@ -346,7 +346,9 @@ object ClauseEncoding {
   } // todo: potentially pattern match to also make literals negative that leo thinks are positive but have a leading negation?
 
   /** Encode a sequence of Leo-III literals to Lambdapi */
-  @inline def lits2Lp(lits: Seq[Literal], bVarMap: Map[Int, String]): Seq[lpLiteralInst] = lits.map(lit2Lp(_, bVarMap))
+  @inline def lits2Lp(lits: Seq[Literal], bVarMap: Map[Int, String], replaceUnknownVars: Boolean = false): Seq[lpLiteralInst] = {
+    lits.map(lit => lit2Lp(lit, bVarMap, replaceUnknownVars = replaceUnknownVars))
+  }
 
   /**
     * Translate Leo-III clauses to the Lambdapi Encoding
@@ -416,7 +418,6 @@ object ClauseEncoding {
     }
 
   }
-
 
 
 

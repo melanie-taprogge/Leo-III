@@ -181,7 +181,7 @@ object Util {
     */
   def reconstructSubstParent(origTermSubst: Subst, origTypeSubst: Subst, litTransf: LiteralTransformation, ctxt: EncUniCtx, parentCl: Clause): Option[Seq[lpLiteralInst]]= {
     val substParent = parentCl.substitute(origTermSubst, origTypeSubst)
-    val encSubstParent = lits2Lp(substParent.lits, ctxt.sharedVarMap)
+    val encSubstParent = lits2Lp(substParent.lits, ctxt.childVarMap, replaceUnknownVars = true)
     applyLiteralTransformations(encSubstParent, litTransf)
   }
 
@@ -1043,9 +1043,9 @@ object PreUniVerification {
     if (typeSubst.nonEmpty) {
       return NotEncodable("LP encoding of type unification not encoded yet")
     }
-    if (termSubst.isEmpty) {
-      return NotEncodable("no term unifications to encode")
-    }
+//    if (termSubst.isEmpty) {
+//      return NotEncodable("no term unifications to encode")
+//    }
 
     val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
     val EncUniCtx(encChild, encParent, _, _, childVarNames, _, _) = ctxt
@@ -1057,6 +1057,8 @@ object PreUniVerification {
     }
 
     val deletePositions = deletedUniLits.map(_.position)
+
+    Out.lp_debug_info(s"Unification literal positions in original clause: $deletePositions")
 
     val childToParentIdx = childToSubstitutedParentIdx(parent.cl.lits.length, deletePositions, encChild.lits.length) match {
       case Left(reason) => return NotEncodable(reason)
