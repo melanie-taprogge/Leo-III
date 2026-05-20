@@ -1019,6 +1019,14 @@ package inferenceControl {
     type OtherLits = Seq[Literal]
     type UniResult = (Clause, (Unification#TermSubst, Unification#TypeSubst))
 
+    object PreUniMode {
+      val General = "generalPreUni"
+      val AfterParamod = "uniAfterParamod"
+      val AfterFactoring = "uniAfterFactoring"
+      val ExtPreprocess = "uniInExtPreprocess"
+      val AfterBoolExtPreprocess = "uniAfterBoolExtPreprocess"
+    }
+
     final def detUniInferences(cl: AnnotatedClause)(implicit state: LocalState): Set[AnnotatedClause] = {
       if (cl.cl.negLits.isEmpty) {
         Out.trace(s"[detUni] On ${cl.id}, skipping (no negative literal)")
@@ -1092,7 +1100,7 @@ package inferenceControl {
       val uniLitInfo = UniLitInfo(cl.lits.length -1,cl.lits.last)
 
       val uniEq = getUniTaskFromLit(uniLit)
-      val uniResult0 = doUnify0(cl0, freshVarGen, Vector(uniEq), cl.lits.init, Seq(uniLitInfo))(state)
+      val uniResult0 = doUnify0(cl0, freshVarGen, Vector(uniEq), cl.lits.init, Seq(uniLitInfo), PreUniMode.AfterParamod)(state)
       // 1 if not unifiable, check if uni constraints can be simplified
       // if it can be simplified, return simplified constraints
       // if it cannot be simplied, drop clause
@@ -1149,7 +1157,7 @@ package inferenceControl {
       }
       val uniLit1Info = UniLitInfo(cl.lits.length -1,uniLit1)
       val uniLit2Info = UniLitInfo(cl.lits.length - 2,uniLit2)
-      val uniResult0 = doUnify0(cl0, freshVarGen, Vector(uniEq1, uniEq2), cl.lits.init.init,Seq(uniLit1Info,uniLit2Info))(state)
+      val uniResult0 = doUnify0(cl0, freshVarGen, Vector(uniEq1, uniEq2), cl.lits.init.init,Seq(uniLit1Info,uniLit2Info), PreUniMode.AfterFactoring)(state)
       // 1 if not unifiable, check if uni constraints can be simplified
       // if it can be simplified, return simplified constraints
       // if it cannot be simplied, drop clause
@@ -1179,25 +1187,19 @@ package inferenceControl {
         detUniSimps
       } else {
         var uniResult: Set[AnnotatedClause] = Set.empty
-        var newResult: Set[AnnotatedClause] = Set.empty
         val uniResultIt = uniResult0.iterator
         while (uniResultIt.hasNext) {
           val uniRes = uniResultIt.next()
           uniResult = uniResult union defaultUnify(freshVarGen, uniRes)(state)
         }
-        // add the information about the kind of unification
-        uniResult foreach { aCl =>
-          val addInfo = aCl.furtherInfo
-          addInfo.addInfoUniRule = ("uniAfterFactoring", (uniLit1, uniLit2)) //todo do not blindly take all of the properties
-          newResult = newResult + AnnotatedClause(aCl.id, aCl.cl, aCl.role, aCl.annotation, aCl.properties, addInfo)
-        }
-        newResult
+        uniResult
       }
     }
 
 
     private final def defaultUnify0(freshVarGen: FreshVarGen, cl: AnnotatedClause)(state: LocalState): Set[AnnotatedClause] = {
 //      val sig: Signature = state.signature
+      val mode: String = PreUniMode.General
       val litIt = cl.cl.lits.iterator.zipWithIndex
       var uniLits: UniLits = Vector()
       var uniLitsInfo: Vector[UniLitInfo] = Vector()
@@ -1213,7 +1215,7 @@ package inferenceControl {
         }
       }
       if (uniLits.nonEmpty) {
-        doUnify0(cl, freshVarGen, uniLits, otherLits, uniLitsInfo)(state)
+        doUnify0(cl, freshVarGen, uniLits, otherLits, uniLitsInfo, mode)(state)
       } else Set.empty
     }
     private final def defaultUnify(freshVarGen: FreshVarGen, cl: AnnotatedClause)(state: LocalState): Set[AnnotatedClause] = {
@@ -1229,8 +1231,7 @@ package inferenceControl {
     }
 
 
-    protected[control] final def doUnify0(cl: AnnotatedClause, freshVarGen: FreshVarGen,
-                               uniLits: UniLits, otherLits: OtherLits, uniLitInfo: Seq[UniLitInfo])(state: LocalState):  Set[AnnotatedClause] = {
+    protected[control] final def doUnify0(cl: AnnotatedClause, freshVarGen: FreshVarGen, uniLits: UniLits, otherLits: OtherLits, uniLitInfo: Seq[UniLitInfo], mode: String = PreUniMode.General)(state: LocalState):  Set[AnnotatedClause] = {
       val sig = state.signature
       if (isAllPattern(uniLits)) {
         val result = doUnifyAllPattern(cl, freshVarGen, uniLits, otherLits, uniLitInfo)(sig)
@@ -1242,7 +1243,7 @@ package inferenceControl {
       } else {
         val uniResultIterator = PreUni(freshVarGen, uniLits, otherLits, state.runStrategy.uniDepth)(sig)
         val uniResult = uniResultIterator.take(state.runStrategy.unifierCount).toSet
-        val result = uniResult.map(res => annotate(cl, res.asUniResult, PreUni, uniLitInfo, res.literalTransformations)(sig))
+        val result = uniResult.map(res => annotate(cl, res.asUniResult, PreUni, uniLitInfo, res.literalTransformations, mode)(sig))
         leo.Out.finest(s"doUnify0 result:\n${result.map(_.pretty(sig)).mkString("\n")}")
         result
       }
@@ -1271,14 +1272,21 @@ package inferenceControl {
                                uniResult: UniResult,
                                rule: CalculusRule,
                                uniLitsInfo: Seq[UniLitInfo],
-                               flippedIds: LiteralTransformation)(sig: Signature): AnnotatedClause = {
+                               flippedIds: LiteralTransformation,
+                               mode: String = "")(sig: Signature): AnnotatedClause = {
       val (clause, subst) = uniResult
       val (tPTPRepresent, addInfoUnification0) = ToTHF.apply_andTrack(subst._1, subst._2, origin.cl.implicitlyBound, origin.cl.typeVars)(sig)
       val addInfoUnification = FurtherInfo()
       val uniLitSubst = uniLitsInfo.map(uniLit => UniLitInfo(uniLit.position, uniLit.literal.substitute(subst._1, subst._2)))
       addInfoUnification.addInfoUni = AddInfoUni(addInfoUnification0, uniLitSubst, flippedIds, subst._1, subst._2)
+      if (rule == PreUni) addInfoUnification.addInfoUniRule = (mode, preUniModeLits(uniLitsInfo))
       val res = AnnotatedClause(clause, Role_Plain, InferredFrom(rule, Seq((origin, tPTPRepresent))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,origin.properties | ClauseAnnotation.PropUnified),addInfoUnification)
       res
+    }
+
+    private final def preUniModeLits(uniLitsInfo: Seq[UniLitInfo]): (Literal, Literal) = {
+      val fallback = Literal(leo.modules.HOLSignature.LitFalse(),false)
+      (uniLitsInfo.headOption.map(_.literal).getOrElse(fallback), uniLitsInfo.drop(1).headOption.map(_.literal).getOrElse(fallback))
     }
 
 
@@ -1919,7 +1927,7 @@ package inferenceControl {
     }
 
     final def extPreprocessUnify(cls: Set[AnnotatedClause])(implicit state: State[AnnotatedClause]): Set[AnnotatedClause] = {
-      import UnificationControl.doUnify0
+      import UnificationControl.{PreUniMode, doUnify0}
       implicit val sig: Signature = state.signature
       var result: Set[AnnotatedClause] = Set.empty
       val clIt = cls.iterator
@@ -1953,7 +1961,7 @@ package inferenceControl {
         // and add it to the solutions
         // (B) if also boolean extensionality literals present, add (BE/cnf) treated clause to result set, else
         // insert the original clause.
-        if (uniLits.nonEmpty) result = result union doUnify0(cl, freshVarGen(cl.cl), uniLits.map(l => (l.left, l.right)), nonUniLits, uniLitsInfo)(state)
+        if (uniLits.nonEmpty) result = result union doUnify0(cl, freshVarGen(cl.cl), uniLits.map(l => (l.left, l.right)), nonUniLits, uniLitsInfo, PreUniMode.ExtPreprocess)(state)
 
         if (boolExtLits.isEmpty) {
           val furtherInfo = FurtherInfo(addInfoSimpRule = Some("uniLitSimp1"))
@@ -1982,7 +1990,7 @@ package inferenceControl {
             val liftedClOtherLits = liftedClOtherLitsIdx.map(_._1)
             val liftedClUniLits = liftedClUniLitsIdx.map(_._1)
             val uniLitsInfo = liftedClUniLitsIdx.map(litIdx => UniLitInfo(litIdx._2,litIdx._1))
-            val liftedUnified = doUnify0(cl, freshVarGen(liftedCl.cl), liftedClUniLits.map(l => (l.left, l.right)), liftedClOtherLits, uniLitsInfo)(state)
+            val liftedUnified = doUnify0(cl, freshVarGen(liftedCl.cl), liftedClUniLits.map(l => (l.left, l.right)), liftedClOtherLits, uniLitsInfo, PreUniMode.AfterBoolExtPreprocess)(state)
             if (liftedUnified.isEmpty) {
               val (tySubst, res) = Simp.uniLitSimp(liftedClUniLits)(sig)
               if (res != liftedClUniLits) {
