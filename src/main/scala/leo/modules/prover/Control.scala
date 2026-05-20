@@ -1952,7 +1952,7 @@ package inferenceControl {
             uniLits = lit +: uniLits
             uniLitsInfo = UniLitInfo(idx, lit) +: uniLitsInfo
           }
-          else nonUniLits = lit +: nonUniLits
+          else nonUniLits = nonUniLits :+ lit
           if (BoolExt.canApply(lit)) boolExtLits = lit +: boolExtLits
           else nonBoolExtLits = lit +: nonBoolExtLits
         }
@@ -1990,7 +1990,7 @@ package inferenceControl {
             val liftedClOtherLits = liftedClOtherLitsIdx.map(_._1)
             val liftedClUniLits = liftedClUniLitsIdx.map(_._1)
             val uniLitsInfo = liftedClUniLitsIdx.map(litIdx => UniLitInfo(litIdx._2,litIdx._1))
-            val liftedUnified = doUnify0(cl, freshVarGen(liftedCl.cl), liftedClUniLits.map(l => (l.left, l.right)), liftedClOtherLits, uniLitsInfo, PreUniMode.AfterBoolExtPreprocess)(state)
+            val liftedUnified = doUnify0(liftedCl, freshVarGen(liftedCl.cl), liftedClUniLits.map(l => (l.left, l.right)), liftedClOtherLits, uniLitsInfo, PreUniMode.AfterBoolExtPreprocess)(state)
             if (liftedUnified.isEmpty) {
               val (tySubst, res) = Simp.uniLitSimp(liftedClUniLits)(sig)
               if (res != liftedClUniLits) {
