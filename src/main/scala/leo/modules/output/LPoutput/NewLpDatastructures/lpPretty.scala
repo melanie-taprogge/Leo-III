@@ -86,7 +86,7 @@ object Renderer {
     case Simplify(ns,onlyBeta) =>
       val maybeRuleOff = if (onlyBeta) " rule off " else ""
       s"simplify ${ns.map(_.value).mkString(" ")}$maybeRuleOff;"
-    case Repeat(step) => s"repeat ${proof(step, ro, sig)};"
+    case Repeat(step) => s"repeat ${proof(step, ro, sig).stripSuffix(";")};"
     case Eval(tac) => s"eval ${renderTerm(tac, ro, sig)};"
     case Comment(com) => s"// $com;"
     case Admit => s"admit;"
@@ -358,7 +358,6 @@ object Renderer {
     case OlMonoType.Fun(args) => s"(${args.map(olTy(_, ro, sig)).mkString(s" $tyConStr ")})"
   }
 }
-
 
 
 

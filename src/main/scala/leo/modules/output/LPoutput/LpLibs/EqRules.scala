@@ -63,8 +63,9 @@ object EqRules {
     import AsTerms.lpSimp_eqTop
     def lpConst[L <: Level] = lpSimp_eqTop
 
-    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l match {
+    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Eq(_, lhs, LogicConst.Top) => Some(lpLiteralInst(lhs,true,false))
+      case LogicConst.Not(LogicConst.Eq(_, lhs, LogicConst.Top)) => Some(lpLiteralInst(LogicConst.Not(lhs),false,false))
       case _ => None
     }
   }
@@ -73,8 +74,9 @@ object EqRules {
     import AsTerms.lpSimp_topEq
     def lpConst[L <: Level] = lpSimp_topEq
 
-    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l match {
+    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Eq(_, LogicConst.Top, rhs) => Some(lpLiteralInst(rhs, true, false))
+      case LogicConst.Not(LogicConst.Eq(_, LogicConst.Top, rhs)) => Some(lpLiteralInst(LogicConst.Not(rhs), false, false))
       case _ => None
     }
   }
@@ -85,8 +87,9 @@ object EqRules {
 
     def lpConst[L <: Level] = lpSimp_eqBot
 
-    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l match {
-      case LogicConst.Eq(_, lhs, LogicConst.Bot) => Some(lpLiteralInst(LogicConst.Not(lhs), true, false))
+    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
+      case LogicConst.Eq(_, lhs, LogicConst.Bot) => Some(lpLiteralInst(LogicConst.Not(lhs), false, false))
+      case LogicConst.Not(LogicConst.Eq(_, lhs, LogicConst.Bot)) => Some(lpLiteralInst(LogicConst.Not(LogicConst.Not(lhs)), false, false))
       case _ => None
     }
   }
@@ -97,8 +100,9 @@ object EqRules {
 
     def lpConst[L <: Level] = lpSimp_botEq
 
-    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l match {
-      case LogicConst.Eq(_, LogicConst.Bot, rhs) => Some(lpLiteralInst(LogicConst.Not(rhs), true, false))
+    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
+      case LogicConst.Eq(_, LogicConst.Bot, rhs) => Some(lpLiteralInst(LogicConst.Not(rhs), false, false))
+      case LogicConst.Not(LogicConst.Eq(_, LogicConst.Bot, rhs)) => Some(lpLiteralInst(LogicConst.Not(LogicConst.Not(rhs)), false, false))
       case _ => None
     }
   }
@@ -109,8 +113,9 @@ object EqRules {
 
     def lpConst[L <: Level] = lpSimp_negEqBot
 
-    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l match {
+    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Not(LogicConst.Eq(_, lhs, LogicConst.Bot)) => Some(lpLiteralInst(lhs, true, false))
+      case LogicConst.Not(LogicConst.Not(LogicConst.Eq(_, lhs, LogicConst.Bot))) => Some(lpLiteralInst(LogicConst.Not(lhs), false, false))
       case _ => None
     }
   }
@@ -121,8 +126,9 @@ object EqRules {
 
     def lpConst[L <: Level] = lpSimp_negBotEq
 
-    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l match {
+    def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Not(LogicConst.Eq(_, LogicConst.Bot, rhs)) => Some(lpLiteralInst(rhs, true, false))
+      case LogicConst.Not(LogicConst.Not(LogicConst.Eq(_, LogicConst.Bot, rhs))) => Some(lpLiteralInst(LogicConst.Not(rhs), false, false))
       case _ => None
     }
   }
@@ -178,4 +184,3 @@ object FunRules {
   }
 
 }
-
