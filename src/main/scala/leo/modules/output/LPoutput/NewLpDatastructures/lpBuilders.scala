@@ -50,6 +50,55 @@ object nAry {
     case _ => throw new Exception(s"Error in LP-Encoding: Trying to construct a binary connective term for 0 elements and connective $conn")
   }
 }
+
+/**
+  * Small smart constructors for recurring object-level Lambdapi AST fragments.
+  *
+  * These helpers deliberately stay close to the core AST:
+  *   - binders are ordinary `LpTerm.Var[Level.Obj]` values
+  *   - lambda binders reuse the variable name and type
+  *   - Π binders are obtained by lifting those same object variables
+  */
+object lpTermBuilder {
+
+  /** Apply an object-level term to explicit object-level arguments. */
+  def app(f: LpTerm[Level.Obj], args: Seq[LpTerm[Level.Obj]]): LpTerm[Level.Obj] =
+    if (args.isEmpty) f else LpTerm.App(f,args.map(Arg.Explicit[Level.Obj]))
+
+  /** Reference to a proof-local Lambdapi symbol. */
+  def localObj(name: Name): LpTerm[Level.Obj] =
+    LpTerm.Const[Level.Obj](SymRef.LP(QName.local(name.value)))
+
+  /** The HOL type of an object-level variable encoded as `τ a`. */
+  def olTy(v: Var[Level.Obj]): OlMonoType = v.ty match {
+    case Some(LpType.El(ty)) => ty
+    case other => throw new IllegalArgumentException(s"Expected object variable with HOL type, got $other")
+  }
+
+  /** Wrap an object-level term in lambdas over the given object variables. */
+  def lam(binders: Seq[Var[Level.Obj]], body: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    binders.foldRight(body) { case (v, acc) => LpTerm.Lam[Level.Obj](v.name -> v.ty, acc) }
+
+  /** Wrap a meta-level type in Π binders over the given object variables. */
+  def pi(binders: Seq[Var[Level.Obj]], body: LpType): LpType =
+    if (binders.isEmpty) body else Pi(binders.map(Lifting.OlVarM(_)), body)
+
+  /** Build the object-level function type represented by lambda-wrapping a term of `bodyTy`. */
+  def funTy(binders: Seq[Var[Level.Obj]], bodyTy: OlMonoType): OlMonoType =
+    if (binders.isEmpty) bodyTy else OlMonoType.Fun(binders.map(olTy) :+ bodyTy)
+
+  /** Build a negated equational literal. */
+  def negEq(ty: OlMonoType, lhs: LpTerm[Level.Obj], rhs: LpTerm[Level.Obj]): lpLiteralInst =
+    lpLiteralInst(Not(Eq(ty,lhs,rhs)),polarity = false,eq = true)
+
+  /** Build a proof type of the form `π premise -> π (l1 ∨ ... ∨ ln)`. */
+  def proofArrow(premise: lpLiteralInst, derived: Seq[lpLiteralInst]): LpType =
+    LpType.Arrow(LpType.Prf(premise.term), LpType.Prf(nAry.disjunction(derived.map(_.term))))
+
+  /** Build the type of a possibly binder-lifted literal transformation rule. */
+  def ruleType(binders: Seq[Var[Level.Obj]], premise: lpLiteralInst, derived: Seq[lpLiteralInst]): LpType =
+    pi(binders, proofArrow(premise, derived))
+}
 /**
   * A Lambdapi representation of a literal.
   *
@@ -148,6 +197,3 @@ object lpClauseInst {
     (fullBvarsMap, encCls0, encCls1)
   }
 }
-
-
-

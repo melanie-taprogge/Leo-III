@@ -19,12 +19,13 @@ object EqRules {
     private val botEq = "⊥="
     private val negEqBot = "=⊥'"
     private val negBotEq = "⊥='"
+    private val expand_lit = "expand_lit"
 
 
     // Standard Library Theorems of Equality
     private val eqImpS = "=⇒"
 
-    val allAscii = Seq()
+    val allAscii = Seq(expand_lit)
 
     private[EqRules] val negEq_idem_S: SymRef = SymRef.LP(QName.local(negEq_idem))
     private[EqRules] val orBot_S: SymRef = SymRef.LP(QName.local(orBot))
@@ -34,6 +35,7 @@ object EqRules {
     private[EqRules] val botEq_S: SymRef = SymRef.LP(QName.local(botEq))
     private[EqRules] val negEqBot_S: SymRef = SymRef.LP(QName.local(negEqBot))
     private[EqRules] val negBotEq_S: SymRef = SymRef.LP(QName.local(negBotEq))
+    private[EqRules] val expand_lit_S: SymRef = SymRef.LP(QName.local(expand_lit))
 
     private[EqRules] val eqImp_S: SymRef = SymRef.LP(QName.local(eqImpS))
 
@@ -50,7 +52,11 @@ object EqRules {
     def lpSimp_botEq[L <: Level] = LpTerm.Const[L](botEq_S)
     def lpSimp_negEqBot[L <: Level] = LpTerm.Const[L](negEqBot_S)
     def lpSimp_negBotEq[L <: Level] = LpTerm.Const[L](negBotEq_S)
+    def expandLit[L <: Level] = LpTerm.Const[L](expand_lit_S)
     def eqImp[L <: Level] = LpTerm.Const[L](eqImp_S)
+
+    def mkExpandLit(a: OlMonoType, b: OlMonoType, f: LpTerm[Level.Obj], g: LpTerm[Level.Obj]): LpTerm[Level.Meta] =
+      LpTerm.App(expandLit[Level.Meta], Seq(Arg.ImplicitTypeArg[Level.Meta](a), Arg.ImplicitTypeArg[Level.Meta](b), Arg.Explicit(LpTerm.Obj(f)), Arg.Explicit(LpTerm.Obj(g))))
 
   }
 
@@ -143,11 +149,15 @@ object FunRules {
     // ** Names as Strings
     private val decomp_step = "Decomp_step"
     private val decomp_single = "Decomp_single"
+    private val lift_decomp_step_binder = "lift_decomp_step_binder"
+    private val lift_decomp_single_binder = "lift_decomp_single_binder"
 
-    val allAscii = Seq(decomp_step,decomp_single)
+    val allAscii = Seq(decomp_step,decomp_single,lift_decomp_step_binder,lift_decomp_single_binder)
 
     private[FunRules] val decomp_step_S: SymRef = SymRef.LP(QName.local(decomp_step))
     private[FunRules] val decomp_single_S: SymRef = SymRef.LP(QName.local(decomp_single))
+    private[FunRules] val lift_decomp_step_binder_S: SymRef = SymRef.LP(QName.local(lift_decomp_step_binder))
+    private[FunRules] val lift_decomp_single_binder_S: SymRef = SymRef.LP(QName.local(lift_decomp_single_binder))
   }
 
   object AsTerms {
@@ -180,6 +190,64 @@ object FunRules {
 
     def DecompSingleResult(a: OlMonoType, s: LpTerm[Level.Obj], t: LpTerm[Level.Obj]): lpLiteralInst = {
       lpLiteralInst(LogicConst.Not(LogicConst.Eq(a,s,t)),false,true)
+    }
+
+    /**
+      * One-binder lifting lemma for Decomp_step.
+      *
+      * The Lambdapi theorem has the following schematic shape:
+      *   (Π x, π (¬ lhs x = rhs x) -> π (¬ cl x = cr x ∨ ¬ el x = er x))
+      *   -> π (¬ (λx. lhs x) = (λx. rhs x))
+      *   -> π (¬ (λx. cl x) = (λx. cr x) ∨ ¬ (λx. el x) = (λx. er x))
+      */
+    def liftDecompStepBinder[L <: Level] = LpTerm.Const[L](lift_decomp_step_binder_S)
+
+    def mkLiftDecompStepBinderObj(binderTy: OlMonoType, resultTy: OlMonoType, residualTy: OlMonoType, argTy: OlMonoType, lhs: LpTerm[Level.Obj], rhs: LpTerm[Level.Obj], lhsResidual: LpTerm[Level.Obj], rhsResidual: LpTerm[Level.Obj], lhsArg: LpTerm[Level.Obj], rhsArg: LpTerm[Level.Obj], bodyProof: Option[LpTerm[Level.Obj]]): LpTerm[Level.Obj] = {
+      val maybeBodyProof = bodyProof.map(Arg.Explicit[Level.Obj]).toSeq
+      LpTerm.App(liftDecompStepBinder[Level.Obj], Seq(Arg.ImplicitTypeArg[Level.Obj](binderTy), Arg.ImplicitTypeArg[Level.Obj](resultTy), Arg.ImplicitTypeArg[Level.Obj](residualTy), Arg.ImplicitTypeArg[Level.Obj](argTy), Arg.Explicit(lhs), Arg.Explicit(rhs), Arg.Explicit(lhsResidual), Arg.Explicit(rhsResidual), Arg.Explicit(lhsArg), Arg.Explicit(rhsArg)) ++ maybeBodyProof)
+    }
+
+    /**
+      * Result shape of a Decomp_step instance lifted under `binders`.
+      *
+      * Returns the initial literal and the two replacement literals:
+      *   ¬((λ xs. f xs (s xs)) = (λ xs. g xs (t xs)))
+      *   ↦ ¬((λ xs. f xs) = (λ xs. g xs)) ∨ ¬((λ xs. s xs) = (λ xs. t xs))
+      */
+    def LiftedDecompStepResult(binders: Seq[LpTerm.Var[Level.Obj]], argTy: OlMonoType, resultTy: OlMonoType, lhsArg: LpTerm[Level.Obj], rhsArg: LpTerm[Level.Obj], lhsFun: LpTerm[Level.Obj], rhsFun: LpTerm[Level.Obj]): (lpLiteralInst, Vector[lpLiteralInst]) = {
+      val funTy = OlMonoType.Fun(Seq(argTy,resultTy))
+      val initial = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(lhsFun,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(rhsFun,Seq(Arg.Explicit(rhsArg)))))
+      val residual = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,funTy), lpTermBuilder.lam(binders,lhsFun), lpTermBuilder.lam(binders,rhsFun))
+      val argLit = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
+      (initial,Vector(residual,argLit))
+    }
+
+    /**
+      * One-binder lifting lemma for Decomp_single.
+      *
+      * This is the single-result analogue of `lift_decomp_step_binder`:
+      *   (Π x, π (¬ lhs x = rhs x) -> π (¬ cl x = cr x))
+      *   -> π (¬ (λx. lhs x) = (λx. rhs x))
+      *   -> π (¬ (λx. cl x) = (λx. cr x))
+      */
+    def liftDecompSingleBinder[L <: Level] = LpTerm.Const[L](lift_decomp_single_binder_S)
+
+    def mkLiftDecompSingleBinderObj(binderTy: OlMonoType, resultTy: OlMonoType, argTy: OlMonoType, lhs: LpTerm[Level.Obj], rhs: LpTerm[Level.Obj], lhsArg: LpTerm[Level.Obj], rhsArg: LpTerm[Level.Obj], bodyProof: Option[LpTerm[Level.Obj]]): LpTerm[Level.Obj] = {
+      val maybeBodyProof = bodyProof.map(Arg.Explicit[Level.Obj]).toSeq
+      LpTerm.App(liftDecompSingleBinder[Level.Obj], Seq(Arg.ImplicitTypeArg[Level.Obj](binderTy), Arg.ImplicitTypeArg[Level.Obj](resultTy), Arg.ImplicitTypeArg[Level.Obj](argTy), Arg.Explicit(lhs), Arg.Explicit(rhs), Arg.Explicit(lhsArg), Arg.Explicit(rhsArg)) ++ maybeBodyProof)
+    }
+
+    /**
+      * Result shape of a Decomp_single instance lifted under `binders`.
+      *
+      * Returns the initial literal and its single replacement literal:
+      *   ¬((λ xs. f (s xs)) = (λ xs. f (t xs)))
+      *   ↦ ¬((λ xs. s xs) = (λ xs. t xs))
+      */
+    def LiftedDecompSingleResult(binders: Seq[LpTerm.Var[Level.Obj]], argTy: OlMonoType, resultTy: OlMonoType, lhsArg: LpTerm[Level.Obj], rhsArg: LpTerm[Level.Obj], hd: LpTerm[Level.Obj]): (lpLiteralInst, Vector[lpLiteralInst]) = {
+      val initial = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(rhsArg)))))
+      val argLit = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
+      (initial,Vector(argLit))
     }
   }
 

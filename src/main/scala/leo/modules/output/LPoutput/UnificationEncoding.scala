@@ -5,10 +5,12 @@ import leo.datastructures.Clause.vars
 import leo.datastructures._
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.ImplicitTransformationUtil.{LiteralInfo2LiteralTransforamtion, litNorm2lpRule, verifySubstitutionLiteralNormalisazion}
-import leo.modules.output.LPoutput.LpLibs.FunRules.AsTerms.{DecompSingleResult, DecompStepRes, mkDecompSingleObj, mkDecompStepObj}
+import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.mkExpandLit
+import leo.modules.output.LPoutput.LpLibs.FunRules.AsTerms.{DecompSingleResult, DecompStepRes, LiftedDecompSingleResult, LiftedDecompStepResult, mkDecompSingleObj, mkDecompStepObj, mkLiftDecompSingleBinderObj, mkLiftDecompStepBinderObj}
 import leo.modules.output.LPoutput.LpLibs.MetaTheorems
 import leo.modules.output.LPoutput.LpLibs.MetaTheorems.Inst.transform_n
 import leo.modules.output.LPoutput.LpLibs.ND.Terms._
+import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.Arguments.extractTermArgs
 import leo.modules.output.LPoutput.NewLpDatastructures.ClauseEncoding.{lit2Lp, lits2Lp}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript._
@@ -551,7 +553,12 @@ object DetUniSimpEncoding {
 
     ////////////////////////////
     // 4) Decomposition subproof (optional)
-    val decompStage: DetUniStage = verifyDecomp(decompInfo, permStage, child.cl.lits, sig) match {
+    val etaExpandedStage: DetUniStage = etaExpandDecompParents(decompInfo, permStage) match {
+      case StageResult.Ok(stage) => stage
+      case StageResult.Fail(reason) => return NotEncodable(reason)
+    }
+
+    val decompStage: DetUniStage = verifyDecomp(decompInfo, etaExpandedStage, child.cl.lits, sig) match {
       case StageResult.Ok(stage) => stage
       case StageResult.Fail(reason) => return NotEncodable(reason)
     }
@@ -676,6 +683,56 @@ object DetUniSimpEncoding {
 
   // Helpers for Decomp steps
 
+  private final case class EtaExpansion(lit: lpLiteralInst, rewrite: Option[Rewrite])
+
+  private def etaExpandDecompLiteral(info: DecompInfo, lit: lpLiteralInst, idxInClause: Int, clauseLen: Int): Either[String,EtaExpansion] = lit.term match {
+    case LogicConst.Not(LogicConst.Eq(ty, left, right)) =>
+      val (expandedLeft, expandedRight) = etaExpandTermPair(ty,left,right,s"Eta${info.OrigIdx}")
+      val expandedLit = lpLiteralInst(LogicConst.Not(LogicConst.Eq(ty,expandedLeft,expandedRight)),polarity = false,eq = true)
+      if (expandedLit == lit) Right(EtaExpansion(lit,None))
+      else splitOlFun(ty) match {
+        case Some((argTy, resultTy)) =>
+          val pattern = PatternBuilder.generateClausePattern(Seq(PatternBuilder.PatternInfo(idxInClause,None,polarity = true)), clauseLen)
+          Right(EtaExpansion(expandedLit,Some(Rewrite(Some(pattern),mkExpandLit(argTy,resultTy,left,right),Side.Left))))
+        case None =>
+          Left("DetUniSimp: eta expansion changed a non-functional decomp literal")
+      }
+    case _ =>
+      Right(EtaExpansion(lit,None))
+  }
+
+  private def etaExpandDecompParents(decompInfo: Vector[DecompInfo], previousStage: DetUniStage): StageResult = {
+    if (decompInfo.isEmpty) return StageResult.Ok(previousStage)
+
+    val clauseLen = previousStage.clauseLits.length
+    var updatedLits = previousStage.clauseLits
+    var rewrites = Vector.empty[Rewrite]
+
+    decompInfo.foreach { info =>
+      previousStage.parent2currentIdx.get(info.OrigIdx) match {
+        case Some(idxInClause) if updatedLits.isDefinedAt(idxInClause) =>
+          etaExpandDecompLiteral(info, updatedLits(idxInClause), idxInClause, clauseLen) match {
+            case Right(EtaExpansion(newLit, maybeRewrite)) =>
+              updatedLits = updatedLits.updated(idxInClause,newLit)
+              rewrites = rewrites ++ maybeRewrite.toVector
+            case Left(err) =>
+              return StageResult.Fail(err)
+          }
+        case Some(idxInClause) =>
+          return StageResult.Fail(s"DetUniSimp: eta expansion requested for decomp literal at out-of-bounds index $idxInClause")
+        case None =>
+          return StageResult.Fail(s"DetUniSimp: eta expansion requested for missing original literal ${info.OrigIdx}")
+      }
+    }
+
+    if (rewrites.isEmpty) StageResult.Ok(previousStage)
+    else {
+      val haveStepName = Name("DetUniEtaExpandedParent")
+      val haveStep = Have(haveStepName,Prf(nAry.disjunction(updatedLits.map(_.term))),(rewrites :+ Refine(Obj(previousStage.curName))).map(Left(_)))
+      StageResult.Ok(previousStage.copy(curName = lpTermBuilder.localObj(haveStepName), scripts = previousStage.scripts :+ haveStep, clauseLits = updatedLits))
+    }
+  }
+
   /**
     * verifyDecomp — Verification of DetUniSimp decomposition steps
     *
@@ -711,6 +768,7 @@ object DetUniSimpEncoding {
                                 originalIdx: Int,
                                 originalLit: lpLiteralInst,
                                 replacementLits: Seq[lpLiteralInst],
+                                binders: Seq[LpTerm.Var[Level.Obj]],
                                 hd: LpTerm[Level.Obj],
                                 lhsArgs: Seq[LpTerm[Level.Obj]],
                                 rhsArgs: Seq[LpTerm[Level.Obj]],
@@ -729,11 +787,10 @@ object DetUniSimpEncoding {
         val litInParent = currentStage.clauseLits(idxInParent)
         Out.lp_debug_info(s"handling literal at pos $idxInParent: $litInParent")
 
-        litInParent.term match {
-          // todo: once we extend to polymorphism, we will need to also handle poly head symbols, then we can probably unify the handling of
-
-          // expected case: Equation enclosed by negation
-          case LogicConst.Not(LogicConst.Eq(_, LpTerm.App(f0, args0), LpTerm.App(f1, args1))) if f0 == f1 =>
+        def buildApplicationTask(binders: Seq[LpTerm.Var[Level.Obj]], leftBody: LpTerm[Level.Obj], rightBody: LpTerm[Level.Obj]): Either[String, DecompTask] = {
+          val (f0, args0) = flattenAppSpine(leftBody)
+          val (f1, args1) = flattenAppSpine(rightBody)
+          if (args0.nonEmpty && args1.nonEmpty && f0 == f1) {
             val (hdTy, relevantArgs0, relevantArgs1) = (mapping.hdTy, removeLeadingTypeArgs(args0), removeLeadingTypeArgs(args1))
             // ensure that the number of arguemtns is appropriate
             val n = relevantArgs0.length
@@ -749,7 +806,8 @@ object DetUniSimpEncoding {
               }
               else {
                 val (_, residualTy) = hdTy.splitFunParamTypesAt(n)
-                if (residualTy.isFunType) Left(s"DetUniSimp: needs Eta expansion")
+                if (residualTy.isFunType)
+                  Left(s"DetUniSimp: needs Eta expansion")
                 else {
                   safeEncTypes(hdTy.funParamTypesWithResultType) match {
                     case Left(NotEncodable(err)) => Left(err)
@@ -764,7 +822,9 @@ object DetUniSimpEncoding {
                           // recorded by DetUniSimp is applied to this block here,
                           // while the proof of those cleanups is emitted later.
                           val rawReplacement = lhsArgs.zip(rhsArgs).zip(fullTypeSpine.take(n)).map {
-                            case ((lhsArg, rhsArg), argTy) => DecompSingleResult(argTy, lhsArg, rhsArg)
+                            case ((lhsArg, rhsArg), argTy) =>
+                              if (binders.isEmpty) DecompSingleResult(argTy, lhsArg, rhsArg)
+                              else lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
                           }
                           Out.lp_debug_info(s"callsite 1")
                           val localLitTransf = LiteralInfo2LiteralTransforamtion(mapping.LitTransf, 0)
@@ -772,7 +832,7 @@ object DetUniSimpEncoding {
                           Out.lp_debug_info(s"applying to: \n${rawReplacement.map(l => Renderer.termP(l.term,RenderOptions(),0,sig)).mkString("\n")}")
                           applyLiteralTransformations(rawReplacement, localLitTransf) match {
                             case Some(replacement) =>
-                              Right(DecompTask(mapping, idxInParent, litInParent, replacement, f0, lhsArgs, rhsArgs, fullTypeSpine))
+                              Right(DecompTask(mapping, idxInParent, litInParent, replacement, binders, f0, lhsArgs, rhsArgs, fullTypeSpine))
                             case None =>
                               Left("Error in DetUniSimp Encoding: could not apply literal transformations after decomp")
                           }
@@ -782,9 +842,18 @@ object DetUniSimpEncoding {
               }
             }
 
-          case LogicConst.Not(LogicConst.Eq(ty, LpTerm.Lam(lAbst, lBody), LpTerm.Lam(rAbst, rBody))) =>
-            Left("DetUniSimp: Equations with Lambbdas not handled yet")
+          } else {
+            Out.lp_debug_info(s"unsuccessfully tried to match ${Renderer.termP(litInParent.term,RenderOptions(),0,sig)}")
+            Left(s"Error in encoding of DetUniSimp: trying to encode decomp, could not match")
+          }
+        }
 
+        litInParent.term match {
+          case LogicConst.Not(LogicConst.Eq(_, left, right)) =>
+            val (lBinders, lBody) = collectLeadingLambdas(left)
+            val (rBinders, rBody) = collectLeadingLambdas(right)
+            assert(lBinders == rBinders, s"DetUniSimp: decomp under binders requires matching leading lambdas, got $lBinders and $rBinders")
+            buildApplicationTask(lBinders, lBody, rBody)
           case _ =>
             Out.lp_debug_info(s"unsuccessfully tried to match ${Renderer.termP(litInParent.term,RenderOptions(),0,sig)}")
             Left(s"Error in encoding of DetUniSimp: trying to encode decomp, could not match")
@@ -848,8 +917,8 @@ object DetUniSimpEncoding {
             val idxInGoal = proofGoalStage.parent2currentIdx(task.info.OrigIdx)
             val sourceStage = revertForBackwardProof(proofGoalStage, task)
             // Instantiate Decomp_step/Decomp_single against the source clause:
-            val instanciatedRules = stepwiseInstDecompRule(task.hd, task.lhsArgs, task.rhsArgs, task.fullTypeSpine, sourceStage.clauseLits, idxInGoal)
-            val decompSteps = instanciatedRules.reverse.map(transfRule => Refine(Obj(transfRule)))
+            val instanciatedRules = stepwiseInstDecompRule(task.hd, task.lhsArgs, task.rhsArgs, task.fullTypeSpine, sourceStage.clauseLits, idxInGoal, task.binders, Name(s"Decomp_inst_${task.info.OrigIdx}"))
+            val decompSteps = instanciatedRules.reverse.flatMap(rule => rule.setupScripts :+ Refine(Obj(rule.transformRule)))
             // Rewrites for implicit flips/normalisations
             val verifyInitialTransformationSteps = decompLitNormalisazion(task.info, 0, proofGoalStage.clauseLits.map(_.polarity), proofGoalStage.parent2currentIdx)
             // After one decomposition proof has fired, Lambdapi may expose list
@@ -869,6 +938,129 @@ object DetUniSimpEncoding {
   }
 
   /**
+    * Result of generating local Lambdapi subproofs for a lifted decomp rule.
+    *
+    * `proofs` must be emitted before the transform_n step.
+    * `finalRule` is the proof term that can be used as transform_n's rule proof.
+    * `initialLit` and `derivedLits` describe the fully lifted rule:
+    * π initialLit -> π (disj derivedLits)
+    */
+  final case class LiftedDecompRuleProofs(proofs: Vector[Have],
+                                          finalRule: LpTerm[Level.Obj],
+                                          initialLit: lpLiteralInst,
+                                          derivedLits: Vector[lpLiteralInst])
+
+  private final case class DecompRuleApplication(setupScripts: Vector[LpProofScript],
+                                                 transformRule: LpTerm[Level.Obj])
+
+  private def liftName(baseName: Name, liftedBinders: Seq[LpTerm.Var[Level.Obj]]): Name =
+    Name(s"${baseName.value}_lift_${liftedBinders.map(_.name.value).mkString("_")}")
+
+  /**
+    * Generate local subproofs for a Decomp_step instance under leading binders.
+    *
+    * The first `have` removes all leading lambdas and replaces them by Π-bound variables.
+    * Each following `have` reintroduces one lambda with `lift_decomp_step_binder`, from the
+    * innermost binder outwards. The final proof term is suitable as the rule argument of
+    * `transform_n`.
+    *
+    * @param resultTy The result type `b` of the body-level decomposition rule
+    *                 `Decomp_step [a] [b] s t f g`.
+    */
+  def decompStepSubproofs(baseName: Name,
+                          binders: Seq[LpTerm.Var[Level.Obj]],
+                          argTy: OlMonoType,
+                          resultTy: OlMonoType,
+                          lhsArg: LpTerm[Level.Obj],
+                          rhsArg: LpTerm[Level.Obj],
+                          lhsFun: LpTerm[Level.Obj],
+                          rhsFun: LpTerm[Level.Obj]): LiftedDecompRuleProofs = {
+    val (basePremise, baseDerived) = LiftedDecompStepResult(Seq.empty, argTy, resultTy, lhsArg, rhsArg, lhsFun, rhsFun)
+    val baseProofSteps =
+      (if (binders.nonEmpty) Seq(Left(Assume(binders.map(_.name)))) else Seq.empty) :+
+        Left(Refine(Obj(mkDecompStepObj(argTy, resultTy, lhsArg, rhsArg, lhsFun, rhsFun, None))))
+    val baseHave = Have(baseName, lpTermBuilder.ruleType(binders, basePremise, baseDerived), baseProofSteps)
+
+    val liftHaves = binders.indices.reverse.map { idx =>
+      val currentBinder = binders(idx)
+      val prefix = binders.take(idx)
+      val alreadyLifted = binders.drop(idx + 1)
+      val nowLifted = binders.drop(idx)
+      val prevName = if (idx == binders.length - 1) baseName else liftName(baseName, alreadyLifted)
+      val curName = liftName(baseName, nowLifted)
+
+      val (premise, derived) = LiftedDecompStepResult(nowLifted, argTy, resultTy, lhsArg, rhsArg, lhsFun, rhsFun)
+
+      val residualTy = lpTermBuilder.funTy(alreadyLifted, OlMonoType.Fun(Seq(argTy, resultTy)))
+      val liftBinders = currentBinder +: alreadyLifted
+      val liftRule = mkLiftDecompStepBinderObj(lpTermBuilder.olTy(currentBinder), lpTermBuilder.funTy(alreadyLifted, resultTy), residualTy, lpTermBuilder.funTy(alreadyLifted, argTy), lpTermBuilder.lam(liftBinders, lpTermBuilder.app(lhsFun, Seq(lhsArg))), lpTermBuilder.lam(liftBinders, lpTermBuilder.app(rhsFun, Seq(rhsArg))), lpTermBuilder.lam(liftBinders, lhsFun), lpTermBuilder.lam(liftBinders, rhsFun), lpTermBuilder.lam(liftBinders, lhsArg), lpTermBuilder.lam(liftBinders, rhsArg), Some(Wildcard[Level.Obj]()))
+
+      val proofSteps =
+        (if (prefix.nonEmpty) Seq(Left(Assume(prefix.map(_.name)))) else Seq.empty) :+
+          Left(Refine(Obj(liftRule))) :+
+          Left(Refine(Obj(lpTermBuilder.app(lpTermBuilder.localObj(prevName), prefix))))
+
+      Have(curName, lpTermBuilder.ruleType(prefix, premise, derived), proofSteps)
+    }.toVector
+
+    val allProofs = baseHave +: liftHaves
+    val finalName = if (binders.isEmpty) baseName else liftName(baseName, binders)
+    val (finalPremise, finalDerived) = LiftedDecompStepResult(binders, argTy, resultTy, lhsArg, rhsArg, lhsFun, rhsFun)
+
+    LiftedDecompRuleProofs(allProofs, lpTermBuilder.localObj(finalName), finalPremise, finalDerived)
+  }
+
+  /**
+    * Generate local subproofs for a Decomp_single instance under leading binders.
+    *
+    * This mirrors `decompStepSubproofs`, but the generated rule has one derived
+    * literal instead of the residual-function-literal plus argument-literal pair.
+    *
+    * @param resultTy The result type `b` of the body-level decomposition rule
+    *                 `Decomp_single [a] [b] s t f`.
+    */
+  def decompSingleSubproofs(baseName: Name,
+                            binders: Seq[LpTerm.Var[Level.Obj]],
+                            argTy: OlMonoType,
+                            resultTy: OlMonoType,
+                            lhsArg: LpTerm[Level.Obj],
+                            rhsArg: LpTerm[Level.Obj],
+                            hd: LpTerm[Level.Obj]): LiftedDecompRuleProofs = {
+    val (basePremise, baseDerived) = LiftedDecompSingleResult(Seq.empty, argTy, resultTy, lhsArg, rhsArg, hd)
+    val baseProofSteps =
+      (if (binders.nonEmpty) Seq(Left(Assume(binders.map(_.name)))) else Seq.empty) :+
+        Left(Refine(Obj(mkDecompSingleObj(argTy, resultTy, lhsArg, rhsArg, hd, None))))
+    val baseHave = Have(baseName, lpTermBuilder.ruleType(binders, basePremise, baseDerived), baseProofSteps)
+
+    val liftHaves = binders.indices.reverse.map { idx =>
+      val currentBinder = binders(idx)
+      val prefix = binders.take(idx)
+      val alreadyLifted = binders.drop(idx + 1)
+      val nowLifted = binders.drop(idx)
+      val prevName = if (idx == binders.length - 1) baseName else liftName(baseName, alreadyLifted)
+      val curName = liftName(baseName, nowLifted)
+
+      val (premise, derived) = LiftedDecompSingleResult(nowLifted, argTy, resultTy, lhsArg, rhsArg, hd)
+
+      val liftBinders = currentBinder +: alreadyLifted
+      val liftRule = mkLiftDecompSingleBinderObj(lpTermBuilder.olTy(currentBinder), lpTermBuilder.funTy(alreadyLifted, resultTy), lpTermBuilder.funTy(alreadyLifted, argTy), lpTermBuilder.lam(liftBinders, lpTermBuilder.app(hd, Seq(lhsArg))), lpTermBuilder.lam(liftBinders, lpTermBuilder.app(hd, Seq(rhsArg))), lpTermBuilder.lam(liftBinders, lhsArg), lpTermBuilder.lam(liftBinders, rhsArg), Some(Wildcard[Level.Obj]()))
+
+      val proofSteps =
+        (if (prefix.nonEmpty) Seq(Left(Assume(prefix.map(_.name)))) else Seq.empty) :+
+          Left(Refine(Obj(liftRule))) :+
+          Left(Refine(Obj(lpTermBuilder.app(lpTermBuilder.localObj(prevName), prefix))))
+
+      Have(curName, lpTermBuilder.ruleType(prefix, premise, derived), proofSteps)
+    }.toVector
+
+    val allProofs = baseHave +: liftHaves
+    val finalName = if (binders.isEmpty) baseName else liftName(baseName, binders)
+    val (finalPremise, finalDerived) = LiftedDecompSingleResult(binders, argTy, resultTy, lhsArg, rhsArg, hd)
+
+    LiftedDecompRuleProofs(allProofs, lpTermBuilder.localObj(finalName), finalPremise, finalDerived)
+  }
+
+  /**
     * Apply the Decomp rules for instances where only one single arguemnt is applied (i.e. litrals of the shape f x = f y)
     * This applies the Decomp literal and applies the transform literal to embed it in a bigger clause.
     *
@@ -882,10 +1074,15 @@ object DetUniSimpEncoding {
     * @param clauseRhs A list of literals on the rhs of the literal to be changed
     * @return The instanciated version of the decomp rule, applied to the transform rule if necessary
     */
-  def singleInstDecompRule(curArgTy: OlMonoType, appliedHdTy: OlMonoType, lArg: LpTerm[Level.Obj], rArg: LpTerm[Level.Obj], hd: LpTerm[Level.Obj], initialLit: lpLiteralInst, clauseLhs: Seq[lpLiteralInst], clauseRhs: Seq[lpLiteralInst]) = {
-    val instRule = mkDecompSingleObj(curArgTy, appliedHdTy, lArg, rArg, hd, None)
-    val res = DecompSingleResult(curArgTy, lArg, rArg)
-    transform_n(initialLit, clauseLhs, clauseRhs, Seq(res), instRule, Wildcard[Level.Obj]())
+  private def singleInstDecompRule(curArgTy: OlMonoType, appliedHdTy: OlMonoType, lArg: LpTerm[Level.Obj], rArg: LpTerm[Level.Obj], hd: LpTerm[Level.Obj], initialLit: lpLiteralInst, clauseLhs: Seq[lpLiteralInst], clauseRhs: Seq[lpLiteralInst], binders: Seq[LpTerm.Var[Level.Obj]], baseName: Name): DecompRuleApplication = {
+    if (binders.isEmpty) {
+      val instRule = mkDecompSingleObj(curArgTy, appliedHdTy, lArg, rArg, hd, None)
+      val res = DecompSingleResult(curArgTy, lArg, rArg)
+      DecompRuleApplication(Vector.empty, transform_n(initialLit, clauseLhs, clauseRhs, Seq(res), instRule, Wildcard[Level.Obj]()))
+    } else {
+      val liftedRule = decompSingleSubproofs(baseName, binders, curArgTy, appliedHdTy, lArg, rArg, hd)
+      DecompRuleApplication(liftedRule.proofs, transform_n(initialLit, clauseLhs, clauseRhs, liftedRule.derivedLits, liftedRule.finalRule, Wildcard[Level.Obj]()))
+    }
   }
 
   /**
@@ -923,7 +1120,7 @@ object DetUniSimpEncoding {
     * @return Vector of instantiated clause-transformation applications (each one is a proof step),
     *         ordered from outermost to innermost (i.e. the order you would usually reverse for refine).
     */
-  private def stepwiseInstDecompRule(hd: LpTerm[Level.Obj], lArgs: Seq[LpTerm[Level.Obj]], rArgs: Seq[LpTerm[Level.Obj]], typeEls: Seq[OlMonoType], currClause: Seq[lpLiteralInst], curPos: Int): Vector[LpTerm[Level.Obj]] = {
+  private def stepwiseInstDecompRule(hd: LpTerm[Level.Obj], lArgs: Seq[LpTerm[Level.Obj]], rArgs: Seq[LpTerm[Level.Obj]], typeEls: Seq[OlMonoType], currClause: Seq[lpLiteralInst], curPos: Int, binders: Seq[LpTerm.Var[Level.Obj]], ruleNamePrefix: Name): Vector[DecompRuleApplication] = {
     val nArgs = lArgs.length
     val curArgTy = typeEls(nArgs - 1)
 
@@ -938,7 +1135,7 @@ object DetUniSimpEncoding {
 
     if (lArgs.length == 1) {
       // needs to apply rule for last step (or single occurrence)
-      val instSingleDecompRule = singleInstDecompRule(curArgTy,appliedHdTy, lArg, rArg, hd, l, c0, c2)
+      val instSingleDecompRule = singleInstDecompRule(curArgTy,appliedHdTy, lArg, rArg, hd, l, c0, c2, binders, Name(s"${ruleNamePrefix.value}_single"))
 
       Vector(instSingleDecompRule)
 
@@ -949,10 +1146,17 @@ object DetUniSimpEncoding {
       val lFun = LpTerm.App(hd, lLeadingArgs.map(arg => Arg.Explicit(arg)))
       val rFun = LpTerm.App(hd, rLeadingArgs.map(arg => Arg.Explicit(arg)))
 
-      val instRule = mkDecompStepObj(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun, None)
-      val res = DecompStepRes(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun)
+      val (setupScripts, derivedLits, instRule) =
+        if (binders.isEmpty) {
+          val res = DecompStepRes(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun)
+          (Vector.empty, Vector(res._1,res._2), mkDecompStepObj(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun, None))
+        } else {
+          val liftedRule = decompStepSubproofs(Name(s"${ruleNamePrefix.value}_step_$nArgs"), binders, curArgTy, appliedHdTy, lArg, rArg, lFun, rFun)
+          (liftedRule.proofs, liftedRule.derivedLits, liftedRule.finalRule)
+        }
+      val instDecompRule = DecompRuleApplication(setupScripts, transform_n(l, c0, c2, derivedLits, instRule, Wildcard[Level.Obj]()))
 
-      transform_n(l, c0, c2, Seq(res._1, res._2), instRule, Wildcard[Level.Obj]()) +: stepwiseInstDecompRule(hd, lLeadingArgs, rLeadingArgs, typeEls, c0 ++ Seq(res._1, res._2) ++ c2, curPos) // idx does not change because the hd stays on the lhs
+      instDecompRule +: stepwiseInstDecompRule(hd, lLeadingArgs, rLeadingArgs, typeEls, c0 ++ derivedLits ++ c2, curPos, binders, ruleNamePrefix) // idx does not change because the hd stays on the lhs
     }
   }
 
