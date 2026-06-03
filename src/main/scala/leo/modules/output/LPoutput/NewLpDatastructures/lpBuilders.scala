@@ -1,11 +1,12 @@
 package leo.modules.output.LPoutput.NewLpDatastructures
 
 import LogicConst._
-import leo.datastructures.Clause
+import leo.Out
+import leo.datastructures.{Clause, fuseMaps}
 import leo.modules.output.LPoutput.NewLpDatastructures.Lifting.{ProofTerm, liftOlVars}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.Pi
-import leo.modules.output.LPoutput.NewLpDatastructures.OlType.TyVar
+import leo.modules.output.LPoutput.NewLpDatastructures.OlMonoType.TyVar
 
 //////////////////////////////////////////
 // smart constructors for things like clauses, conjunctions, disjunctions, etc.
@@ -51,6 +52,91 @@ object nAry {
 }
 
 /**
+  * Small smart constructors for recurring object-level Lambdapi AST fragments.
+  *
+  * These helpers deliberately stay close to the core AST:
+  *   - binders are ordinary `LpTerm.Var[Level.Obj]` values
+  *   - lambda binders reuse the variable name and type
+  *   - Π binders are obtained by lifting those same object variables
+  */
+object lpTermBuilder {
+
+  /** Apply an object-level term to explicit object-level arguments. */
+  def app(f: LpTerm[Level.Obj], args: Seq[LpTerm[Level.Obj]]): LpTerm[Level.Obj] =
+    if (args.isEmpty) f else LpTerm.App(f,args.map(Arg.Explicit[Level.Obj]))
+
+  /** Reference to a proof-local Lambdapi symbol. */
+  def localObj(name: Name): LpTerm[Level.Obj] =
+    LpTerm.Const[Level.Obj](SymRef.LP(QName.local(name.value)))
+
+  /** The HOL type of an object-level variable encoded as `τ a`. */
+  def olTy(v: Var[Level.Obj]): OlMonoType = v.ty match {
+    case Some(LpType.El(ty)) => ty
+    case other => throw new IllegalArgumentException(s"Expected object variable with HOL type, got $other")
+  }
+
+  /** Wrap an object-level term in lambdas over the given object variables. */
+  def lam(binders: Seq[Var[Level.Obj]], body: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    binders.foldRight(body) { case (v, acc) => LpTerm.Lam[Level.Obj](v.name -> v.ty, acc) }
+
+  /** Wrap a meta-level type in Π binders over the given object variables. */
+  def pi(binders: Seq[Var[Level.Obj]], body: LpType): LpType =
+    if (binders.isEmpty) body else Pi(binders.map(Lifting.OlVarM(_)), body)
+
+  /** Build the object-level function type represented by lambda-wrapping a term of `bodyTy`. */
+  def funTy(binders: Seq[Var[Level.Obj]], bodyTy: OlMonoType): OlMonoType =
+    if (binders.isEmpty) bodyTy else OlMonoType.Fun(binders.map(olTy) :+ bodyTy)
+
+  /** Build a negated equational literal. */
+  def negEq(ty: OlMonoType, lhs: LpTerm[Level.Obj], rhs: LpTerm[Level.Obj]): lpLiteralInst =
+    lpLiteralInst(Not(Eq(ty,lhs,rhs)),polarity = false,eq = true)
+
+  /** Build a proof type of the form `π premise -> π (l1 ∨ ... ∨ ln)`. */
+  def proofArrow(premise: lpLiteralInst, derived: Seq[lpLiteralInst]): LpType =
+    LpType.Arrow(LpType.Prf(premise.term), LpType.Prf(nAry.disjunction(derived.map(_.term))))
+
+  /** Build the type of a possibly binder-lifted literal transformation rule. */
+  def ruleType(binders: Seq[Var[Level.Obj]], premise: lpLiteralInst, derived: Seq[lpLiteralInst]): LpType =
+    pi(binders, proofArrow(premise, derived))
+}
+/**
+  * A Lambdapi representation of a literal.
+  *
+  * @param term the literal represented as an `LpTerm`
+  * @param polarity the polarity of the literal
+  * @param eq a boolean indicating weather the literal is equational or not
+  */
+case class lpLiteralInst(term: LpTerm[Level.Obj], polarity: Boolean, eq: Boolean) {
+
+  private def stripLeadingNeg(term0: LpTerm[Level.Obj], n: Int = 0): (LpTerm[Level.Obj],Int) = {
+    term0 match {
+      case LogicConst.Not(body) => stripLeadingNeg(body,n + 1)
+      case _ => (term0,n)
+    }
+  }
+
+  private def wrapInNeg(term0: LpTerm[Level.Obj], n: Int): LpTerm[Level.Obj] ={
+    if (n > 0)  wrapInNeg(LogicConst.Not(term0),n-1)
+    else term0
+  }
+
+  def flipIfEq: lpLiteralInst = {
+    val strippedEq = stripLeadingNeg(term)
+    strippedEq._1 match {
+      case LogicConst.Eq(ty, lhs, rhs) =>
+        val flippedEq = LogicConst.Eq(ty, rhs, lhs)
+        val wrappedEq = wrapInNeg(flippedEq,strippedEq._2)
+        lpLiteralInst(wrappedEq,polarity,eq)
+      case _ => Out.lp_debug_info(s"could not flip: ${strippedEq._1}"); this
+    }
+  }
+
+  def termEq(lit2: lpLiteralInst) = {
+    this.term == lit2.term
+  }
+}
+
+/**
   * A Lambdapi representation of a clause.
   *
   * @param term the disjunction of the clause’s literals, represented as an `LpTerm`
@@ -58,9 +144,13 @@ object nAry {
   * @param vars the clause’s bound variables, each either a term variable or a type variable
   * @param asMl the clause encoded as a meta-level type (Dependant types for clause-variables and propositions encoded as types)
   */
-case class lpClauseInst(term: LpTerm[Level.Obj], lits: Seq[LpTerm[Level.Obj]], vars: Seq[Either[Var[Level.Obj],TyVar]], asMl: LpType) {
+case class lpClauseInst(term: LpTerm[Level.Obj], lits: Seq[lpLiteralInst], vars: Seq[Either[Var[Level.Obj],TyVar]], asMl: LpType) {
   /** Returns `vars` as a plain sequence of `lpOlTerm`. */
   def metaVars: Seq[Var[Level.Meta]] = vars.map(liftOlVars)
+
+  def termEq(cl2: lpClauseInst) = {
+    this.term == cl2.term
+  }
 }
 
 object lpClauseInst {
@@ -75,11 +165,17 @@ object lpClauseInst {
     * @param vars the clause's object-level bound variables
     * @return the corresponding `lpClauseInst`
     */
-  def apply(lits: Seq[LpTerm[Level.Obj]], vars: Seq[Either[Var[Level.Obj], TyVar]]): lpClauseInst = { // used to translate -> now directly use
-    val disjunction = nAry.disjunction(lits)
+  def apply(lits: Seq[lpLiteralInst], vars: Seq[Either[Var[Level.Obj], TyVar]]): lpClauseInst = { // used to translate -> now directly use
+    val disjunction = nAry.disjunction(lits.map(_.term))
     val liftedVars = vars.map(liftOlVars)
     val mlTerm = if (liftedVars.nonEmpty) Pi(liftedVars,ProofTerm(disjunction)) else ProofTerm(disjunction)
     lpClauseInst(disjunction,lits,vars,mlTerm)
+  }
+
+  private def apply_to_single(cl: Clause, fullBvarsMap: Map[Int, String]) = {
+    val encCls = ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap)
+    val encVars = TermEncoding.vars2Lp(cl.implicitlyBound, fullBvarsMap).map(Left(_))
+    lpClauseInst(encCls,encVars)
   }
 
   /**
@@ -89,11 +185,15 @@ object lpClauseInst {
   def apply_to_set(cls: Seq[Clause]): (Map[Int, String], Seq[lpClauseInst]) = {
     val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
-    val encCls = cls.map(cl => ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap))
-    val encVars: Seq[Seq[Either[Var[Level.Obj], TyVar]]] = cls.map(cl => TermEncoding.vars2Lp(cl.implicitlyBound, fullBvarsMap).map(Left(_)))
-    (fullBvarsMap, encCls.zip(encVars).map(ecnCl => lpClauseInst(ecnCl._1, ecnCl._2)))
+    val encCls = cls.map(cl => apply_to_single(cl, fullBvarsMap))
+    (fullBvarsMap, encCls)
+  }
+
+  def apply_to_pair(cl0: Clause, cl1: Clause): (Map[Int, String], lpClauseInst, lpClauseInst) = {
+    val allImpBoundVars = Seq(cl0,cl1).flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
+    val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
+    val encCls0 = apply_to_single(cl0, fullBvarsMap)
+    val encCls1 = apply_to_single(cl1, fullBvarsMap)
+    (fullBvarsMap, encCls0, encCls1)
   }
 }
-
-
-

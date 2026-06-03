@@ -7,7 +7,7 @@ import leo.datastructures.{Clause, Literal, Position, Signature, Subst, Term, Ty
 import leo.modules.HOLSignature._
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings.{term2LP, type2LP}
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
-import leo.modules.output.LPoutput.NewLpDatastructures.{LpSig, Prefix, QName}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, Level, LpSig, LpTerm, LpType, Name, OlMonoType, Prefix, QName, lpTermBuilder}
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures.{PrettyConfig, lpAnd, lpChoice, lpConstantTerm, lpDeclaration, lpDefinition, lpElWitness, lpEq, lpFunctionApp, lpHave, lpImp, lpInEq, lpLambdaTerm, lpNot, lpOlBinder, lpOlBot, lpOlBoundTerm, lpOlConnective, lpOlConstantTerm, lpOlExists, lpOlForAll, lpOlFunctionApp, lpOlFunctionType, lpOlLambdaTerm, lpOlMonoQuantifiedTerm, lpOlPolyType, lpOlTerm, lpOlTop, lpOlTyVar, lpOlType, lpOlTypedBinaryConnective, lpOlTypedBinaryConnectiveTerm, lpOlTypedVar, lpOlUnappliedConnective, lpOlUnaryConnective, lpOlUnaryConnectiveTerm, lpOlUntypedBinaryConnective, lpOlUntypedBinaryConnectiveTerm, lpOlUntypedBinaryConnectiveTerm_multi, lpOlUntypedVar, lpOlUserDefinedPolyType, lpOlUserDefinedType, lpOlWildcard, lpOr, lpOtype, lpProofScript, lpProofScriptStep, lpRefine, lpReflexivity, lpRewritePattern, lpScheme, lpSet, lpSet2Schme, lpTerm, lpTypedVar, lpUntypedVar, lpWildcard}
 
 package object LPoutput {
@@ -47,6 +47,79 @@ package object LPoutput {
   @inline def nameSkDef(sko: Signature.Key, sig: Signature): QName = {
     val baseName = s"${sig(sko).name}_def"
     QName.local(baseName)
+  }
+
+  ////////////////////////////////////////////////////////////////
+  ////////// New LP AST helpers
+  ////////////////////////////////////////////////////////////////
+
+  /**
+    * Collect the leading object-level lambda binders of an LP term.
+    *
+    * This keeps the AST shape intact: the returned binders are ordinary
+    * `LpTerm.Var[Level.Obj]` values that can later be reused for Π lifting,
+    * lambda wrapping, or object-level applications.
+    */
+  def collectLeadingLambdas(term: LpTerm[Level.Obj], acc: Vector[LpTerm.Var[Level.Obj]] = Vector.empty): (Vector[LpTerm.Var[Level.Obj]], LpTerm[Level.Obj]) = term match {
+    case LpTerm.Lam((name, ty @ Some(LpType.El(_))), body) =>
+      collectLeadingLambdas(body, acc :+ LpTerm.Var[Level.Obj](name, ty))
+    case LpTerm.Lam((name, ty), _) =>
+      assert(false, s"LP encoding: expected object-level binder type for lambda $name, got $ty")
+      (acc, term)
+    case _ =>
+      (acc, term)
+  }
+
+  /**
+    * Flatten a curried LP application into its head and explicit/implicit
+    * argument spine.
+    *
+    * Lambdapi printing and construction may nest applications, e.g. `(f a) b`;
+    * many encodings want to inspect this as `f` applied to `a, b`.
+    */
+  def flattenAppSpine(term: LpTerm[Level.Obj]): (LpTerm[Level.Obj], Seq[Arg[Level.Obj]]) = term match {
+    case LpTerm.App(f, args) =>
+      val (hd, prefixArgs) = flattenAppSpine(f)
+      (hd, prefixArgs ++ args)
+    case _ => (term, Seq.empty)
+  }
+
+  /**
+    * Split the first argument type from an encoded HOL function type.
+    *
+    * `OlMonoType.Fun` stores a full function spine.  For a type
+    * `a -> b -> c`, this returns `a` and the residual function type `b -> c`.
+    */
+  def splitOlFun(ty: OlMonoType): Option[(OlMonoType, OlMonoType)] = ty match {
+    case OlMonoType.Fun(Seq(argTy, resultTy)) => Some((argTy,resultTy))
+    case OlMonoType.Fun(argTy +: rest) if rest.nonEmpty => Some((argTy,OlMonoType.Fun(rest)))
+    case _ => None
+  }
+
+  /**
+    * Eta-expand two LP object terms in lockstep according to their HOL type.
+    *
+    * Existing matching leading lambdas are preserved and only their bodies are
+    * recursively expanded.  If exactly one side is already a lambda, the pair is
+    * left unchanged; this avoids manufacturing asymmetric proof obligations.
+    */
+  def etaExpandTermPair(ty: OlMonoType, left: LpTerm[Level.Obj], right: LpTerm[Level.Obj], namePrefix: String): (LpTerm[Level.Obj], LpTerm[Level.Obj]) = {
+    def go(curTy: OlMonoType, l: LpTerm[Level.Obj], r: LpTerm[Level.Obj], depth: Int): (LpTerm[Level.Obj], LpTerm[Level.Obj]) = splitOlFun(curTy) match {
+      case Some((argTy, resultTy)) =>
+        (l,r) match {
+          case (LpTerm.Lam(lBinder, lBody), LpTerm.Lam(rBinder, rBody)) =>
+            val (newLBody, newRBody) = go(resultTy,lBody,rBody,depth + 1)
+            (LpTerm.Lam(lBinder,newLBody), LpTerm.Lam(rBinder,newRBody))
+          case (LpTerm.Lam(_, _), _) | (_, LpTerm.Lam(_, _)) =>
+            (l,r)
+          case _ =>
+            val etaVar = LpTerm.Var[Level.Obj](Name(s"${namePrefix}_${depth}"), Some(LpType.El(argTy)))
+            val (newLBody, newRBody) = go(resultTy,lpTermBuilder.app(l,Seq(etaVar)),lpTermBuilder.app(r,Seq(etaVar)),depth + 1)
+            (LpTerm.Lam(etaVar.name -> etaVar.ty,newLBody), LpTerm.Lam(etaVar.name -> etaVar.ty,newRBody))
+        }
+      case None => (l,r)
+    }
+    go(ty,left,right,0)
   }
 
   val lambdapiNames = Set(

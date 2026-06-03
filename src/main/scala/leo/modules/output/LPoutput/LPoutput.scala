@@ -25,6 +25,7 @@ import java.nio.charset.StandardCharsets
 import scala.collection.mutable
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, DefEncoding, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef, TermEncoding, TypeEncoding}
 import leo.modules.output.LPoutput.UnificationEncoding.encodePatternUni
+import leo.modules.output.LPoutput.PreUniVerification.encodePreUni
 
 /**
   * Generation of the various files making up the Lambdapi encoding
@@ -138,25 +139,29 @@ object LPoutput {
 
   def identifySteps_new(cl: ClauseProxy, identicalSteps: mutable.HashMap[Long, QName], encStep: NewLpDatastructures.lpClauseInst): (Boolean, mutable.HashMap[Long, QName]) = {
     var encodeStep = false
+    val childId = cl.id
     cl.annotation.parents foreach { parent => // todo: save them rather than translating over and over again
       val encParent = NewLpDatastructures.ClauseEncoding.clause2LP(parent.cl)
-      if (encParent == encStep) { // case: any potential differences are abstracted away by rendering -> need not prove
-        if (identicalSteps.contains(cl.id)) {
-          if (identicalSteps(cl.id) != nameStep(parent.id)) {
-            throw new Exception(s"step $cl.id ($encStep) is equivalent to two parents: ${cl.id}, ${parent.id} ")
+      if (encParent.termEq(encStep)) { // case: any potential differences are abstracted away by rendering -> need not prove
+        if (identicalSteps.contains(childId)) {
+          if (identicalSteps(childId) != nameStep(parent.id)) {
+            throw new Exception(s"step $childId ($encStep) is equivalent to two parents: ${childId}, ${parent.id} ")
           }
         }
         if (identicalSteps.contains(parent.id)) {
           // in this case we already have the parent as a key and want to map the new child to the parents parent
           val exVal = identicalSteps(parent.id)
           Out.lp_debug_info(s"identical steps for parent ${parent.id} (maps to ${exVal})")
-          identicalSteps.update(cl.id, exVal)
+          identicalSteps.update(childId, exVal)
         } else {
           // in this case we just want to link the child to the parent
           val exVal = nameStep_new(parent.id)
-          identicalSteps.update(cl.id, exVal)
+          identicalSteps.update(childId, exVal)
         }
-      } else encodeStep = true
+      } else {
+        //Out.lp_debug_info(s"child (step$childId) and parent (step${parent.id}) differ: (upper line child, lower line parent):\n${encStep}\n${encParent}")
+        encodeStep = true
+      }
     }
     (encodeStep, identicalSteps)
   }
@@ -344,8 +349,11 @@ object LPoutput {
               }
 
             case leo.modules.calculus.PreUni =>
-              val encodingPreUni = encPreUni(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoUni, cl.furtherInfo.addInfoUniRule, parentInLpEncID.head, sig.orig)
-              (toProofStepOld(stepName, encStep, "PreUni", encodingPreUni._1, encodingPreUni._2),outputInfo)
+              val encProof = encodePreUni(cl.annotation.parents.head, cl, Name(parentInLpEncID.head.name), sig)
+              encProof match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "PreUni", Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", Left(Seq.empty), Some(reason)), outputInfo)
+              }
 
             case leo.modules.calculus.RewriteSimp =>
               val encodingRewrite = encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID, sig.orig)
@@ -527,7 +535,6 @@ object LPoutput {
 
 
     // encode the clauses representing the steps
-    // todo: Also make it possible to just output one long lambda-term
     val compressedProof = proof
     var idClauseMap: mutable.HashMap[Long, ClauseProxy] = mutable.HashMap.empty
     val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty
@@ -550,7 +557,7 @@ object LPoutput {
         val (encConj, _) = clause2LP(step.cl, Set(), sig.orig)
         val (newEncConj) = ClauseEncoding.clause2LP(step.cl)
         identicalSteps += (stepId -> conjName)
-        conjecture = newEncConj.lits match {
+        conjecture = newEncConj.lits.map(_.term) match {
           case Seq(LogicConst.Not(conj)) => conj
           case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
         }

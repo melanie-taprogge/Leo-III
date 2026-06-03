@@ -1049,10 +1049,18 @@ object Simp extends CalculusRule {
     //val (processedNegLits,subst) = detUniInferences0(taggedNegLits, Vector(init), Subst.id)(sig)
     val processedNegLits = branches
     val normSubst = subst.normalize
-    // todo: replace condition with flag
-    val addinfoUnification0 = if (true) ToTHF.apply_andTrack(normSubst, Subst.id, cl.implicitlyBound, cl.typeVars)(sig)._2 else UniSubst()
     val substPosLits = posLits.map(lit => lit.copy(lit = lit.lit.substituteOrdered(normSubst)._1))
-    val res = processedNegLits.map(nLits => (Clause(substPosLits.map(_.lit) ++ nLits.lits.map(_.lit)), AddInfoDetUni(addinfoUnification0,BranchState(substPosLits ++ nLits.lits,nLits.decomp))))
+    val numPosLits = posLits.length
+    // todo: so far we lack the info for the positive literals!
+    val res = processedNegLits.map{nLits =>
+      val addInfoFinal = if (true) {
+        // todo: replace condition with flag
+        val encSubst = ToTHF.apply_andTrack(normSubst, Subst.id, cl.implicitlyBound, cl.typeVars)(sig)._2
+        val shiftedImpTransf = if (numPosLits == 0) nLits.impTransf
+          else nLits.impTransf.copy(flippedLits = nLits.impTransf.flippedLits.map{_ + numPosLits}, normalizedEq = nLits.impTransf.normalizedEq.map{nLit => (nLit._1 + numPosLits,nLit._2)})
+      AddInfoUniWithSubst(normSubst,Subst.id,encSubst,shiftedImpTransf)
+    } else AddInfoUniWithSubst()
+      (Clause(substPosLits.map(_.lit) ++ nLits.lits.map(_.lit)), AddInfoDetUni(addInfoFinal,BranchState(substPosLits ++ nLits.lits,nLits.decomp)))}
     leo.modules.myAssert(res.map(_._1).forall(Clause.wellTyped),
       s"Not well typed: ${res.map(_._1).filterNot(Clause.wellTyped).map(_.pretty(sig)).mkString("\n")}"
     )
@@ -1085,14 +1093,39 @@ object Simp extends CalculusRule {
           val subst = HuetsPreUnification.BindRule.apply((left, right), leftAbstractions.size, canApplyBind)
           leo.Out.finest(s"[UniLitSimp] Bind subst: ${subst.pretty}")
           val newPartialSubst = partialSubst.comp(subst)
-          val newTail = literals.tail.map(tl => tl.copy(lit = tl.lit.substituteOrdered(subst)(sig)._1))
-          // todo: but we do not delete literals that become trivially false now, do we?
-//          val delId = hd.originId match {
-//            case Orig(idx) => idx
-//            case DecompOf(idx, _) => idx // fallback, should be unreachable
-//          }
-          //val newAcc = acc.map(a => a.copy(lits = a.lits.map(tl => tl.copy(lit = tl.lit.substituteOrdered(subst)(sig)._1)), deleted = a.deleted + delId))
-          val newAcc = acc.map(a => a.copy(lits = a.lits.map(tl => tl.copy(lit = tl.lit.substituteOrdered(subst)(sig)._1))))
+          val (transformations, newTail) = literals.tail.foldLeft((LiteralTransformation(), Vector.empty[TaggedLit])) { case ((infos, acc), tl) =>
+            val (newLit, info) = tl.lit.substituteOrdered(subst)(sig)
+            val tlId = tl.originId match {
+              case Orig(idx) => idx
+              case DecompOf(idx, _) => idx // fallback, should be unreachable
+            }
+            val infos2 = if (info.flip) infos.copy(infos.flippedLits :+ tlId)
+            else if (info.normalize.isDefined) infos.copy(normalizedEq = infos.normalizedEq :+ (tlId, info.normalize.get))
+            else infos
+            (infos2, acc :+ tl.copy(lit = newLit))
+            }
+          val hdId = hd.originId match {
+            case Orig(idx) => idx
+            case DecompOf(idx, _) => idx // fallback, should be unreachable
+          }
+          val newAcc = acc.map{a =>
+            var litTransfAcc: LiteralTransformation = transformations
+            val newLits = a.lits.map{tl =>
+              val tlId = tl.originId match {
+                case Orig(idx) => idx
+                case DecompOf(idx, _) => idx // fallback, should be unreachable
+              }
+              val litAndTransf = tl.lit.substituteOrdered(subst)(sig)
+              if (litAndTransf._2.flip) {
+                litTransfAcc = litTransfAcc.copy(flippedLits = litTransfAcc.flippedLits :+ tlId)
+              }
+              else if (litAndTransf._2.normalize.isDefined) {
+                val infoWithIdx = (tlId,litAndTransf._2.normalize.get)
+                litTransfAcc = litTransfAcc.copy(normalizedEq = litTransfAcc.normalizedEq :+ infoWithIdx)
+              }
+              tl.copy(lit = litAndTransf._1)
+            } //todo: handle these tracking operations uniformly and also track for positive literals
+            a.copy(lits = newLits, uniLits = a.uniLits :+ UniLitInfo(hdId,hd.lit),impTransf = litTransfAcc)}
           detUniInferences0(newTail, newAcc, newPartialSubst)(sig)
         } else {
           val canApplyDecomp = HuetsPreUnification.DecompRule.canApply((leftBody, rightBody), leftAbstractions.size)

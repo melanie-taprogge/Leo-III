@@ -1,48 +1,40 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.Clause.{effectivelyEmpty, vars}
-import leo.datastructures.Type.{ComposedType, ProductType, ∀}
+import leo.datastructures.Clause.vars
 import leo.datastructures._
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
-import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms._
-import leo.modules.output.LPoutput.LpLibs.FunRules.AsTerms.{DecompSingleResult, DecompStepRes, mkDecompSingleObj, mkDecompStepObj}
-import leo.modules.output.LPoutput.LpLibs.LeoTactics.EvalApp.removeBot
-import leo.modules.output.LPoutput.LpLibs.MetaTheorems.Inst.{deleteBots, transform_n}
+import leo.modules.output.LPoutput.ImplicitTransformationUtil.{LiteralInfo2LiteralTransforamtion, litNorm2lpRule, verifySubstitutionLiteralNormalisazion}
+import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.mkExpandLit
+import leo.modules.output.LPoutput.LpLibs.FunRules.AsTerms.{DecompSingleResult, DecompStepRes, LiftedDecompSingleResult, LiftedDecompStepResult, mkDecompSingleObj, mkDecompStepObj, mkLiftDecompSingleBinderObj, mkLiftDecompStepBinderObj}
+import leo.modules.output.LPoutput.LpLibs.MetaTheorems
+import leo.modules.output.LPoutput.LpLibs.MetaTheorems.Inst.transform_n
 import leo.modules.output.LPoutput.LpLibs.ND.Terms._
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.Arguments.extractTermArgs
-import leo.modules.output.LPoutput.NewLpDatastructures.ClauseEncoding.lit2Lp
+import leo.modules.output.LPoutput.NewLpDatastructures.ClauseEncoding.{lit2Lp, lits2Lp}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Obj, Wildcard}
-import leo.modules.output.LPoutput.NewLpDatastructures.LpType.Prf
-import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, var2Lp}
-import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
+import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, Prf}
+import leo.modules.output.LPoutput.NewLpDatastructures.Substitution.removeLeadingTypeArgs
+import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{args2LP, term2LP, var2Lp}
+import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.{polyType2LP, safeEncTy, safeEncTypes, type2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures._
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, extractVarNames}
+import leo.modules.output.LPoutput.NewModularEncoding.InstMetaTheorems.{applyRemoveStep, constructRemoveStep}
 
 object Util {
-  private def assumeVars(encChild: lpClauseInst): Seq[Name] = {
-    encChild.vars.map {
-      case Left(olVar) => olVar.name
-      case Right(_) => throw new Exception(s"Error in Lambdapi Encoding: Encountered unexpected TyVar, Poymorphism not yet encoded")
-    }
-  }
 
-  def encPatternUniAssume(encChild: lpClauseInst): (Seq[LpProofScript], Seq[Name]) = {
-    if (encChild.vars.nonEmpty) {
-      val varNames = assumeVars(encChild)
-      (Seq(Assume(varNames)), varNames)
-    } else (Seq.empty, Seq.empty)
-  }
+  // Set up Context for encodings
 
-  final case class EncUniCtx(encChild: lpClauseInst, encParent: lpClauseInst, sharedVarMap: Map[Int, String], childVarMap: Map[Int, String], parentNameLpEnc: LpTerm[Level.Obj], substClauseLen: Int)
+  final case class EncUniCtx(encChild: lpClauseInst, encParent: lpClauseInst, sharedVarMap: Map[Int, String], childVarMap: Map[Int, String], childVarNames: Seq[Name], parentNameLpEnc: LpTerm[Level.Obj], substClauseLen: Int)
 
-  def initCtxt(childCl: Clause, parentCl: Clause, parentNameLpEnc0: Name): EncUniCtx = {
+  def initUniRuleCtxt(childCl: Clause, parentCl: Clause, parentNameLpEnc0: Name): EncUniCtx = {
 
     //todo: do any checks here?
 
     // translation of the clauses
-    val (sharedVarMap, encClauses) = lpClauseInst.apply_to_set(Seq(childCl, parentCl))
+    val (sharedVarMap, encChild, encParent) = lpClauseInst.apply_to_pair(childCl, parentCl)
 
     // compute names and clause length
     val parentNameLpEnc: LpTerm[Level.Obj] = Const(SymRef.LP(QName.local(parentNameLpEnc0.value)))
@@ -50,8 +42,179 @@ object Util {
 
     // filter out only the vars relevant to the child
     val childVarMap = sharedVarMap.view.filterKeys(vars(childCl).distinct).toMap
+    val childVarNames = extractVarNames(encChild)
 
-    EncUniCtx(encClauses.head, encClauses(1), sharedVarMap, childVarMap, parentNameLpEnc, substClauseLen)
+    EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen)
+  }
+
+  // Encode the Substitution steps
+
+  /**
+    * encodeUniInfo — Encode the RHS entry of a term substitution as an LP argument.
+    *
+    * The produced argument is intended to be used to instantiate the parent clause in
+    * unification/ substitution steps.
+    *
+    * Cases:
+    *  - UniTermByBoundVar(j):
+    *    -> If j refers to a variable that is available in the child’s context, return that variable.
+    *    -> Otherwise, j denotes an out-of-scope bound index;
+    *    in this case we generate a witness term of the appropriate HOL type using lpWitnessCon.
+    *  - UniTermByTerm(t, ...):
+    *    Encode the concrete term t directly and return it as an explicit argument.
+    *
+    * @param termUni           The RHS of a unification substitution entry.
+    * @param childBoundIndices Bound indices that are in scope for the child clause.
+    * @param sharedVarMap      Mapping from bound indices to LP variable names (for in-scope vars).
+    * @param bndIdxToType      Mapping from bound indices to HOL types (used to build witness terms).
+    * @return An explicit LP argument to be applied to the encoded parent.
+    */
+  private def encodeUniInfo(termUni: UniTermRhs, childBoundIndices: Seq[Int], sharedVarMap: Map[Int, String], bndIdxToType: Map[Int, leo.datastructures.Type]): Arg[Level.Obj] = {
+    termUni match {
+      case UniTermByBoundVar(targetIndex) =>
+        if (childBoundIndices.contains(targetIndex)) {
+          Out.lp_debug_info(s"bind by variable with index $targetIndex")
+          val encVar = LpTerm.Var[Level.Obj](Name(sharedVarMap(targetIndex)), None)
+          Arg.Explicit(encVar)
+        } else {
+          Out.lp_debug_info(s"creating a witness term for variable of scope $targetIndex")
+          val ty = bndIdxToType(targetIndex)
+          val freshWitness = LpTerm.App[Level.Obj](lpWitnessCon, Seq(Arg.ExplicitTypeArg(type2LP(ty))))
+          Arg.Explicit(freshWitness)
+        }
+
+      case UniTermByTerm(term, _, _) =>
+        val encTargetTerm = term2LP(term, sharedVarMap, suppressReduction = false, replaceUnknownVars = true)
+        Out.lp_debug_info(s"bind by term $encTargetTerm}")
+        Arg.Explicit(encTargetTerm)
+    }
+  }
+
+  /**
+    * Encode the refine step encoding instantiation of the parent during a substitution step
+    *
+    * @param parentVars The free variables of the parent to be instantiated
+    * @param childVars The free variables of the child to be proved
+    * @param termToApply A mapping of the Integers encoding the variable to be instantiated to the encoded LP Term
+    * @param sharedVarMap The mapping assigning unambiguous variables to the free variables of the parent and child clause
+    * @param parentNameLpEnc The Term in the LP encoding representing the proved step of the parent
+    * @return LP refine tactic with the applied parent
+    */
+  private def constructSubstStep(parentVars: Seq[(Int, Type)], childVars: Seq[(Int, Type)], termToApply: Map[Int, Arg[Level.Obj]], sharedVarMap: Map[Int, String], parentNameLpEnc: LpTerm[Level.Obj]): Refine = {
+    assert(termToApply.nonEmpty)
+    // todo: should i not instead test for the non-emptiness of parent.cl.implicitlyBound ?
+
+    val orderedTerms: Seq[Arg[Level.Obj]] = parentVars.map(id =>
+      // case var instantiated by some term
+      if (termToApply.keySet.contains(id._1)) termToApply(id._1)
+      // case var instantiated by a var of the parent
+      else if (childVars.contains(id)) Arg.Explicit(var2Lp(id._1, id._2, sharedVarMap))
+      // case var instantiated by a witness term
+      else Arg.Explicit(LpTerm.App(lpWitnessCon, Seq(Arg.ExplicitTypeArg(type2LP(id._2))))))
+
+    val appliedParentName = if (orderedTerms.nonEmpty) LpTerm.App(parentNameLpEnc, orderedTerms) else parentNameLpEnc
+
+    Refine(Obj(appliedParentName))
+  }
+
+  /**
+    * Orchestrator for the construction of a proof step encoding the substitution and any potential implicit transformations entailed by it.
+    *
+    * @param ctxt The encoding context
+    * @param termSubst Additional information about the substitution tracked during proof search
+    * @param litTransf Additional information about the implicit literal transformation entailed by substitution tracked during proof search
+    * @param encSubstParent A sequence of literals encoding the parent that is to result from the substitution step
+    * @param childImpBound A mapping of the implicitly bound variable indices of the child to its types
+    * @param parentImpB A mapping of the implicitly bound variable indices of the parent to its types
+    * @param idxMap If the indices given in the additional information refer to indices in the original child clause, we need a mapping to associate
+    *               them with the correct indices in the clause at hand.
+    * @return if no substitution is needed, return the previous step and an empty sequence, else, return the LP term encoding the substet and a
+    *         sequence containing the LP have tactic encoding the substep
+    */
+  def encodeSubstitutionSubstep(nameStep: Name, ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, encSubstParent: Seq[lpLiteralInst], childImpBound: Seq[(Int, Type)], parentImpB: Seq[(Int, Type)], idxMap: Int => Int = identity): (LpTerm[Level.Obj], Seq[Have]) = {
+
+    // a mapping of the id of the free variable to the encoded term that it is instanciated with
+    val termToApply: Map[Int, Arg[Level.Obj]] =
+    termSubst.foldLeft(Map.empty[Int, Arg[Level.Obj]]) { (acc, termUni) =>
+      val lpUnboundVar = termUni.sourceIndex
+      val encSubstTerm = encodeUniInfo(termUni.rhs, childImpBound.map(_._1), ctxt.sharedVarMap.view.filterKeys(childImpBound.map(_._1).contains(_)).toMap, parentImpB.toMap)
+      acc + (lpUnboundVar -> encSubstTerm)
+    }
+
+    // construct the application
+    Out.lp_debug_info(s"vars of parent: ${parentImpB.map(_._1)}")
+    Out.lp_debug_info(s"vars of child: ${childImpBound.map(_._1)}")
+    if (termToApply.nonEmpty) {
+      // detect potential flipping or normalisazion of literals that may be necessary in this step
+      val maybeFlipAndNormalize: Seq[Rewrite] = verifySubstitutionLiteralNormalisazion(litTransf, encSubstParent.map(_.polarity), ctxt.substClauseLen, idxMap)
+      // construct the refine step carrying out the substitution
+      val refineStep = constructSubstStep(parentImpB, childImpBound, termToApply, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
+
+      // have substitution step
+      val haveSubstStep = Have(nameStep, Prf(nAry.disjunction(encSubstParent.map(_.term))), (maybeFlipAndNormalize :+ refineStep).map(Left(_)))
+
+      (Const[Level.Obj](SymRef.LP(QName.local(nameStep.value))), Seq(haveSubstStep))
+
+    } else (LpTerm.App(ctxt.parentNameLpEnc, ctxt.childVarNames.map(varName => Arg.Explicit(LpTerm.Var(varName, None)))), Seq.empty)
+  }
+
+  /**
+    * Reindex literal-transformation metadata through a clause-position map.
+    *
+    * Literal transformations are usually tracked in the clause produced by the
+    * calculus rule. If proof reconstruction temporarily reinserts deleted
+    * literals, the same transformations must be applied at the corresponding
+    * positions in the reconstructed parent.
+    */
+  def reindexLiteralTransformation(litTransf: LiteralTransformation, idxMap: Int => Int): LiteralTransformation = {
+    LiteralTransformation(
+      litTransf.flippedLits.map(idxMap),
+      litTransf.normalizedEq.map { case (idx, mode) => (idxMap(idx), mode) }
+    )
+  }
+
+  /**
+    * Reconstruct a parent clause after applying an original Leo substitution,
+    * including any recorded literal-level transformations.
+    *
+    * This is shared by DetUniSimp and PreUni: both need an explicit encoded
+    * clause as target type for the substitution subproof, and both can obtain
+    * it most robustly by applying the original substitution to the parent clause.
+    */
+  def reconstructSubstParent(origTermSubst: Subst, origTypeSubst: Subst, litTransf: LiteralTransformation, ctxt: EncUniCtx, parentCl: Clause): Option[Seq[lpLiteralInst]]= {
+    val substParent = parentCl.substitute(origTermSubst, origTypeSubst)
+    val encSubstParent = lits2Lp(substParent.lits, ctxt.childVarMap, replaceUnknownVars = true)
+    applyLiteralTransformations(encSubstParent, litTransf)
+  }
+
+  /**
+    * Apply recorded literal transformations to an encoded clause.
+    *
+    * The returned literals represent the post-substitution clause shape expected
+    * by the later proof target, while the rewrite proof for these transformations
+    * is still generated separately by `verifySubstitutionLiteralNormalisazion`.
+    */
+  def applyLiteralTransformations(encLits: Seq[lpLiteralInst], litTransf: LiteralTransformation): Option[Seq[lpLiteralInst]] = {
+    val normalisazionMap = litTransf.normalizedEq.toMap
+    if (litTransf.transforamtionsHappened) {
+      Some(encLits.zipWithIndex.map { taggedLit =>
+        val (lit, idx) = taggedLit
+        if (litTransf.flippedLits.contains(idx)) {
+          lit.flipIfEq
+        } else if (normalisazionMap.contains(idx)) {
+          val appliedRule = litNorm2lpRule(normalisazionMap(idx))
+          Out.lp_debug_info(s"trying to apply normalisazion $appliedRule to ${lit.term}")
+          val transformedLit = appliedRule.applyTo(lit)
+          Out.lp_debug_info(s"resulting in $transformedLit ")
+          transformedLit match {
+            case Some(res) => res
+            case None => return None
+          }
+        } else {
+          lit
+        }
+      })
+    } else Some(encLits)
   }
 
 }
@@ -118,21 +281,21 @@ object UnificationEncoding {
     // Encodings and prelim
 
     // encoding of parents, generation of var maps etc.
-    val ctxt = initCtxt(child.cl, parent.cl, parentNameLpEnc0)
-    val EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, parentNameLpEnc, substClauseLen) = ctxt
+    val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
+    val EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen) = ctxt
     Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
     Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
 
     // encoding of additional information regarding the unification rule application
-    val UniCtx(termSubst, typeSubst, deletedUniLits, litTransf) = initUniCtxt(child)
+    val UniCtx(termSubst, typeSubst, deletedUniLits, litTransf) = initUniCtxt(child.furtherInfo.addInfoUni)
 
     // construct the parent post-substitution (but prior to the deletion of the literals) and a mapping of the child literal indices to the ones in this parent
-    val (encSubstParent, old2NewIdx): (LpTerm[Level.Obj], Map[Int, Int]) = reconstructSubstUniParent(deletedUniLits, encChild, childVarMap)
+    val (encSubstParent, old2NewIdx) = reconstructSubstUniParent(deletedUniLits, encChild.lits, childVarMap)
 
 
     ////////////////////////////
     // 0) Assume free variables
-    val (assumeStep, childVarNames) = encPatternUniAssume(encChild)
+    val (assumeStep) = encAssumeStep(childVarNames)
 
     // construct the actual proof
     if (typeSubst.nonEmpty) {
@@ -141,110 +304,26 @@ object UnificationEncoding {
 
       ////////////////////////////
       // 1) Substitution subproof (optional)
-      val (maybeSubstStepName, maybeSubstStep) = encodeSubstitutionSubstep(ctxt, termSubst, litTransf, old2NewIdx, childVarNames, encSubstParent, child.cl, parent.cl.implicitlyBound)
+      val nameHaveSubstStep = Name("Subst")
+      val (maybeSubstStepName, maybeSubstStep) = encodeSubstitutionSubstep(nameHaveSubstStep,ctxt, termSubst, litTransf, encSubstParent, child.cl.implicitlyBound, parent.cl.implicitlyBound, old2NewIdx.withDefault(identity))
 
       ////////////////////////////
       // 2) Constraint-elimination subproof
       val nameHaveRemoveStep = Name("RemoveUniConst")
-      val haveRemoveStep = constructRemoveStep(nameHaveRemoveStep, encSubstParent, encChild.lits, deletedUniLits, substClauseLen, child.cl)
+      val haveRemoveStep = constructRemoveStep(nameHaveRemoveStep, encSubstParent, encChild.lits, deletedUniLits.map(_.position)) // , child.cl
 
       ////////////////////////////
       // 3) Composition in final refine step
-      val lastStep = LpTerm.App(Obj(eqImp), Seq(Arg.Explicit[Level.Meta](Const(SymRef.LP(QName.local(nameHaveRemoveStep.value)))), Arg.Explicit[Level.Meta](Obj(maybeSubstStepName))))
+      val appliedHaveRemoveStep = applyRemoveStep(nameHaveRemoveStep, maybeSubstStepName)
 
-      Encoded(((assumeStep ++ maybeSubstStep) :+ haveRemoveStep) :+ Refine(lastStep))
+      Encoded(((assumeStep ++ maybeSubstStep) :+ haveRemoveStep) :+ Refine(Obj(appliedHaveRemoveStep)))
     }
   }
 
-  /**
-    * encodeUniInfo — Encode one RHS entry of a term substitution as an LP argument.
-    *
-    * The produced argument is intended to be applied to the encoded parent clause in
-    * unification/ substitution steps
-    *
-    * Cases:
-    *  - UniTermByBoundVar(j):
-    *    -> If j refers to a variable that is available in the child’s context, return that variable.
-    *    -> Otherwise, j denotes an out-of-scope bound index;
-    *       in this case we generate a witness term of the appropriate HOL type using lpWitnessCon.
-    *  - UniTermByTerm(t, ...):
-    *    Encode the concrete term t directly and return it as an explicit argument.
-    *
-    * @param termUni      The RHS of a unification substitution entry.
-    * @param childBoundIndices    Bound indices that are in scope for the child clause.
-    * @param sharedVarMap Mapping from bound indices to LP variable names (for in-scope vars).
-    * @param bndIdxToType      Mapping from bound indices to HOL types (used to build witness terms).
-    * @return An explicit LP argument to be applied to the encoded parent.
-    */
-  private def encodeUniInfo(termUni: UniTermRhs, childBoundIndices: Seq[Int], sharedVarMap: Map[Int, String], bndIdxToType: Map[Int, leo.datastructures.Type]): Arg[Level.Obj] = {
-    termUni match {
-      case UniTermByBoundVar(targetIndex) =>
-        if (childBoundIndices.contains(targetIndex)) {
-          Out.lp_debug_info(s"bind by variable with index $targetIndex")
-          //val encVar = Const[Level.Obj](SymRef.LP(QName.local(sharedVarMap(targetIndex)))) //todo: this is not nice
-          val encVar = LpTerm.Var[Level.Obj](Name(sharedVarMap(targetIndex)),None)
-          Arg.Explicit(encVar)
-        } else {
-          Out.lp_debug_info(s"creating a witness term for variable of scope $targetIndex")
-          val ty = bndIdxToType(targetIndex)
-          val freshWitness = LpTerm.App[Level.Obj](lpWitnessCon, Seq(Arg.ExplicitTypeArg(type2LP(ty))))
-          Arg.Explicit(freshWitness)
-        }
+  final case class UniCtx(termSubst: Seq[UniTermSubst], typeSubst: Seq[UniTypeSubst], deletedUniLits: Seq[UniLitInfo], litTransf: LiteralTransformation)
 
-      case UniTermByTerm(term, _, _) =>
-        val encTargetTerm = term2LP(term, sharedVarMap, suppressReduction = false, replaceUnknownVars = true)
-        Out.lp_debug_info(s"bind by term $encTargetTerm}")
-        Arg.Explicit(encTargetTerm)
-    }
-  }
-
-  // generate the rewrite rules necessary to verify normalisazion by reverse-engineering
-  // goalLits = child.cl.lits
-  private def verifyLiteralNormalisazion(addInfo: LiteralTransformation, old2NewIdx: Map[Int, Int], goalLits: Seq[Literal], clauseLen: Int) = {
-
-    def generatePatternInfo(id: Int) = PatternBuilder.PatternInfo(old2NewIdx.getOrElse(id, id), None, goalLits(id).polarity)
-
-    var newFlipSteps: Seq[Int] = Seq.empty
-    val maybeNormalizeSteps: Seq[Rewrite] = if (addInfo.normalizedEq.nonEmpty) {
-      Out.lp_debug_info(s"need to normalize: ${addInfo.normalizedEq}")
-      addInfo.normalizedEq.map { pair =>
-        val (pos, normMode) = pair
-        val rule: LpTerm[Level.Meta] = normMode match {
-          case LitNorm.TopL => newFlipSteps = newFlipSteps :+ pos; lpSimp_eqTop
-          case LitNorm.TopR => lpSimp_eqTop
-          case LitNorm.BotL => newFlipSteps = newFlipSteps :+ pos; lpSimp_eqBot
-          case LitNorm.BotR => lpSimp_eqBot
-        }
-        val patternInfo = generatePatternInfo(pos)
-        val pattern = PatternBuilder.generateClausePattern(Seq(patternInfo), clauseLen)
-        Rewrite(Some(pattern),rule,Side.Left)
-      }
-    } else Seq.empty
-
-    // sanity check: we ony need to flip literals that are equational and we only need to rewrite literals to an euational form if they are non-equational. Therefore, there can never be an overlap between the two
-    assert(addInfo.flippedLits.intersect(newFlipSteps).isEmpty, s"Error in Lambdapi Encoding: Trying to verify literal-normalisazion, but found contradicroty input (${addInfo.flippedLits.intersect(newFlipSteps)})")
-
-    val allFlipSteps = (addInfo.flippedLits ++ newFlipSteps).sorted
-
-    val maybeFlipStep: Seq[Rewrite] = if (allFlipSteps.nonEmpty) {
-      Out.lp_debug_info(s"the following literals need to be flipped: $allFlipSteps") //todo: kann es sein, dass auch das abgespeicherte uni lit geflippt wurde? in dem fall muss ich die Operation umkehren
-      // the indices refer to the positions of the literals in the child, as we re-inserted the uni Lits, we may need to shift them
-      val flipInfo = allFlipSteps.map(generatePatternInfo)
-      val flipPattern = PatternBuilder.generateClausePattern(flipInfo, clauseLen)
-
-      Seq(Rewrite(Some(flipPattern), eqSym))
-    } else Seq.empty
-
-    maybeNormalizeSteps ++ maybeFlipStep
-  }
-  
-  // general mode of encoding: apply substitution, show that unification literal is now trivially false, remove it
-
-  private final case class UniCtx(termSubst: Seq[UniTermSubst], typeSubst: Seq[UniTypeSubst], deletedUniLits: Seq[UniLitInfo], litTransf: LiteralTransformation)
-
-  private def initUniCtxt(child:ClauseProxy)={
+  def initUniCtxt(addInfo: AddInfoUni) = {
     // extract the addInfo
-    val addInfo = child.furtherInfo.addInfoUni
 
     //extract the substitutions
     val termSubst = addInfo.subst.termSubsts
@@ -255,25 +334,45 @@ object UnificationEncoding {
 
     val litTransf = addInfo.literalTransformations
 
-    UniCtx(termSubst,typeSubst,deletedUniLits,litTransf)
+    UniCtx(termSubst, typeSubst, deletedUniLits, litTransf)
   }
 
-  private def reconstructSubstUniParent(deletedUniLits: Seq[UniLitInfo], encChild: lpClauseInst, childVarMap: Map[Int, String])={
+  /**
+    * reconstructSubstUniParent - reconstruct a clause after substitution but prior to the deletion of unification literals
+    *
+    * In the process of unification, Leo-III carries out the substitution and deletes the unification constraints
+    * that have become trivially false as a result of the substitution. In proof verification, the substitution step
+    * prior to this deletion needs to be verified in a substep in order to justify this removal.
+    * reconstructSubstUniParent carries out this reconstruction based on a lits of deleted literals, and the encoded
+    * literals of the last proven step.
+    *
+    * We track the literals produced by unification throughtout the reasoning process of Leo-III, and this function expects
+    * the already substituted literal as an arguemnt.
+    *
+    * @param deletedUniLits Seq of UniLitInfo, detailing the deleted literals and their indices
+    * @param encUniClause   List of encoded literals of the clause after substitution
+    * @param childVarMap    Mapping of the bound variables, necessary for encoding of the new literals
+    * @return A Seq of literals representing the last proven step with the deleted literals inserted, and mapping linking the
+    *         original index of the literals in encLastStep to those in the new Seq.
+    */
+  def reconstructSubstUniParent(deletedUniLits: Seq[UniLitInfo], encUniClause: Seq[lpLiteralInst], childVarMap: Map[Int, String]): (Seq[lpLiteralInst], Map[Int, Int]) = {
     assert(deletedUniLits.nonEmpty, "Trying to verify unification but no unification literals to delete were given")
     Out.lp_debug_info(s"found ${deletedUniLits.length} unification literal(s):")
     val sortedInsertLits = deletedUniLits.sortBy(_.position)
-    val newLits = sortedInsertLits.foldLeft(encChild.lits) {
+    // reinsert the deleted literals
+    // first, encode the new literals
+    val newLits = sortedInsertLits.foldLeft(encUniClause) {
       case (acc, newUniLit) =>
         val encNewLit = lit2Lp(newUniLit.literal, childVarMap, surpressReduction = true, replaceUnknownVars = true)
         Out.lp_debug_info(s"- at position ${newUniLit.position}: ($encNewLit)")
+        // we assume that the sequence of literals passed here do not contain the
         acc.patch(newUniLit.position, Seq(encNewLit), 0)
     }
-
     // positions at which we insert new literals (sorted)
     val insertPositions: Seq[Int] = sortedInsertLits.map(_.position)
     // map from old index -> new index after all insertions
     val old2NewIdx: Map[Int, Int] = {
-      val n = encChild.lits.length
+      val n = encUniClause.length
 
       (0 until n).map { oldIdx =>
         // how many insertions were at or before this old index?
@@ -282,68 +381,7 @@ object UnificationEncoding {
       }.toMap
     }
 
-    (nAry.disjunction(newLits), old2NewIdx)
-  }
-
-  private def constructSubstStep(parentVars: Seq[(Int, Type)], childVars: Seq[(Int, Type)], termToApply: Map[Int, Arg[Level.Obj]], maybeFlipStep: Seq[Rewrite], sharedVarMap: Map[Int, String], parentNameLpEnc: LpTerm[Level.Obj]): Refine = {
-    assert(termToApply.nonEmpty)
-    // todo: should i not instead test for the non-emptiness of parent.cl.implicitlyBound ?
-
-    val orderedTerms: Seq[Arg[Level.Obj]] = parentVars.map(id =>
-      // case var instanciated by some term
-      if (termToApply.keySet.contains(id._1)) termToApply(id._1)
-      // case var instanciated by a var of the parent
-      else if (childVars.contains(id)) Arg.Explicit(var2Lp(id._1, id._2, sharedVarMap))
-      // case var instanciated by a witness term
-      else Arg.Explicit(LpTerm.App(lpWitnessCon, Seq(Arg.ExplicitTypeArg(type2LP(id._2))))))
-
-    val appliedParentName = if (orderedTerms.nonEmpty) LpTerm.App(parentNameLpEnc, orderedTerms) else parentNameLpEnc
-
-    Refine(Obj(appliedParentName))
-  }
-
-  private def encodeSubstitutionSubstep(ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, old2NewIdx: Map[Int, Int], childVarNames: Seq[Name], encSubstParent: LpTerm[Level.Obj], childCl: Clause, parentImpB : Seq[(Int, Type)]):(LpTerm[Level.Obj], Seq[Have]) = {
-    // based on the additional information, construct the terms in the lambdapi encoidng that need to be applied to the parent to verify the substitution
-    // this is a mapping of the id of the free variable to the encoded term that it is instanciated with
-    val termToApply: Map[Int, Arg[Level.Obj]] =
-    termSubst.foldLeft(Map.empty[Int, Arg[Level.Obj]]) { (acc, termUni) =>
-      val lpUnboundVar = termUni.sourceIndex
-      val encSubstTerm = encodeUniInfo(termUni.rhs, childCl.implicitlyBound.map(_._1), ctxt.sharedVarMap.view.filterKeys(childCl.implicitlyBound.map(_._1).contains(_)).toMap, parentImpB.toMap)
-      acc + (lpUnboundVar -> encSubstTerm)
-    }
-
-    // construct the application
-    Out.lp_debug_info(s"vars of parent: ${parentImpB.map(_._1)}")
-    Out.lp_debug_info(s"vars of child: ${childCl.implicitlyBound.map(_._1)}")
-    if (termToApply.nonEmpty) {
-      // todo: should i not instead test for the non-emptiness of parent.cl.implicitlyBound ?
-
-      // detect potential flipping of literals that may be necessary in this step
-      val maybeFlipStep: Seq[Rewrite] = verifyLiteralNormalisazion(litTransf, old2NewIdx, childCl.lits, ctxt.substClauseLen)
-      // construct the refine step carrying out the substitution
-      val refineStep = constructSubstStep(parentImpB, childCl.implicitlyBound, termToApply, maybeFlipStep, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
-
-      // have substitution step
-      val nameSubst = Name("Subst") // todo: add to names to keep safe, maybe make them parameters of the class
-      val haveSubstStep = Have(nameSubst, Prf(encSubstParent), (maybeFlipStep :+ refineStep).map(Left(_)))
-
-      (Const[Level.Obj](SymRef.LP(QName.local(nameSubst.value))), Seq(haveSubstStep))
-
-    } else (LpTerm.App(ctxt.parentNameLpEnc, childVarNames.map(varName => Arg.Explicit(LpTerm.Var(varName, None)))), Seq.empty)
-  }
-
-  private def constructRemoveStep(nameHaveRemoveStep: Name, encSubstParent: LpTerm[Level.Obj], encChildLits: Seq[LpTerm[Level.Obj]], deletedUniLits: Seq[UniLitInfo],  substClauseLen: Int, childCl: Clause) = {
-    val impToProve = Prf(LogicConst.Eq(HolBaseTypes.O, encSubstParent, nAry.disjunction(encChildLits)))
-    val proofScript: Seq[LpProofScript] = deletedUniLits.map(litInfo => {
-      Out.lp_debug_info(s"orig pos is ${litInfo.position}")
-      val posInSubs = litInfo.position
-      val patternLitInfo = PatternBuilder.PatternInfo(posInSubs, None, polarity = true)
-      val pattern = PatternBuilder.generateClausePattern(Seq(patternLitInfo), substClauseLen)
-      val embeddedPattern = PatternBuilder.embedPatternInEq(pattern, Side.Left)
-      removeBot(embeddedPattern)
-    })
-    val finalStep = if (effectivelyEmpty(childCl) && childCl.lits.length == 1) Reflexivity else Refine(deleteBots(encChildLits, deletedUniLits.map(_.position).sorted))
-    Have(nameHaveRemoveStep, impToProve, (proofScript :+ finalStep).map(step => Left(step)))
+    (newLits, old2NewIdx)
   }
 
 }
@@ -356,7 +394,8 @@ object DetUniSimpEncoding {
 
   final case class DetUniStage(curName: LpTerm[Level.Obj], // current proof term to refine at the end
                                 scripts: Vector[LpProofScript], // accumulated scripts
-                                clauseLits: Seq[LpTerm[Level.Obj]]) // current clause literal encoding after steps
+                                clauseLits: Seq[lpLiteralInst],
+                                parent2currentIdx: Map[Int,Int]) // current clause literal encoding after steps
                               {
                                 def add(more: Seq[LpProofScript]): DetUniStage = copy(scripts = scripts ++ more)
                               }
@@ -409,6 +448,7 @@ object DetUniSimpEncoding {
     *    If DetUniSimp reordered literals:
     *      - Apply the `permute` theorem in a dedicated substep to align
     *        the parent clause with the child clause ordering.
+    *
     * 3) Removal of trivially false literals (optional)
     *    Required when literals were deleted due to:
     *      - Deterministic unification constraints, or
@@ -445,8 +485,8 @@ object DetUniSimpEncoding {
 
     ////////////////////////////
     // Encodings and prelim
-    val ctxt = initCtxt(child.cl, parent.cl, parentNameLpEnc0)
-    val EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, parentNameLpEnc, substClauseLen) = ctxt
+    val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
+    val EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen) = ctxt
     Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
     Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
 
@@ -458,41 +498,67 @@ object DetUniSimpEncoding {
     // reconstruct the necessary additional info based on the tagged literals:
     val DetUniReconstruction(deleteIdx,permutation) = reconstruct(taggedLits,parent.cl.lits.length)
 
-    if (subst.typeSubsts.nonEmpty) return NotEncodable(s"type substitution not encoded")
+    if (subst.encSubst.typeSubsts.nonEmpty) return NotEncodable(s"type substitution not encoded")
 
     ////////////////////////////
     // 0) Assume free variables
-    val (assumeStep, childVarNames) = encPatternUniAssume(encChild)
+    val (assumeStep) = encAssumeStep(childVarNames)
 
     // initial state
     val appliedParent = LpTerm.App(parentNameLpEnc, childVarNames.map(varName => Arg.Explicit[Level.Obj](LpTerm.Var(varName, None))))
     val parntLits = encParent.lits
-    val initState = DetUniStage(appliedParent,assumeStep.toVector,parntLits)
+    val initState = DetUniStage(appliedParent,assumeStep.toVector,parntLits, (0 until (encParent.lits.length)).map(i => i -> i).toMap)
+
+    Out.lp_debug_info(s"initial state")
+    Out.lp_debug_info(s"proof so far: ${initState.scripts.map(scr => Renderer.proof(scr, ro, sig))}")
+    Out.lp_debug_info(s"current step: ${initState.clauseLits.map(lit => Renderer.termP(lit.term, ro, 0, sig))}")
 
     ////////////////////////////
     // 1) Substitution subproof (optional)
-    val substStage: DetUniStage = verifyDetUniSubstStep(initState, subst) match {
+    val substStage: DetUniStage = verifyDetUniSubstStep(initState, subst, ctxt, child.cl, parent.cl) match {
       case StageResult.Ok(stage) => stage
       case StageResult.Fail(reason) => return NotEncodable(reason)
     }
 
-    ////////////////////////////
-    // 2) Clause permutation subproof (optional)
-    val permStage: DetUniStage = verifyDetUniPermuteStep(permutation, parent.cl.lits.indices.toVector, substStage) match {
-      case StageResult.Ok(stage) => stage
-      case StageResult.Fail(reason) => return NotEncodable(reason)
-    }
+    Out.lp_debug_info(s"substStage state")
+    Out.lp_debug_info(s"proof so far: ${substStage.scripts.map(scr => Renderer.proof(scr, ro, sig))}")
+    Out.lp_debug_info(s"current step: ${substStage.clauseLits.map(lit => Renderer.termP(lit.term, ro, 0, sig))}")
 
     ////////////////////////////
     // 3) Removal of trivially false literals (optional)
-    val deleteStage: DetUniStage = verifyDetUniDeleteStep(deleteIdx, permStage) match {
+    val deleteStage: DetUniStage = verifyDetUniDeleteStep(deleteIdx, substStage) match { // todo: throw untested exception in case of non uni literals to delete
       case StageResult.Ok(stage) => stage
       case StageResult.Fail(reason) => return NotEncodable(reason)
     }
 
+    Out.lp_debug_info(s"permutation: $permutation, current map values: ${deleteStage.parent2currentIdx.values.toVector}")
+    // permutation needs to be updated
+    //val updatedPermutation = permutation.map(deleteStage.parent2currentIdx)
+    //if (subst.encSubst.termSubsts.nonEmpty && (updatedPermutation != deleteStage.parent2currentIdx.values.toVector)) throw new Exception(s"BOOOOOTH")
+
+    Out.lp_debug_info(s"deleteStage state")
+    Out.lp_debug_info(s"proof so far: ${deleteStage.scripts.map(scr => Renderer.proof(scr, ro, sig))}")
+    Out.lp_debug_info(s"current step: ${deleteStage.clauseLits.map(lit => Renderer.termP(lit.term, ro, 0, sig))}")
+
+    ////////////////////////////
+    // 2) Clause permutation subproof (optional) //todo: handle cases with permuation and substitution
+    val permStage: DetUniStage = verifyDetUniPermuteStep(permutation, deleteStage) match {
+      case StageResult.Ok(stage) => stage
+      case StageResult.Fail(reason) => return NotEncodable(reason)
+    }
+
+    Out.lp_debug_info(s"permStage state")
+    Out.lp_debug_info(s"proof so far: ${permStage.scripts.map(scr => Renderer.proof(scr,ro,sig))}")
+    Out.lp_debug_info(s"current step: ${permStage.clauseLits.map(lit => Renderer.termP(lit.term,ro,0,sig))}")
+
     ////////////////////////////
     // 4) Decomposition subproof (optional)
-    val decompStage: DetUniStage = verifyDecomp(decompInfo, deleteStage) match {
+    val etaExpandedStage: DetUniStage = etaExpandDecompParents(decompInfo, permStage) match {
+      case StageResult.Ok(stage) => stage
+      case StageResult.Fail(reason) => return NotEncodable(reason)
+    }
+
+    val decompStage: DetUniStage = verifyDecomp(decompInfo, etaExpandedStage, child.cl.lits, sig) match {
       case StageResult.Ok(stage) => stage
       case StageResult.Fail(reason) => return NotEncodable(reason)
     }
@@ -507,14 +573,35 @@ object DetUniSimpEncoding {
   // Helpers for Substitution steps
 
   /**
-    * encode the substitution steps, WIP
+    * Reconstruct the parent of a DetUniSimp step prior to implicit transformations. This process is more involved than in
+    * other unification instances, as DetUniSubst applies substitution interlaced with other operations (like decomposition). In order to separate
+    * the processes cleanly and verify them sequentially, the result of the substitution step needs to be reconstructed carefully.
+    *
+    * @param subst Additional information on substitution tracked during proof search
+    * @param ctxt The encoding context
+    * @param parentCl The unencoded parent clause
+    * @return
     */
-  private def verifyDetUniSubstStep(previousStage: DetUniStage, subst: UniSubst): StageResult = {
-    if (subst.termSubsts.nonEmpty) {
+  def reconstructSubstParentUniDetSubst(subst: AddInfoUniWithSubst, ctxt: EncUniCtx, parentCl: Clause): Option[Seq[lpLiteralInst]]= {
+    reconstructSubstParent(subst.origTermSubst, subst.origTypeSubst, subst.literalTransformations, ctxt, parentCl)
+  }
+
+  private def verifyDetUniSubstStep(previousStage: DetUniStage, subst: AddInfoUniWithSubst, ctxt: EncUniCtx, childCl: Clause, parentCl: Clause): StageResult = {
+    if (subst.encSubst.termSubsts.nonEmpty) {
       Out.lp_debug_info(s"needs to apply substitution(s)")
-      // todo
-      //val termSubst = subst.termSubsts
-      StageResult.Fail("DetUniSimp with substitution")
+
+      // encoding of additional information regarding the unification rule application
+      val (termSubst, litTransf) = (subst.encSubst.termSubsts,subst.literalTransformations)
+
+      val normalSubstParent: Seq[lpLiteralInst] = reconstructSubstParentUniDetSubst(subst, ctxt, parentCl) match {
+        case Some(res) => res
+        case None => return StageResult.Fail(s"Trying to encode substitution substep, error when reconstructing substituted parent")
+      }
+
+      val nameHaveSubstStep = Name("Subst")
+      val (newStepName, substSubstep) = encodeSubstitutionSubstep(nameHaveSubstStep,ctxt,termSubst,litTransf,normalSubstParent,childCl.implicitlyBound,parentCl.implicitlyBound,previousStage.parent2currentIdx.withDefault(identity))
+
+      StageResult.Ok(DetUniStage(newStepName,previousStage.scripts ++ substSubstep,normalSubstParent,previousStage.parent2currentIdx))
     } else {
       StageResult.Ok(previousStage)
     }
@@ -523,14 +610,27 @@ object DetUniSimpEncoding {
   // Helpers for Permutation steps
 
   /**
-    * encode the permutation steps, WIP
+    * encode the permutation steps
     */
-  private def verifyDetUniPermuteStep(permutation: Vector[Int], parentIds: Vector[Int], previousStage: DetUniStage): StageResult = {
-    val needsPermutation = permutation != parentIds
+  private def verifyDetUniPermuteStep(permutation: Vector[Int], previousStage: DetUniStage): StageResult = {
+    val currentIds = previousStage.parent2currentIdx.values.toVector
+    val updatedPermutation = permutation.map(previousStage.parent2currentIdx(_))
+    val needsPermutation = updatedPermutation != currentIds
     if (needsPermutation) {
-      Out.lp_debug_info(s"needs to apply permutation")
+      Out.lp_debug_info(s"needs to apply permutation: $permutation")
+      Out.lp_debug_info(s"all good")
+      val instPermTheorem = MetaTheorems.Inst.permute(updatedPermutation,previousStage.clauseLits,previousStage.curName)
+      Out.lp_debug_info(s"inst theorem: $instPermTheorem")
       // todo
-      StageResult.Fail("DetUniSimp with permutation")
+      val haveStepName = Name("DetUniLit_permutation") // todo: safe and source from one central place that can ensure no conflict with names occurs
+      val permutedClause = updatedPermutation.map(previousStage.clauseLits)
+      val refineStep = Refine(Obj(instPermTheorem))
+      val haveStep = Have(haveStepName,Prf(nAry.disjunction(permutedClause.map(_.term))),Seq(Left(refineStep)))
+
+      // update the map todo: can probably make this a general (safe) method in package
+      val updatedMap = previousStage.parent2currentIdx.map{case (i, j) => (i, updatedPermutation(j))}
+
+      StageResult.Ok(previousStage.copy(scripts = previousStage.scripts :+ haveStep, clauseLits = permutedClause, curName = Const(SymRef.LP(QName.local(haveStepName.value))),parent2currentIdx = updatedMap))
     } else {
       StageResult.Ok(previousStage)
     }
@@ -543,15 +643,95 @@ object DetUniSimpEncoding {
     */
   private def verifyDetUniDeleteStep(deleteIdx: Vector[Int], previousStage: DetUniStage): StageResult = {
     if (deleteIdx.nonEmpty) {
-      Out.lp_debug_info(s"needs to verify deletion")
-      // todo
-      StageResult.Fail("DetUniSimp with Deletion")
+      Out.lp_debug_info(s"needs to verify deletion (of indices $deleteIdx)")
+
+      // This is currently just the identity, but order of steps may be rearranged leading to change in orders
+      val deleteIdxCurrent = deleteIdx.map(i => previousStage.parent2currentIdx(i))
+
+      val fdsfsd = deleteIdxCurrent.map(i => i >= 0 && i < previousStage.clauseLits.length)
+
+      // ensure all indices are in scope
+      if (!fdsfsd.contains(false)){
+        // reconstruct the clause after the removal of the substituted literals
+        val postDeleteClause = previousStage.clauseLits.zipWithIndex.filterNot { case (_, i) => deleteIdxCurrent.toSet(i) }.map(_._1)
+
+        val nameHaveRemoveStep = Name("RemoveTrivFalse")
+        val haveRemoveStep = constructRemoveStep(nameHaveRemoveStep, previousStage.clauseLits, postDeleteClause, deleteIdxCurrent)
+        val appliedRemoveStep = applyRemoveStep(nameHaveRemoveStep,previousStage.curName)
+
+        // create a mapping that (for all remaining literals) links the indices that literals had in the parent clause to the index of the literal in the current goal
+        // to this end, we need to delete elements from the mapping that lead to indices that were remoced, and we need to shift the remaining indices
+        //val updatedMapping = previousStage.parent2currentIdx.filterNot{case (_, v) => deleteIdxCurrent.contains(v)}
+        val delsSorted = deleteIdxCurrent.distinct.sorted
+
+        def shiftAfterDeletes(i: Int): Int = i - delsSorted.count(_ < i)
+
+        val updatedMapping =
+          previousStage.parent2currentIdx
+            .filterNot { case (_, v) => deleteIdxCurrent.contains(v) }
+            .map { case (k, v) => k -> shiftAfterDeletes(v) }
+        // todo: I may want to handle these updates differently/ ensure that the operation is admissible in all cases etc. I may need this across operations _> safe method in package?
+
+        StageResult.Ok(DetUniStage(appliedRemoveStep, previousStage.scripts :+ haveRemoveStep,postDeleteClause,updatedMapping))
+      } else{
+        StageResult.Fail(s"Error encoding DetUniSimp: Attempting to verify deletion of literals but indices ${deleteIdxCurrent.filter(fdsfsd)} are out of scope")
+      }
     } else {
       StageResult.Ok(previousStage)
     }
   }
 
   // Helpers for Decomp steps
+
+  private final case class EtaExpansion(lit: lpLiteralInst, rewrite: Option[Rewrite])
+
+  private def etaExpandDecompLiteral(info: DecompInfo, lit: lpLiteralInst, idxInClause: Int, clauseLen: Int): Either[String,EtaExpansion] = lit.term match {
+    case LogicConst.Not(LogicConst.Eq(ty, left, right)) =>
+      val (expandedLeft, expandedRight) = etaExpandTermPair(ty,left,right,s"Eta${info.OrigIdx}")
+      val expandedLit = lpLiteralInst(LogicConst.Not(LogicConst.Eq(ty,expandedLeft,expandedRight)),polarity = false,eq = true)
+      if (expandedLit == lit) Right(EtaExpansion(lit,None))
+      else splitOlFun(ty) match {
+        case Some((argTy, resultTy)) =>
+          val pattern = PatternBuilder.generateClausePattern(Seq(PatternBuilder.PatternInfo(idxInClause,None,polarity = true)), clauseLen)
+          Right(EtaExpansion(expandedLit,Some(Rewrite(Some(pattern),mkExpandLit(argTy,resultTy,left,right),Side.Left))))
+        case None =>
+          Left("DetUniSimp: eta expansion changed a non-functional decomp literal")
+      }
+    case _ =>
+      Right(EtaExpansion(lit,None))
+  }
+
+  private def etaExpandDecompParents(decompInfo: Vector[DecompInfo], previousStage: DetUniStage): StageResult = {
+    if (decompInfo.isEmpty) return StageResult.Ok(previousStage)
+
+    val clauseLen = previousStage.clauseLits.length
+    var updatedLits = previousStage.clauseLits
+    var rewrites = Vector.empty[Rewrite]
+
+    decompInfo.foreach { info =>
+      previousStage.parent2currentIdx.get(info.OrigIdx) match {
+        case Some(idxInClause) if updatedLits.isDefinedAt(idxInClause) =>
+          etaExpandDecompLiteral(info, updatedLits(idxInClause), idxInClause, clauseLen) match {
+            case Right(EtaExpansion(newLit, maybeRewrite)) =>
+              updatedLits = updatedLits.updated(idxInClause,newLit)
+              rewrites = rewrites ++ maybeRewrite.toVector
+            case Left(err) =>
+              return StageResult.Fail(err)
+          }
+        case Some(idxInClause) =>
+          return StageResult.Fail(s"DetUniSimp: eta expansion requested for decomp literal at out-of-bounds index $idxInClause")
+        case None =>
+          return StageResult.Fail(s"DetUniSimp: eta expansion requested for missing original literal ${info.OrigIdx}")
+      }
+    }
+
+    if (rewrites.isEmpty) StageResult.Ok(previousStage)
+    else {
+      val haveStepName = Name("DetUniEtaExpandedParent")
+      val haveStep = Have(haveStepName,Prf(nAry.disjunction(updatedLits.map(_.term))),(rewrites :+ Refine(Obj(previousStage.curName))).map(Left(_)))
+      StageResult.Ok(previousStage.copy(curName = lpTermBuilder.localObj(haveStepName), scripts = previousStage.scripts :+ haveStep, clauseLits = updatedLits))
+    }
+  }
 
   /**
     * verifyDecomp — Verification of DetUniSimp decomposition steps
@@ -568,109 +748,357 @@ object DetUniSimpEncoding {
     * Decomp_single), using transform theorem if necessary.
     *
     * Current limitations:
-    *   - At most one literal is decomposed.
-    *   - No implicit literal transformations are pending
-    *     (no flips, no normalization steps).
     *   - Polymorphic types are not handled
     *   - Eta expansions are not handled
     *
     * Preconditions / Encoding Invariants:
     *   - The decomposed literal must have the shape ¬(f(args…) = f(args…))
     */
-  private def verifyDecomp(decompInfo: Vector[DecompInfo], currentStage: DetUniStage): StageResult = {
-    if (decompInfo.length > 1) return StageResult.Fail("DetUniSimp: Decomp on mulitple literals!")
-    //val impTransf = decompInfo.flatMap(_.LitTransf.map(_.flip)).contains(true) || decompInfo.flatMap(_.LitTransf.map(_.normalize.isDefined)).contains(true)
-    val impTransf = decompInfo.exists(_.LitTransf.exists(t => t.flip || t.normalize.isDefined))
-    if (impTransf) return StageResult.Fail("DetUniSimp: implicit transformation in decomposition")
+  private def verifyDecomp(decompInfo: Vector[DecompInfo], currentStage: DetUniStage, goalLits: Seq[Literal], sig: LpSig): StageResult = {
 
-    // go over the individual tracked decompositions and apply the necessary steps to encode them
-    val scriptsRes: StageResult = decompInfo.foldLeft[Either[String, Vector[LpProofScript]]](Right(Vector.empty)) {
-      // if the accumulator already inlcudes an error, abort
-      case (Left(err), _) => Left(err)
-      // else, continue
-      case (Right(acc), mapping) =>
-        val idxInParent = mapping.OrigIdx
+    Out.lp_debug_info(s"Needs verification of decomposition")
 
-        if (!currentStage.clauseLits.isDefinedAt(idxInParent))
-          Left(s"DetUniSimp: decomp index $idxInParent out of bounds (len=${currentStage.clauseLits.length})")
-        else {
-          val litInParent = currentStage.clauseLits(idxInParent)
-          Out.lp_debug_info(s"handling literal at pos $idxInParent: $litInParent")
+    if (decompInfo.isEmpty) return StageResult.Ok(currentStage)
 
-          // generate the new proof steps necessary to encode the given decomposition
-          val newScriptsE: Either[String, Vector[LpProofScript]] = litInParent match {
-            case LogicConst.Not(LogicConst.Eq(_, LpTerm.App(f0, args0), LpTerm.App(f1, args1))) if f0 == f1 =>
-              // ensure that the number of arguemtns is appropriate
-              val n = args0.length
-              if (n != args1.length) Left("Error in encoding of DetUniSimp: decomp but different number of arguments")
-              else if (n < 1) Left("Error in encoding of DetUniSimp: decomp but no arguments found")
+    // Store all data needed for one decomposed original literal.  We first
+    // collect these tasks from the unchanged stage, then use them twice: once to
+    // compute the fully decomposed target clause, and once to build the proof
+    // backwards from that target.
+    final case class DecompTask(info: DecompInfo,
+                                originalIdx: Int,
+                                originalLit: lpLiteralInst,
+                                replacementLits: Seq[lpLiteralInst],
+                                binders: Seq[LpTerm.Var[Level.Obj]],
+                                hd: LpTerm[Level.Obj],
+                                lhsArgs: Seq[LpTerm[Level.Obj]],
+                                rhsArgs: Seq[LpTerm[Level.Obj]],
+                                fullTypeSpine: Seq[OlMonoType])
+
+    // Decode the tracked Leo decomposition information into LP literals and arguments.
+    def buildTask(mapping: DecompInfo): Either[String, DecompTask] = {
+      val maybeIdxInParent = currentStage.parent2currentIdx.get(mapping.OrigIdx)
+
+      if (maybeIdxInParent.isEmpty) {
+        Left(s"DetUniSimp: decomp original index ${mapping.OrigIdx} is not present in the current clause")
+      } else if (!currentStage.clauseLits.isDefinedAt(maybeIdxInParent.get)) {
+        Left(s"DetUniSimp: decomp index ${maybeIdxInParent.get} out of bounds (len=${currentStage.clauseLits.length})")
+      } else {
+        val idxInParent = maybeIdxInParent.get
+        val litInParent = currentStage.clauseLits(idxInParent)
+        Out.lp_debug_info(s"handling literal at pos $idxInParent: $litInParent")
+
+        def buildApplicationTask(binders: Seq[LpTerm.Var[Level.Obj]], leftBody: LpTerm[Level.Obj], rightBody: LpTerm[Level.Obj]): Either[String, DecompTask] = {
+          val (f0, args0) = flattenAppSpine(leftBody)
+          val (f1, args1) = flattenAppSpine(rightBody)
+          if (args0.nonEmpty && args1.nonEmpty && f0 == f1) {
+            val (hdTy, relevantArgs0, relevantArgs1) = (mapping.hdTy, removeLeadingTypeArgs(args0), removeLeadingTypeArgs(args1))
+            // ensure that the number of arguemtns is appropriate
+            val n = relevantArgs0.length
+            if (n != relevantArgs1.length) Left("Error in encoding of DetUniSimp: decomp but different number of arguments")
+            else if (n < 1) Left("Error in encoding of DetUniSimp: decomp but no arguments found")
+            else {
+              // extract types of the arguments
+              if (!(n <= hdTy.funParamTypes.length)) {
+                val encHdTySafe = hdTy.funParamTypesWithResultType.map(polyType2LP)
+                Out.lp_debug_info(s"type of the head symbol: ${mapping.hdTy}, encoded: ${encHdTySafe}")
+                Out.lp_debug_info(s"args: $relevantArgs0")
+                Left(s"Error in DetUniSimp Encoding: too many arguments ($n) in decomp (funParamTypes gives ${hdTy.funParamTypes.length})")
+              }
               else {
-                // extract types of the arguments
-                if (!(n <= mapping.hdTy.funParamTypes.length)) Left(s"Error in DetUniSimp Encoding: too many arguments in decomp")
+                val (_, residualTy) = hdTy.splitFunParamTypesAt(n)
+                if (residualTy.isFunType)
+                  Left(s"DetUniSimp: needs Eta expansion")
                 else {
-                  val (_, residualTy) = mapping.hdTy.splitFunParamTypesAt(n)
-                  if (residualTy.isFunType) Left(s"DetUniSimp: needs Eta expansion")
-                  else {
-                    safeEncTypes(mapping.hdTy.funParamTypesWithResultType) match {
-                      case Left(NotEncodable(err)) => Left(err)
-                      case Right(fullTypeSpine) =>
-                        // Iterative construction of the necessary rule instances
-                        (extractTermArgs(args0), extractTermArgs(args1)) match {
-                          case (Left(NotEncodable(r)), _) => Left(r)
-                          case (_, Left(NotEncodable(r))) => Left(r)
-                          case (Right(lhsArgs), Right(rhsArgs)) =>
-                            val instanciatedRules =
-                              stepwiseInstDecompRule(f0, lhsArgs, rhsArgs, fullTypeSpine, currentStage.clauseLits, idxInParent)
-                            // reverse application of the rule makes up the proof script
-                            Right(instanciatedRules.reverse.map(transfRule => Refine(Obj(transfRule))))
-                        }
-                    }
+                  safeEncTypes(hdTy.funParamTypesWithResultType) match {
+                    case Left(NotEncodable(err)) => Left(err)
+                    case Right(fullTypeSpine) =>
+                      // Iterative construction of the necessary rule instances
+                      (extractTermArgs(relevantArgs0), extractTermArgs(relevantArgs1)) match {
+                        case (Left(NotEncodable(r)), _) => Left(r)
+                        case (_, Left(NotEncodable(r))) => Left(r)
+                        case (Right(lhsArgs), Right(rhsArgs)) =>
+                          // The final replacement for f a1 ... an = f b1 ... bn is
+                          // the block a1=b1, ..., an=bn.  Literal-level cleanup
+                          // recorded by DetUniSimp is applied to this block here,
+                          // while the proof of those cleanups is emitted later.
+                          val rawReplacement = lhsArgs.zip(rhsArgs).zip(fullTypeSpine.take(n)).map {
+                            case ((lhsArg, rhsArg), argTy) =>
+                              if (binders.isEmpty) DecompSingleResult(argTy, lhsArg, rhsArg)
+                              else lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
+                          }
+                          Out.lp_debug_info(s"callsite 1")
+                          val localLitTransf = LiteralInfo2LiteralTransforamtion(mapping.LitTransf, 0)
+                          Out.lp_debug_info(s"generated transfomration: $localLitTransf")
+                          Out.lp_debug_info(s"applying to: \n${rawReplacement.map(l => Renderer.termP(l.term,RenderOptions(),0,sig)).mkString("\n")}")
+                          applyLiteralTransformations(rawReplacement, localLitTransf) match {
+                            case Some(replacement) =>
+                              Right(DecompTask(mapping, idxInParent, litInParent, replacement, binders, f0, lhsArgs, rhsArgs, fullTypeSpine))
+                            case None =>
+                              Left("Error in DetUniSimp Encoding: could not apply literal transformations after decomp")
+                          }
+                      }
                   }
                 }
               }
+            }
 
-            case LogicConst.Not(LogicConst.Eq(ty, LpTerm.Lam(lAbst, lBody), LpTerm.Lam(rAbst, rBody))) =>
-              Left("DetUniSimp: Equations with Lambbdas not handled yet")
-
-            case _ => Left(s"Error in encoding of DetUniSimp: trying to encode decomp, could not match")
+          } else {
+            Out.lp_debug_info(s"unsuccessfully tried to match ${Renderer.termP(litInParent.term,RenderOptions(),0,sig)}")
+            Left(s"Error in encoding of DetUniSimp: trying to encode decomp, could not match")
           }
-          newScriptsE.map(acc ++ _)
         }
-    } match {
-      case Left(err) => StageResult.Fail(err)
-      case Right(scripts) => StageResult.Ok(currentStage.add(Comment("Verification of Decomp steps") +: scripts))
-    }
-    scriptsRes
-  }
 
-  /** Helper for Decomp steps: todo: move this to more general file
-    * safe encoder of types that does not throw on poly types but just regurns a Not encodable mesage
-    */
-  private def safeEncTy(ty: Type): Either[NotEncodable, OlType] = {
-    ty match {
-      case ComposedType(_, _) =>
-        Left(NotEncodable("Error: trying to encode ComposedType"))
-      case ProductType(_) =>
-        Left(NotEncodable("Error: trying to encode ProductType"))
-      case ∀(_) =>
-        Left(NotEncodable("Error: trying to encode quantified Type"))
-      case _ => Right(type2LP(ty))
+        litInParent.term match {
+          case LogicConst.Not(LogicConst.Eq(_, left, right)) =>
+            val (lBinders, lBody) = collectLeadingLambdas(left)
+            val (rBinders, rBody) = collectLeadingLambdas(right)
+            assert(lBinders == rBinders, s"DetUniSimp: decomp under binders requires matching leading lambdas, got $lBinders and $rBinders")
+            buildApplicationTask(lBinders, lBody, rBody)
+          case _ =>
+            Out.lp_debug_info(s"unsuccessfully tried to match ${Renderer.termP(litInParent.term,RenderOptions(),0,sig)}")
+            Left(s"Error in encoding of DetUniSimp: trying to encode decomp, could not match")
+        }
+      }
     }
-  }
 
-  // todo: move this to more general file
-  private def safeEncTypes(tys: Seq[Type]): Either[NotEncodable, Vector[OlType]] = {
-    tys.foldLeft[Either[NotEncodable, Vector[OlType]]](Right(Vector.empty)){
+    // Forward model of the DetUniSimp result: replace one original literal by
+    // its decomposed block and shift all later tracked original-literal
+    // positions.  Applying this to every task yields the clause we ultimately
+    // have to prove.
+    def replaceForward(stage: DetUniStage, task: DecompTask): DetUniStage = {
+      Out.lp_debug_info(s"replacing ${Renderer.termP(task.originalLit.term,RenderOptions(),0,sig)} with ${task.replacementLits.map(l => Renderer.termP(l.term,RenderOptions(),0,sig))}")
+      val idx = stage.parent2currentIdx(task.info.OrigIdx)
+      val updatedClause = stage.clauseLits.patch(idx, task.replacementLits, 1)
+      val shift = task.replacementLits.length - 1
+      val updatedMapping = stage.parent2currentIdx.map {
+        case (origIdx, _) if origIdx == task.info.OrigIdx => origIdx -> idx
+        case (origIdx, pos) if pos > idx => origIdx -> (pos + shift)
+        case other => other
+      }
+      stage.copy(clauseLits = updatedClause, parent2currentIdx = updatedMapping)
+    }
+
+    // Proof scripts are generated by refinement, hence backwards.  Starting
+    // from a goal in which all decompositions have already happened, one
+    // transform_n step proves the current goal from a subgoal where exactly the
+    // selected decomposed block is reverted to its original literal.  Other
+    // decomposition blocks must stay in their current goal form.
+    def revertForBackwardProof(stage: DetUniStage, task: DecompTask): DetUniStage = {
+      val idx = stage.parent2currentIdx(task.info.OrigIdx)
+      val updatedClause = stage.clauseLits.patch(idx, Seq(task.originalLit), task.replacementLits.length)
+      val shift = task.replacementLits.length - 1
+      val updatedMapping = stage.parent2currentIdx.map {
+        case (origIdx, _) if origIdx == task.info.OrigIdx => origIdx -> idx
+        case (origIdx, pos) if pos > idx => origIdx -> (pos - shift)
+        case other => other
+      }
+      stage.copy(clauseLits = updatedClause, parent2currentIdx = updatedMapping)
+    }
+
+    val orderedDecomps = decompInfo.sortBy(info => currentStage.parent2currentIdx.getOrElse(info.OrigIdx, Int.MaxValue))
+
+    val tasksE = orderedDecomps.foldLeft[Either[String, Vector[DecompTask]]](Right(Vector.empty)) {
       case (Left(err), _) => Left(err)
-      // else, continue
-      case (Right(acc), nextTy) =>
-        safeEncTy(nextTy) match {
-          case Left(error) => Left(error)
-          case Right(encTy) => Right(acc :+ encTy)
+      case (Right(acc), info) => buildTask(info).map(task => acc :+ task)
+    }
+
+    tasksE match {
+      case Left(err) => StageResult.Fail(err)
+      case Right(tasks) =>
+        // Construct the actual DetUniSimp child shape after all decomposition
+        val targetStage = tasks.foldLeft(currentStage)(replaceForward)
+        val scripts0 = targetStage.scripts :+ Comment("Verification of Decomp steps")
+
+        // Build the proof in the reversed direction, i.e. each emitted transform_n step
+        // consumes the current goal and leaves the next, less-decomposed subgoal.
+        val proofResult = tasks.zipWithIndex.foldLeft[Either[String, (DetUniStage, Vector[LpProofScript])]](Right(targetStage, scripts0)) {
+          case (Left(err), _) => Left(err)
+          case (Right((proofGoalStage, scripts)), (task, taskIdx)) =>
+            val idxInGoal = proofGoalStage.parent2currentIdx(task.info.OrigIdx)
+            val sourceStage = revertForBackwardProof(proofGoalStage, task)
+            // Instantiate Decomp_step/Decomp_single against the source clause:
+            val instanciatedRules = stepwiseInstDecompRule(task.hd, task.lhsArgs, task.rhsArgs, task.fullTypeSpine, sourceStage.clauseLits, idxInGoal, task.binders, Name(s"Decomp_inst_${task.info.OrigIdx}"))
+            val decompSteps = instanciatedRules.reverse.flatMap(rule => rule.setupScripts :+ Refine(Obj(rule.transformRule)))
+            // Rewrites for implicit flips/normalisations
+            val verifyInitialTransformationSteps = decompLitNormalisazion(task.info, 0, proofGoalStage.clauseLits.map(_.polarity), proofGoalStage.parent2currentIdx)
+            // After one decomposition proof has fired, Lambdapi may expose list
+            // constructors in the surrounding disjunction.  Normalize those away
+            // before targeting another literal with a rewrite pattern.
+            val simplifyDisj =
+              if (taskIdx > 0 && verifyInitialTransformationSteps.nonEmpty) Vector(Repeat(Simplify(Seq(Name("disj")))))
+              else Vector.empty
+            Right((sourceStage, scripts ++ simplifyDisj ++ verifyInitialTransformationSteps ++ decompSteps))
+        }
+
+        proofResult match {
+          case Left(err) => StageResult.Fail(err)
+          case Right((_, scripts)) => StageResult.Ok(targetStage.copy(scripts = scripts))
         }
     }
   }
 
+  /**
+    * Result of generating local Lambdapi subproofs for a lifted decomp rule.
+    *
+    * `proofs` must be emitted before the transform_n step.
+    * `finalRule` is the proof term that can be used as transform_n's rule proof.
+    * `initialLit` and `derivedLits` describe the fully lifted rule:
+    * π initialLit -> π (disj derivedLits)
+    */
+  final case class LiftedDecompRuleProofs(proofs: Vector[Have],
+                                          finalRule: LpTerm[Level.Obj],
+                                          initialLit: lpLiteralInst,
+                                          derivedLits: Vector[lpLiteralInst])
+
+  private final case class DecompRuleApplication(setupScripts: Vector[LpProofScript],
+                                                 transformRule: LpTerm[Level.Obj])
+
+  private def liftName(baseName: Name, liftedBinders: Seq[LpTerm.Var[Level.Obj]]): Name =
+    Name(s"${baseName.value}_lift_${liftedBinders.map(_.name.value).mkString("_")}")
+
+  /**
+    * Generate local subproofs for a Decomp_step instance under leading binders.
+    *
+    * The first `have` removes all leading lambdas and replaces them by Π-bound variables.
+    * Each following `have` reintroduces one lambda with `lift_decomp_step_binder`, from the
+    * innermost binder outwards. The final proof term is suitable as the rule argument of
+    * `transform_n`.
+    *
+    * @param resultTy The result type `b` of the body-level decomposition rule
+    *                 `Decomp_step [a] [b] s t f g`.
+    */
+  def decompStepSubproofs(baseName: Name,
+                          binders: Seq[LpTerm.Var[Level.Obj]],
+                          argTy: OlMonoType,
+                          resultTy: OlMonoType,
+                          lhsArg: LpTerm[Level.Obj],
+                          rhsArg: LpTerm[Level.Obj],
+                          lhsFun: LpTerm[Level.Obj],
+                          rhsFun: LpTerm[Level.Obj]): LiftedDecompRuleProofs = {
+    val (basePremise, baseDerived) = LiftedDecompStepResult(Seq.empty, argTy, resultTy, lhsArg, rhsArg, lhsFun, rhsFun)
+    val baseProofSteps =
+      (if (binders.nonEmpty) Seq(Left(Assume(binders.map(_.name)))) else Seq.empty) :+
+        Left(Refine(Obj(mkDecompStepObj(argTy, resultTy, lhsArg, rhsArg, lhsFun, rhsFun, None))))
+    val baseHave = Have(baseName, lpTermBuilder.ruleType(binders, basePremise, baseDerived), baseProofSteps)
+
+    val liftHaves = binders.indices.reverse.map { idx =>
+      val currentBinder = binders(idx)
+      val prefix = binders.take(idx)
+      val alreadyLifted = binders.drop(idx + 1)
+      val nowLifted = binders.drop(idx)
+      val prevName = if (idx == binders.length - 1) baseName else liftName(baseName, alreadyLifted)
+      val curName = liftName(baseName, nowLifted)
+
+      val (premise, derived) = LiftedDecompStepResult(nowLifted, argTy, resultTy, lhsArg, rhsArg, lhsFun, rhsFun)
+
+      val residualTy = lpTermBuilder.funTy(alreadyLifted, OlMonoType.Fun(Seq(argTy, resultTy)))
+      val liftBinders = currentBinder +: alreadyLifted
+      val liftRule = mkLiftDecompStepBinderObj(lpTermBuilder.olTy(currentBinder), lpTermBuilder.funTy(alreadyLifted, resultTy), residualTy, lpTermBuilder.funTy(alreadyLifted, argTy), lpTermBuilder.lam(liftBinders, lpTermBuilder.app(lhsFun, Seq(lhsArg))), lpTermBuilder.lam(liftBinders, lpTermBuilder.app(rhsFun, Seq(rhsArg))), lpTermBuilder.lam(liftBinders, lhsFun), lpTermBuilder.lam(liftBinders, rhsFun), lpTermBuilder.lam(liftBinders, lhsArg), lpTermBuilder.lam(liftBinders, rhsArg), Some(Wildcard[Level.Obj]()))
+
+      val proofSteps =
+        (if (prefix.nonEmpty) Seq(Left(Assume(prefix.map(_.name)))) else Seq.empty) :+
+          Left(Refine(Obj(liftRule))) :+
+          Left(Refine(Obj(lpTermBuilder.app(lpTermBuilder.localObj(prevName), prefix))))
+
+      Have(curName, lpTermBuilder.ruleType(prefix, premise, derived), proofSteps)
+    }.toVector
+
+    val allProofs = baseHave +: liftHaves
+    val finalName = if (binders.isEmpty) baseName else liftName(baseName, binders)
+    val (finalPremise, finalDerived) = LiftedDecompStepResult(binders, argTy, resultTy, lhsArg, rhsArg, lhsFun, rhsFun)
+
+    LiftedDecompRuleProofs(allProofs, lpTermBuilder.localObj(finalName), finalPremise, finalDerived)
+  }
+
+  /**
+    * Generate local subproofs for a Decomp_single instance under leading binders.
+    *
+    * This mirrors `decompStepSubproofs`, but the generated rule has one derived
+    * literal instead of the residual-function-literal plus argument-literal pair.
+    *
+    * @param resultTy The result type `b` of the body-level decomposition rule
+    *                 `Decomp_single [a] [b] s t f`.
+    */
+  def decompSingleSubproofs(baseName: Name,
+                            binders: Seq[LpTerm.Var[Level.Obj]],
+                            argTy: OlMonoType,
+                            resultTy: OlMonoType,
+                            lhsArg: LpTerm[Level.Obj],
+                            rhsArg: LpTerm[Level.Obj],
+                            hd: LpTerm[Level.Obj]): LiftedDecompRuleProofs = {
+    val (basePremise, baseDerived) = LiftedDecompSingleResult(Seq.empty, argTy, resultTy, lhsArg, rhsArg, hd)
+    val baseProofSteps =
+      (if (binders.nonEmpty) Seq(Left(Assume(binders.map(_.name)))) else Seq.empty) :+
+        Left(Refine(Obj(mkDecompSingleObj(argTy, resultTy, lhsArg, rhsArg, hd, None))))
+    val baseHave = Have(baseName, lpTermBuilder.ruleType(binders, basePremise, baseDerived), baseProofSteps)
+
+    val liftHaves = binders.indices.reverse.map { idx =>
+      val currentBinder = binders(idx)
+      val prefix = binders.take(idx)
+      val alreadyLifted = binders.drop(idx + 1)
+      val nowLifted = binders.drop(idx)
+      val prevName = if (idx == binders.length - 1) baseName else liftName(baseName, alreadyLifted)
+      val curName = liftName(baseName, nowLifted)
+
+      val (premise, derived) = LiftedDecompSingleResult(nowLifted, argTy, resultTy, lhsArg, rhsArg, hd)
+
+      val liftBinders = currentBinder +: alreadyLifted
+      val liftRule = mkLiftDecompSingleBinderObj(lpTermBuilder.olTy(currentBinder), lpTermBuilder.funTy(alreadyLifted, resultTy), lpTermBuilder.funTy(alreadyLifted, argTy), lpTermBuilder.lam(liftBinders, lpTermBuilder.app(hd, Seq(lhsArg))), lpTermBuilder.lam(liftBinders, lpTermBuilder.app(hd, Seq(rhsArg))), lpTermBuilder.lam(liftBinders, lhsArg), lpTermBuilder.lam(liftBinders, rhsArg), Some(Wildcard[Level.Obj]()))
+
+      val proofSteps =
+        (if (prefix.nonEmpty) Seq(Left(Assume(prefix.map(_.name)))) else Seq.empty) :+
+          Left(Refine(Obj(liftRule))) :+
+          Left(Refine(Obj(lpTermBuilder.app(lpTermBuilder.localObj(prevName), prefix))))
+
+      Have(curName, lpTermBuilder.ruleType(prefix, premise, derived), proofSteps)
+    }.toVector
+
+    val allProofs = baseHave +: liftHaves
+    val finalName = if (binders.isEmpty) baseName else liftName(baseName, binders)
+    val (finalPremise, finalDerived) = LiftedDecompSingleResult(binders, argTy, resultTy, lhsArg, rhsArg, hd)
+
+    LiftedDecompRuleProofs(allProofs, lpTermBuilder.localObj(finalName), finalPremise, finalDerived)
+  }
+
+  /**
+    * Apply the Decomp rules for instances where only one single arguemnt is applied (i.e. litrals of the shape f x = f y)
+    * This applies the Decomp literal and applies the transform literal to embed it in a bigger clause.
+    *
+    * @param curArgTy The type of the arguments (i.e. the type of x and y)
+    * @param appliedHdTy The type of the head applied with the current argument (i.e. the type of f)
+    * @param lArg The argument of the lhs (i.e. x)
+    * @param rArg The argument of the lhs (i.e. y)
+    * @param hd The head symbol (i.e. f)
+    * @param initialLit The literal in the previous step to be replaced
+    * @param clauseLhs A list of literals on the lhs of the literal to be changed
+    * @param clauseRhs A list of literals on the rhs of the literal to be changed
+    * @return The instanciated version of the decomp rule, applied to the transform rule if necessary
+    */
+  private def singleInstDecompRule(curArgTy: OlMonoType, appliedHdTy: OlMonoType, lArg: LpTerm[Level.Obj], rArg: LpTerm[Level.Obj], hd: LpTerm[Level.Obj], initialLit: lpLiteralInst, clauseLhs: Seq[lpLiteralInst], clauseRhs: Seq[lpLiteralInst], binders: Seq[LpTerm.Var[Level.Obj]], baseName: Name): DecompRuleApplication = {
+    if (binders.isEmpty) {
+      val instRule = mkDecompSingleObj(curArgTy, appliedHdTy, lArg, rArg, hd, None)
+      val res = DecompSingleResult(curArgTy, lArg, rArg)
+      DecompRuleApplication(Vector.empty, transform_n(initialLit, clauseLhs, clauseRhs, Seq(res), instRule, Wildcard[Level.Obj]()))
+    } else {
+      val liftedRule = decompSingleSubproofs(baseName, binders, curArgTy, appliedHdTy, lArg, rArg, hd)
+      DecompRuleApplication(liftedRule.proofs, transform_n(initialLit, clauseLhs, clauseRhs, liftedRule.derivedLits, liftedRule.finalRule, Wildcard[Level.Obj]()))
+    }
+  }
+
+  /**
+    * Given a clause, isolate one literal and provide the literals before and after as lists
+    *
+    * @param currClause The literals of a given clause as a list
+    * @param curPos The position of the literal in question
+    * @return A tuple of the literal, a sequence of the literal on its lhs and another sequence of the literals on the rhs
+    */
+  def splitParentClause(currClause: Seq[lpLiteralInst], curPos: Int) = {
+    assert(currClause.indices.contains(curPos), "Error in LP-Encoding: attemtpint to isolate literal but given index out of bounds")
+    val l = currClause(curPos)
+    val c0 = currClause.take(curPos)
+    val c2 = currClause.takeRight(currClause.length - (curPos + 1))
+    (l, c0, c2)
+  }
 
   /**
     * stepwiseInstDecompRule
@@ -692,27 +1120,24 @@ object DetUniSimpEncoding {
     * @return Vector of instantiated clause-transformation applications (each one is a proof step),
     *         ordered from outermost to innermost (i.e. the order you would usually reverse for refine).
     */
-  private def stepwiseInstDecompRule(hd: LpTerm[Level.Obj], lArgs: Seq[LpTerm[Level.Obj]], rArgs: Seq[LpTerm[Level.Obj]], typeEls: Seq[OlType], currClause: Seq[LpTerm[Level.Obj]], curPos: Int): Vector[LpTerm.App[Level.Obj]] = {
+  private def stepwiseInstDecompRule(hd: LpTerm[Level.Obj], lArgs: Seq[LpTerm[Level.Obj]], rArgs: Seq[LpTerm[Level.Obj]], typeEls: Seq[OlMonoType], currClause: Seq[lpLiteralInst], curPos: Int, binders: Seq[LpTerm.Var[Level.Obj]], ruleNamePrefix: Name): Vector[DecompRuleApplication] = {
     val nArgs = lArgs.length
     val curArgTy = typeEls(nArgs - 1)
 
     // compute the type of the applied head
     val appliedHdTy0 = typeEls.takeRight(typeEls.length - nArgs)
-    val appliedHdTy = if (appliedHdTy0.length == 1) appliedHdTy0.head else OlType.Fun(appliedHdTy0)
+    val appliedHdTy = if (appliedHdTy0.length == 1) appliedHdTy0.head else OlMonoType.Fun(appliedHdTy0)
 
     val lArg = lArgs.last
     val rArg = rArgs.last
 
-    val l = currClause(curPos)
-    val c0 = currClause.take(curPos)
-    val c2 = currClause.takeRight(currClause.length - (curPos + 1))
+    val (l, c0, c2) = splitParentClause(currClause, curPos)
 
     if (lArgs.length == 1) {
       // needs to apply rule for last step (or single occurrence)
-      val instRule = mkDecompSingleObj(curArgTy, appliedHdTy, lArg, rArg, hd, None)
-      val res = DecompSingleResult(curArgTy, lArg, rArg)
+      val instSingleDecompRule = singleInstDecompRule(curArgTy,appliedHdTy, lArg, rArg, hd, l, c0, c2, binders, Name(s"${ruleNamePrefix.value}_single"))
 
-      Vector(transform_n(l, c0, c2, Seq(res), instRule, Wildcard[Level.Obj]()))
+      Vector(instSingleDecompRule)
 
     } else {
       // needs to apply rule for step
@@ -721,10 +1146,55 @@ object DetUniSimpEncoding {
       val lFun = LpTerm.App(hd, lLeadingArgs.map(arg => Arg.Explicit(arg)))
       val rFun = LpTerm.App(hd, rLeadingArgs.map(arg => Arg.Explicit(arg)))
 
-      val instRule = mkDecompStepObj(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun, None)
-      val res = DecompStepRes(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun)
+      val (setupScripts, derivedLits, instRule) =
+        if (binders.isEmpty) {
+          val res = DecompStepRes(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun)
+          (Vector.empty, Vector(res._1,res._2), mkDecompStepObj(curArgTy, appliedHdTy, lArg, rArg, lFun, rFun, None))
+        } else {
+          val liftedRule = decompStepSubproofs(Name(s"${ruleNamePrefix.value}_step_$nArgs"), binders, curArgTy, appliedHdTy, lArg, rArg, lFun, rFun)
+          (liftedRule.proofs, liftedRule.derivedLits, liftedRule.finalRule)
+        }
+      val instDecompRule = DecompRuleApplication(setupScripts, transform_n(l, c0, c2, derivedLits, instRule, Wildcard[Level.Obj]()))
 
-      transform_n(l, c0, c2, Seq(res._1, res._2), instRule, Wildcard[Level.Obj]()) +: stepwiseInstDecompRule(hd, lLeadingArgs, rLeadingArgs, typeEls, c0 ++ Seq(res._1, res._2) ++ c2, curPos) // idx does not change because the hd stays on the lhs
+      instDecompRule +: stepwiseInstDecompRule(hd, lLeadingArgs, rLeadingArgs, typeEls, c0 ++ derivedLits ++ c2, curPos, binders, ruleNamePrefix) // idx does not change because the hd stays on the lhs
+    }
+  }
+
+  /**
+    * decompLitNormalisazion — Generate rewrite steps for implicit transformations invoked by  Decomp
+    *
+    * During decomposition, Leo may implicitly:
+    * • Flip equational literals
+    * • Normalise equalities (polarity adjustments/ changing equalities with $false or $true to non-eq literals)
+    *
+    * decompLitNormalisazion constructs the clause-level rewrite rules required to justify these implicit
+    * literal transformations.
+    *
+    * Behaviour:
+    * • Detects whether any transformations are required.
+    * • Translates decomposition-local transformation metadata into global
+    *   clause indices via LiteralInfo2LiteralTransformation.
+    * • Delegates rewrite construction to
+    *   verifySubstitutionLiteralNormalisazion.
+    *
+    * @param decompInfo           Tracked decomposition metadata
+    * @param alreadyAddedLitCount Number of literals inserted before this step
+    * @param goalLitPolarities    Clause literal polarities at the point where the rewrite is applied
+    * @return Rewrite steps justifying transformations
+    */
+  private def decompLitNormalisazion(decompInfo: DecompInfo, alreadyAddedLitCount: Int, goalLitPolarities: Seq[Boolean], mapUpdatedPos: Map[Int,Int]): Vector[Rewrite] = {
+    // first check if we need any additional transformations
+    val impTransf = decompInfo.LitTransf.exists(t => t.flip || t.normalize.isDefined)
+    if (impTransf) {
+      Out.lp_debug_info(s"needed transformations: ${decompInfo.LitTransf}")
+      val idxInGoal = mapUpdatedPos(decompInfo.OrigIdx)
+
+      // transform the currently handled additional information
+      Out.lp_debug_info(s"callsite 2")
+      val addInfoAsLiteralTransformation = LiteralInfo2LiteralTransforamtion(decompInfo.LitTransf, idxInGoal + alreadyAddedLitCount)
+      verifySubstitutionLiteralNormalisazion(addInfoAsLiteralTransformation, goalLitPolarities, goalLitPolarities.length).toVector
+    } else {
+      Vector.empty
     }
   }
 
@@ -769,4 +1239,157 @@ object DetUniSimpEncoding {
     )
   }
 
+}
+
+object PreUniVerification {
+
+  import Util._
+
+  // Orchestrator
+
+  /**
+    * encodePreUni — Outline of the encoded proof
+    *
+    * Proof structure in the Lambdapi encoding:
+    *
+    * 0) Assume free variables
+    *    Introduce all free variables of the child clause.
+    *
+    * 1) Reconstruct the substituted parent
+    *    Rebuild the parent clause with the shared reconstruction helper by
+    *    applying the original PreUni substitution and the recorded literal
+    *    transformations. This yields the clause before removing the tracked
+    *    unification constraints and is used as the target type of the
+    *    substitution subproof.
+    *
+    * 2) Substitution subproof
+    *    Instantiate the encoded parent proof with the substitution terms.
+    *    Any recorded implicit literal transformations are delegated to the
+    *    shared substitution encoder, which emits the corresponding rewrite
+    *    steps before refining with the instantiated parent proof.
+    *
+    * 3) Constraint-elimination subproof
+    *    The tracked deleted constraints are expected to be trivially false
+    *    after substitution. Turn them into ⊥ using the shared remove-trivial-
+    *    false tactic, then remove them from the disjunction via deleteBots.
+    *
+    * 4) Composition
+    *    Compose the removal proof with the substitution proof using eqImp,
+    *    yielding a proof of the child clause from the original parent.
+    *
+    * Limitations / Notes:
+    *   - The encoding is structural: unsupported PreUni modes should fail
+    *     through the reconstruction and deletion-shape checks rather than
+    *     through a mode-name whitelist.
+    *   - Type unification is not encoded.
+    *   - Residual flex-flex literals are not encoded here; if PreUni produces
+    *     new flex-flex constraints, the reconstructed post-deletion parent may
+    *     not have the same literal shape as the child.
+    *     
+    * This is the new-datastructure counterpart of `ModularProofEncoding.encPreUni`.
+    *
+    * @return encoded proof script or an explanatory NotEncodable result
+    */
+  def encodePreUni(parent: ClauseProxy, child: ClauseProxy, parentNameLpEnc0: Name, sig: LpSig): EncodeResult = {
+    val ro = RenderOptions()
+
+    ////////////////////////////
+    // Encodings and prelim
+
+    val addInfoUni = child.furtherInfo.addInfoUni
+    val addInfoUniRule = child.furtherInfo.addInfoUniRule
+    val mode = addInfoUniRule._1
+    Out.lp_debug_info(s"Encoding instance of PreUni, mode: ${if (mode.nonEmpty) mode else "<unset>"}")
+
+    val UnificationEncoding.UniCtx(termSubst, typeSubst, deletedUniLits, litTransf) = UnificationEncoding.initUniCtxt(addInfoUni)
+
+    if (typeSubst.nonEmpty) {
+      return NotEncodable("LP encoding of type unification not encoded yet")
+    }
+//    if (termSubst.isEmpty) {
+//      return NotEncodable("no term unifications to encode")
+//    }
+
+    val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
+    val EncUniCtx(encChild, encParent, _, _, childVarNames, _, _) = ctxt
+    Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
+    Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
+
+    if (deletedUniLits.isEmpty) {
+      return NotEncodable("PreUni did not track any deleted unification constraints")
+    }
+
+    val deletePositions = deletedUniLits.map(_.position)
+
+    Out.lp_debug_info(s"Unification literal positions in original clause: $deletePositions")
+
+    val childToParentIdx = childToSubstitutedParentIdx(parent.cl.lits.length, deletePositions, encChild.lits.length) match {
+      case Left(reason) => return NotEncodable(reason)
+      case Right(idxMap) => idxMap
+    }
+    val childToParentIdxDefault = childToParentIdx.withDefault(identity)
+
+    // Literal transformations are tracked relative to the child clause.
+    // Reindex them to reconstruct the substituted parent before deletion.
+    val substParentLitTransf = reindexLiteralTransformation(litTransf, childToParentIdxDefault)
+
+    // Reconstruct the parent after PreUni substitution, but before deleting constraints.
+    val normalizedSubstParent = reconstructSubstParent(addInfoUni.origTermSubst, addInfoUni.origTypeSubst, substParentLitTransf, ctxt, parent.cl) match {
+      case Some(lits) => lits
+      case None => return NotEncodable("Trying to encode PreUni substitution substep, error when reconstructing substituted parent")
+    }
+
+    ////////////////////////////
+    // 0) Assume free variables
+    val assumeStep = encAssumeStep(childVarNames)
+
+    ////////////////////////////
+    // 1) Substitution subproof
+    val nameHaveSubstStep = Name("Substitution")
+    val (substStepName, substStep) =
+      encodeSubstitutionSubstep(nameHaveSubstStep, ctxt, termSubst, litTransf, normalizedSubstParent, child.cl.implicitlyBound, parent.cl.implicitlyBound, childToParentIdxDefault)
+
+    ////////////////////////////
+    // 2) Constraint-elimination subproof
+    val nameHaveRemoveStep = Name("RemoveUniConst")
+    val haveRemoveStep = constructRemoveStep(nameHaveRemoveStep, normalizedSubstParent, encChild.lits, deletePositions)
+
+    ////////////////////////////
+    // 3) Composition in final refine step
+    val appliedRemoveStep = applyRemoveStep(nameHaveRemoveStep, substStepName)
+
+    Encoded((assumeStep ++ substStep) :+ haveRemoveStep :+ Refine(Obj(appliedRemoveStep)))
+  }
+
+  // Helpers for tracked unification-constraint deletion
+
+  /**
+    * Compute how child-clause literal positions embed into the substituted parent.
+    *
+    * PreUni tracks deleted unification constraints as `UniLitInfo`, with
+    * positions in the parent before deletion. The substitution proof, however,
+    * receives literal-transformation metadata in child positions. This helper
+    * builds the required child-position to parent-position map.
+    *
+    * Limitation: If the remaining parent positions do not match the child length, PreUni
+    * produced a different literal shape, for example by adding residual
+    * flex-flex constraints. That case is not currently encoded.
+    *
+    * @param parentLen       Number of literals in the parent clause
+    * @param deletePositions Parent positions deleted by PreUni
+    * @param childLen        Number of literals in the child clause
+    * @return map from child literal positions to reconstructed-parent positions
+    */
+  private def childToSubstitutedParentIdx(parentLen: Int, deletePositions: Seq[Int], childLen: Int): Either[String, Map[Int, Int]] = {
+    val deleteSet = deletePositions.toSet
+    val remainingParentPositions = (0 until parentLen).filterNot(deleteSet)
+
+    if (deletePositions.exists(pos => pos < 0 || pos >= parentLen)) {
+      Left(s"PreUni tracked deleted literal positions out of bounds: $deletePositions")
+    } else if (remainingParentPositions.length != childLen) {
+      Left("PreUni with residual flex-flex literals is not encoded yet")
+    } else {
+      Right(remainingParentPositions.zipWithIndex.map { case (parentIdx, childIdx) => childIdx -> parentIdx }.toMap)
+    }
+  }
 }

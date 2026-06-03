@@ -229,14 +229,48 @@ object LitNorm {
   case object BotL extends LitNorm;
 
   case object BotR extends LitNorm
+
+  case object NegBotL extends LitNorm;
+
+  case object NegBotR extends LitNorm
 }
 
+/**
+  * @param position Index of the unification Constraint (in reference to the original position in the parent)
+  * @param literal The original unification constraint
+  *                todo: sometimes literal is used to save the original one, and sometimes the substituted one
+  */
 case class UniLitInfo(position: Int,
                       literal: Literal)
+
+/**
+  * Additional information for unification steps where the substituted and deleted literals
+  * can be tracked independently of interleaved simplification/decomposition steps.
+  * @param subst
+  * @param uniLits
+  * @param literalTransformations
+  * @param origTermSubst Original term substitution, retained for proof reconstruction
+  * @param origTypeSubst Original type substitution, retained for proof reconstruction
+  */
 case class AddInfoUni(subst: UniSubst = UniSubst(),
                       uniLits: Seq[UniLitInfo] = Seq.empty,
-                      literalTransformations: LiteralTransformation = LiteralTransformation()) //todo currently affected Lit is only used for pattern uni - also use for preuni
+                      literalTransformations: LiteralTransformation = LiteralTransformation(),
+                      origTermSubst: Subst = Subst.id,
+                      origTypeSubst: Subst = Subst.id)
 
+/**
+  * Additional Information for Unification processes like DetUniSimp, where operations are applied in an interlaced fashion.
+  * In these cases, we need to track the substitution, as we need to reconstruct the clause after its application.
+  *
+  * @param origTermSubst Original term substitution
+  * @param origTypeSubst Original type substitution
+  * @param encSubst The enocded term substitution
+  * @param literalTransformations Additional information detailing necessary implicitly applied Literal normalisazions
+  */
+case class AddInfoUniWithSubst(origTermSubst: Subst = Subst.id,
+                               origTypeSubst: Subst = Subst.id,
+                               encSubst: UniSubst = UniSubst(),
+                               literalTransformations: LiteralTransformation = LiteralTransformation())
 case class TaggedLit(originId: OriginId, lit: Literal)
 
 sealed trait OriginId
@@ -245,15 +279,31 @@ case class DecompOf(idx: Int, k: Int) extends OriginId
 
 case class DecompInfo(OrigIdx: Int, hdTy: Type, LitTransf: Seq[LiteralInfo])
 case class BranchState(lits: Vector[TaggedLit] = Vector.empty, // accumulated kept literals (tagged)
-                        //deleted: scala.collection.immutable.BitSet, // original indices deleted by DeleteRule
-                        decomp: Vector[DecompInfo] = Vector.empty) // origIdx -> produced ids (in decomposed branch))
-case class AddInfoDetUni(uniSubst: UniSubst = UniSubst(),
+                        decomp: Vector[DecompInfo] = Vector.empty, // origIdx -> produced ids (in decomposed branch))
+                        uniLits: Vector[UniLitInfo] = Vector.empty,
+                       impTransf: LiteralTransformation = LiteralTransformation()
+                      )
+case class AddInfoDetUni(uniSubst: AddInfoUniWithSubst = AddInfoUniWithSubst(),
                          branchState: BranchState = BranchState())
 case class LiteralInfo(flip: Boolean,
-                       normalize: Option[LitNorm])
+                       normalize: Option[LitNorm]) {
+  def changeHappened: Boolean =
+    flip || normalize.isDefined
+}
 
+/**
+  * Infomration necessary for verifying unification steps.
+  *
+  * Note: The indices given here refer to the position of the literal in the child after substitution, but prior
+  * to deletion of constraints and permutations etc. (relevant in case of DetUniSimp).
+  *
+  * @param flippedLits
+  * @param normalizedEq
+  */
 case class LiteralTransformation(flippedLits: Seq[Int] = Seq.empty,
-                                 normalizedEq: Seq[(Int, LitNorm)] = Seq.empty)
+                                 normalizedEq: Seq[(Int, LitNorm)] = Seq.empty){
+  def transforamtionsHappened = flippedLits.nonEmpty || normalizedEq.nonEmpty
+}
 
 
 case class FurtherInfo (val addInfoSimpRule: Option[String] = None,

@@ -164,7 +164,7 @@ object SeqLoop {
           Configuration.overrideOrdering = state.runStrategy.ordering
           val clauses = state.processed
           state.removeProcessed(clauses)
-          val clauses0 = clauses.map(c => AnnotatedClause(Clause(c.cl.lits.map(l => Literal.mkLit(l.left, l.right, l.polarity))), c.role, c.annotation, c.properties))
+          val clauses0 = clauses.map(c => AnnotatedClause(Clause(c.cl.lits.map(l => Literal.mkLit(l.left, l.right, l.polarity))), c.role, c.annotation, c.properties, c.furtherInfo))
           state.addUnprocessed(clauses0)
           mainLoop(timeout, startTime)(state)
           successSZS(state.szsStatus)
