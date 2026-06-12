@@ -404,27 +404,85 @@ object LPoutput {
     }
 
     // Create the makefile
-    val makefileContent = s"""|.POSIX:
-                              |SRC = $proofFileName.lp
-                              |OBJ = $${SRC:.lp=.lpo}
-                              |.SUFFIXES:
-                              |
-                              |all: $${OBJ}
-                              |
-                              |install: $${OBJ} $pkgFileName
-                              |\tlambdapi install $pkgFileName $${OBJ} $${SRC}
-                              |
-                              |uninstall:
-                              |\tlambdapi uninstall $pkgFileName
-                              |
-                              |clean:
-                              |\trm -f $${OBJ}
-                              |
-                              |.SUFFIXES: .lp .lpo
-                              |
-                              |.lp.lpo:
-                              |\tlambdapi check --gen-obj $$<
-                              |""".stripMargin
+    val makefileContent =
+      s"""|.POSIX:
+          |.SUFFIXES:
+          |
+          |.PHONY: default
+          |default: lpo
+          |
+          |LP := $$(wildcard $nameSignatureFile.lp) \\
+          |      $$(wildcard $nameFormulaeFile.lp) \\
+          |      $$(filter-out $nameSignatureFile.lp $nameFormulaeFile.lp $proofFileName.lp encoding.lp mappings.lp,$$(wildcard *.lp)) \\
+          |      $$(wildcard $proofFileName.lp)
+          |
+          |LPO := $$(LP:%.lp=%.lpo)
+          |.PHONY: lpo
+          |lpo: $$(LPO)
+          |
+          |.PHONY: clean-lpo
+          |clean-lpo:
+          |\t-find . -name '*.lpo' -delete
+          |
+          |%.lpo: %.lp
+          |\tlambdapi check --gen-obj $$<
+          |
+          |.PHONY: install
+          |install: $pkgFileName $$(LP)
+          |\tfor f in $$(LP); do \\
+          |\t  lambdapi check --gen-obj "$$$$f"; \\
+          |\t  obj=$$$${f%.lp}.lpo; \\
+          |\t  lambdapi install $pkgFileName "$$$$f" "$$$$obj"; \\
+          |\tdone
+          |
+          |.PHONY: uninstall
+          |uninstall: $pkgFileName
+          |\tlambdapi uninstall $pkgFileName
+          |
+          |DK := $$(LP:%.lp=%.dk)
+          |
+          |.PHONY: dk
+          |dk: $$(DK)
+          |
+          |%.dk: %.lp
+          |\t-find . -name '*.lpo' -delete
+          |\tlambdapi export -o dk $$< > $$@
+          |
+          |.PHONY: clean-dk
+          |clean-dk: clean-dko
+          |\t-find . -name '*.dk' -delete
+          |
+          |DKO := $$(DK:%.dk=%.dko)
+          |
+          |.PHONY: dko
+          |dko: $$(DKO)
+          |
+          |%.dko: %.dk
+          |\tdk check -e $$<
+          |
+          |.PHONY: clean-dko
+          |clean-dko:
+          |\t-find . -name '*.dko' -delete
+          |
+          |.PHONY: clean
+          |clean: clean-lpo clean-dk
+          |
+          |V := $$(LP:%.lp=%.v)
+          |
+          |.PHONY: v
+          |v: $$(V)
+          |
+          |%.v: %.lp
+          |\tlambdapi export -o stt_coq --encoding encoding.lp --use-notations --mapping mappings.lp --requiring mappings $$< > $$@
+          |
+          |.PHONY: clean-v
+          |clean-v: clean-vo
+          |\t-find . -name '*.v' -a ! -name mappings.v -delete
+          |
+          |.PHONY: clean-vo
+          |clean-vo:
+          |\t-find . -name '*.vo' -delete
+          |""".stripMargin
 
 
     // Write the Makefile using Files.write
