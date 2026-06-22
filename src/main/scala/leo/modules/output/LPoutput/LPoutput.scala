@@ -737,6 +737,7 @@ object LPoutput {
     proofSteps = LpProofScript.Assume(Seq(conjName.local)) +: proofSteps
     val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]))))
     proofSteps = refineStep +: proofSteps
+    gdvProofParam.foreach { proofParamName => proofSteps = LpProofScript.Assume(Seq(Name(proofParamName))) +: proofSteps}
     // finally, test if the derived last clause is the empty clause or a flex-flex clause.
     // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
     val emptyClause = NewLpDatastructures.lpClauseInst(Seq(),Seq()).asMl//lpClause(Seq(), Seq(lpOlBot))
