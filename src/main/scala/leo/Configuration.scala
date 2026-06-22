@@ -82,6 +82,7 @@ object Configuration extends DefaultConfiguration {
       // Force computation of lazy values for early error output
       PROBLEMFILE
       PROOF_OBJECT
+      LP_PROOF_OBJECT
       VERBOSITY
       LPDEBUG
       SOS

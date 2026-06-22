@@ -494,7 +494,7 @@ object SeqLoop {
 
     if(Configuration.LP_PROOF_OBJECT && proof != null){
       try {
-        val proofString = proof2LP(state)
+        val proofString = proof2GDVLP(state)
         Out.output(SZSOutput(SZS_Refutation, Configuration.PROBLEMFILE, proofString))
       } catch {
         case e: Exception => Out.comment("Translation of proof object failed. See error logs for details.")
