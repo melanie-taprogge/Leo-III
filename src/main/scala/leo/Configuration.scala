@@ -55,6 +55,7 @@ object Configuration extends DefaultConfiguration {
   private val PARAM_PASSTOEMBEDDING = "embedding-param"
   private val PARAM_LPOUTPUTPATH = "lp-output"
   private val PARAM_GDV_LP = "gdv-lp"
+  private val PARAM_SKOLEMIZE = "skolemize"
 
   // Collect standard options for nice output: short-option -> (long option, argname, description)
   private val optionsMap : Map[Char, (String, String, String)] = {
@@ -83,6 +84,7 @@ object Configuration extends DefaultConfiguration {
       PROBLEMFILE
       PROOF_OBJECT
       LP_PROOF_OBJECT
+      SKOLEMIZE
       VERBOSITY
       LPDEBUG
       SOS
@@ -150,6 +152,7 @@ object Configuration extends DefaultConfiguration {
 
   lazy val PROOF_OBJECT : Boolean = isSet(PARAM_PROOFOBJECT) && !isSet(PARAM_GDV_LP)
   lazy val LP_PROOF_OBJECT : Boolean = isSet(PARAM_GDV_LP)
+  lazy val SKOLEMIZE : Boolean = isSet(PARAM_SKOLEMIZE)
 
   lazy val RELEVANCE_FILTERING: Boolean = isSet(PARAM_RELEVANCEFILTER)
   lazy val RELEVANCE_PASSMARK: Double = uniqueDoubleFor(PARAM_PASSMARK, DEFAULT_PASSMARK)

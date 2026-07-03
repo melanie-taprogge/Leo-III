@@ -8,11 +8,13 @@ import leo.modules.input.{Input, ProblemStatistics, TPTPParser}
 
 object Modes {
   final def apply(beginTime: Long, parsedProblem: Seq[AnnotatedFormula], stats: ProblemStatistics): Unit = {
-    val timeout = Configuration.TIMEOUT
+    lazy val timeout = Configuration.TIMEOUT
     if (Configuration.isSet("seq")) {
       seqLoop(beginTime, timeout, parsedProblem, stats)
     } else if (Configuration.isSet("scheduled")) {
       scheduledSeq(beginTime, timeout, parsedProblem)
+    } else if (Configuration.SKOLEMIZE) {
+      skolemize(parsedProblem)
     } else if (Configuration.isSet("processOnly")) {
       normalizationOnly(parsedProblem)
     } else if (Configuration.isSet("syntaxcheck")) {
@@ -75,6 +77,11 @@ object Modes {
   final def normalizationOnly(parsedProblem: Seq[AnnotatedFormula]): Unit = {
     Out.info("Running in processOnly mode.")
     modes.Normalization(parsedProblem)
+  }
+
+  final def skolemize(parsedProblem: Seq[AnnotatedFormula]): Unit = {
+    Out.info("Running in skolemize mode.")
+    modes.Skolemize(parsedProblem)
   }
 
   final def seqLoop(startTime: Long, timeout: Int, parsedProblem: Seq[AnnotatedFormula], stats: ProblemStatistics): Unit = {
