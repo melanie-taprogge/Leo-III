@@ -57,6 +57,8 @@ object LPoutput {
   val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
+  val gdvRequireOpenLine: String =
+    s"require open $calcRuleLibStr $permLibStr $simpTacLibStr Stdlib.Epsilon Stdlib.Disj Stdlib.Conj;"
 
   final class lpProofObject {
     var etaExpFlag: Boolean = true
@@ -885,6 +887,7 @@ object LPoutput {
   def proof2GDVLP(state: LocalState): String = {
     val targetFormulaName = gdvTargetNameFromState(state)
     val (proofFileSB,_,_) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
+    proofFileSB.insert(0, s"$gdvRequireOpenLine\n")
 
     val sig = LpSig.fromLeo(state.signature)
     val proofParam = LpTerm.Var[Level.Meta](Name(gdvNegatedConjectureProofName), None)

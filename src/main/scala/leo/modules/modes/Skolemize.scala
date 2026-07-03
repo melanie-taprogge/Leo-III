@@ -7,15 +7,17 @@ import leo.modules.{SZSException, SZSOutput, SZSResult, termToClause}
 import leo.modules.input.Input
 import leo.modules.output.{SZS_InputError, SZS_Proof, SZS_Success}
 import leo.Out
+import leo.modules.output.LPoutput.LPoutput.gdvRequireOpenLine
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef}
 
 /**
   * Experimental GDV mode for TPTP proof obligations that represent a single
   * skolemization step.
   *
-  * GDV still owns the Lambdapi package context: it prepends `require` commands
-  * for Signature.lp, Formulae.lp and parent proof files. This mode therefore
-  * only prints the Lambdapi payload between SZS start/end markers:
+  * GDV still owns most of the Lambdapi package context: it prepends `require`
+  * commands for Signature.lp, Formulae.lp and parent proof files. Leo prints
+  * the `require open` line for the Leo-specific proof libraries it uses, then
+  * the Lambdapi proof payload between SZS start/end markers:
   *
   *   - an `encodedProof (h : π F.lambdapi__negated_conjecture) : π target`
   *     proof script;
@@ -146,7 +148,9 @@ object Skolemize {
       LpTerm.Lam[Level.Meta](proofData.negatedConjectureProofName -> None, applyEncodedProof)
     )
 
-    s"""${Renderer.stmt(proofData.definition, processed.sig, ro).trim}
+    s"""$gdvRequireOpenLine
+       |
+       |${Renderer.stmt(proofData.definition, processed.sig, ro).trim}
        |
        |${Renderer.stmt(finalRule, processed.sig, ro).trim}""".stripMargin
   }
