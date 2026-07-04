@@ -19,9 +19,15 @@ import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, Lev
   * the `require open` line for the Leo-specific proof libraries it uses, then
   * the Lambdapi proof payload between SZS start/end markers:
   *
-  *   - an `encodedProof (h : π F.lambdapi__negated_conjecture) : π target`
-  *     proof script;
-  *   - a final rewrite rule `rule F.target ↪ λ h, encodedProof h;`.
+  *   - an `encodedProof` proof script;
+  *   - a final rewrite rule for `F.target`.
+  *
+  * GDV has two proof-obligation shapes that matter here. In regular proofs,
+  * both the parent assumptions and the target conjecture are `π'` symbols. In
+  * leaf proofs, the parent assumptions are original problem formulae of type
+  * `π`, while the target conjecture is still a `π'` symbol. Until GDV passes
+  * that distinction explicitly, this module infers the scenario from GDV's
+  * current `_pN` suffix convention for problem formula symbols.
   *
   * The supported non-admitted proof shape is deliberately narrow. After the
   * outer universal prefix of the target has been assumed, the parent formula
@@ -46,6 +52,25 @@ object Skolemize {
   /** Which skolem rewrite lemma to use, or why this step has to be admitted. */
   private final case class SkolemRewritePlan(ruleName: String, admitReason: Option[String])
   private final val gdvNegatedConjectureName = "lambdapi__negated_conjecture"
+
+  private final def isGdvProblemFormulaName(name: String): Boolean =
+    name.matches(""".*_p[0-9]+$""")
+
+  /** Whether parent assumptions are `π` leaves or GDV-derived `π'` formulae. */
+  private sealed trait GdvProofScenario {
+    def parentProofsNeedNegatedConjecture: Boolean
+  }
+  private case object RegularGdvProof extends GdvProofScenario {
+    override val parentProofsNeedNegatedConjecture: Boolean = true
+  }
+  private case object LeafGdvProof extends GdvProofScenario {
+    override val parentProofsNeedNegatedConjecture: Boolean = false
+  }
+
+  private final def inferGdvProofScenario(obligation: SkolemizationObligation): GdvProofScenario = {
+    if (isGdvProblemFormulaName(obligation.parent.name)) LeafGdvProof
+    else RegularGdvProof
+  }
 
   /** A skolemization redex in the parent formula and the Lambdapi lemma that rewrites it. */
   private sealed trait SkolemRedexKind {
@@ -136,16 +161,20 @@ object Skolemize {
     // The target name is the GDV/Formulae.lp symbol name, not a Leo-internal proof
     // step name. GDV checks completion by seeing an uncommented `rule F.<name>`.
     val ro = RenderOptions(sigPrefix = true, formulaPrefix = true)
+    val proofScenario = inferGdvProofScenario(obligation)
     val encodedProofName = freshLocalName("encodedProof", processed.sig, targetPrefix.binders.map(_._1.value).toSet)
-    val proofData = skolemizationProofDefinition(obligation, parent, target, targetPrefix, parentPrefix, processed.sig, encodedProofName)
+    val proofData = skolemizationProofDefinition(obligation, parent, target, targetPrefix, parentPrefix, processed.sig, encodedProofName, proofScenario)
+    val encodedProofConst = LpTerm.Const[Level.Meta](SymRef.LP(QName.local(encodedProofName.value)))
+    val proofName = proofData.negatedConjectureProofName
+    val proofParam = LpTerm.Var[Level.Meta](proofName, None)
     val applyEncodedProof = LpTerm.App[Level.Meta](
-      LpTerm.Const[Level.Meta](SymRef.LP(QName.local(encodedProofName.value))),
-      Seq(Arg.Explicit[Level.Meta](LpTerm.Var[Level.Meta](proofData.negatedConjectureProofName, None)))
+      encodedProofConst,
+      Seq(Arg.Explicit[Level.Meta](proofParam))
     )
     val finalRule = Stmt.Rule(
       LpTerm.Const[Level.Meta](SymRef.LP(QName.in(Prefix.Formula, obligation.target.name))),
       Seq.empty,
-      LpTerm.Lam[Level.Meta](proofData.negatedConjectureProofName -> None, applyEncodedProof)
+      LpTerm.Lam[Level.Meta](proofName -> None, applyEncodedProof)
     )
 
     s"""$gdvRequireOpenLine
@@ -163,11 +192,13 @@ object Skolemize {
                                                  targetPrefix: ForallPrefix,
                                                  parentPrefix: ForallPrefix,
                                                  sig: LpSig,
-                                                 encodedProofName: Name): SkolemizationProofData = {
+                                                 encodedProofName: Name,
+                                                 proofScenario: GdvProofScenario): SkolemizationProofData = {
     val binderNames = targetPrefix.binders.map(_._1.value).toSet
     val negatedConjecture = freshLocalName("negatedConj", sig, binderNames + encodedProofName.value)
     val assumedNames = targetPrefix.binders.map(_._1)
-    val parentProofArgs = negatedConjecture +: assumedNames
+    val parentProofArgs =
+      (if (proofScenario.parentProofsNeedNegatedConjecture) Seq(negatedConjecture) else Seq.empty) ++ assumedNames
     val implication = LogicConst.Imp(parentPrefix.body, targetPrefix.body)
     val haveName = freshLocalName("SK_dev", sig, parentProofArgs.map(_.value).toSet + encodedProofName.value)
     val hName = freshLocalName("h", sig, parentProofArgs.map(_.value).toSet ++ Set(encodedProofName.value, haveName.value))
@@ -194,11 +225,13 @@ object Skolemize {
       rewritePlan.admitReason match {
         case Some(reason) =>
           Seq(
+            LpProofScript.Assume(Seq(negatedConjecture)),
             LpProofScript.Comment(reason),
             LpProofScript.Admit
           )
         case None =>
           Seq(
+            LpProofScript.Assume(Seq(negatedConjecture)),
             LpProofScript.Assume(assumedNames),
             haveStep,
             LpProofScript.Refine(applyHave),
