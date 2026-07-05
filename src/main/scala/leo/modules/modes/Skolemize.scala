@@ -230,9 +230,8 @@ object Skolemize {
             LpProofScript.Admit
           )
         case None =>
-          Seq(
-            LpProofScript.Assume(Seq(negatedConjecture)),
-            LpProofScript.Assume(assumedNames),
+          val maybeAssume = if (assumedNames.nonEmpty) Seq(LpProofScript.Assume(assumedNames)) else Seq.empty
+          (LpProofScript.Assume(Seq(negatedConjecture)) +: maybeAssume) ++ Seq(
             haveStep,
             LpProofScript.Refine(applyHave),
             LpProofScript.Refine(applyParent)
