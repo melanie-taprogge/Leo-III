@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput
 
 import leo.{Out, modules}
 import leo.datastructures.Term.Integer
-import leo.datastructures.{ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
+import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
 import leo.modules.HOLSignature.{HOLDifference, HOLGreater, HOLGreaterEq, HOLLess, HOLLessEq, HOLProduct, HOLQuotient, HOLSum, HOLUnaryMinus}
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
@@ -57,6 +57,8 @@ object LPoutput {
   val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
+  val gdvRequireOpenLine: String =
+    s"require open $calcRuleLibStr $permLibStr $simpTacLibStr Stdlib.Epsilon Stdlib.Disj Stdlib.Conj;"
 
   final class lpProofObject {
     var etaExpFlag: Boolean = true
@@ -497,6 +499,24 @@ object LPoutput {
     }
   }
 
+  private final val gdvNegatedConjectureProofName = "__negated_conjecture_proof__"
+  private final val gdvNegatedConjectureName = "lambdapi__negated_conjecture"
+
+  private def tptpFormulaNameFromAnnotation(annotation: ClauseAnnotation): String = {
+    val pretty = annotation.pretty
+    if (pretty == "introduced(axiom_of_choice)") "axiom_of_choice"
+    else pretty.dropRight(1).split(",", 2)(1)
+  }
+
+  private def isGdvProblemFormulaName(name: String): Boolean =
+    name.matches(""".*_p[0-9]+$""")
+
+  private def isGdvDerivedFormulaName(name: String): Boolean =
+    !isGdvProblemFormulaName(name) && !name.startsWith("lambdapi__")
+
+  private def gdvTargetNameFromState(state: LocalState): String =
+    lpEscapeName(tptpFormulaNameFromAnnotation(state.conjecture.annotation), state.signature, false)
+
   def generateObjectDeclaartions(proof: modules.Proof, sig: LpSig): (StringBuilder, StringBuilder, StringBuilder, StringBuilder) = {
 
     // add symbols of the user defined TPTP problem signature if necessary
@@ -574,12 +594,14 @@ object LPoutput {
     (typeDecSB, skDecsSB, defSB, tacticSB)
   }
 
-  def extractNecessaryFormulas(state: LocalState, gdv_mode: Boolean)  = {
+  def extractNecessaryFormulas(state: LocalState, gdv_mode: Boolean, gdvProofParam: Option[String] = None)  = {
+
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
     val signatureFileSB: mutable.StringBuilder = new StringBuilder()
     val formulaeFileSB: mutable.StringBuilder = new StringBuilder()
     var proofSteps: Seq[LpProofScript] = Seq.empty
+    var gdvParentProofSteps: Seq[LpProofScript] = Seq.empty
 
     val flagSt = new lpProofObject
 
@@ -599,7 +621,7 @@ object LPoutput {
     val clausifiedSteps: mutable.HashMap[lpConstantTerm, lpConstantTerm] = mutable.HashMap.empty
     var conjEnc = false
     var axCounter = 0
-    val conjName = QName.local(s"negatedConjecture")
+    val conjName = QName.local(s"localNegatedConjecture")
 
     val problemEncSB: mutable.StringBuilder = new StringBuilder()
 
@@ -621,12 +643,24 @@ object LPoutput {
         }
       } else if (step.role == Role_Axiom) { //todo: what about other roles like lamme etc. ?
         val encClause = ClauseEncoding.clause2LP(step.cl)
-        val tptpName = step.annotation.pretty
-        val axName0 = if (tptpName == "introduced(axiom_of_choice)") "axiom_of_choice" else s"${tptpName.dropRight(1).split(",", 2)(1)}"
+        val axName0 = tptpFormulaNameFromAnnotation(step.annotation)
         val axName = if (gdv_mode) axName0 else axName0 + s"_p$axCounter"
         val safeAxName = lpEscapeName(axName,sig.orig,false)
         problemEncSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration(Name(safeAxName),Seq.empty,encClause.asMl),sig,RenderOptions(!outputSingleFile,false,monomorphic)))
-        identicalSteps += (stepId -> QName.in(Prefix.Formula, safeAxName))
+        gdvProofParam match {
+          case Some(proofParamName) =>
+            // If we are in GDV mode, and if the referenced formula is a derived formula from GDV earlier in the proof,
+            // define a new symbol for the version of the formula to which the negated conjecture of the global problem is applied.
+            val localName = s"gdv_parent_$safeAxName"
+            val formulaProof = LpTerm.Const[Level.Meta](SymRef.LP(QName.in(Prefix.Formula, safeAxName)))
+            val parentProof = if (isGdvDerivedFormulaName(safeAxName)) {
+                LpTerm.App[Level.Meta](formulaProof, Seq(Arg.Explicit[Level.Meta](LpTerm.Var[Level.Meta](Name(proofParamName), None))))
+              } else formulaProof
+            gdvParentProofSteps = gdvParentProofSteps :+ LpProofScript.Have(Name(localName), encClause.asMl, Seq(Left(LpProofScript.Refine(parentProof))))
+            identicalSteps += (stepId -> QName.local(localName))
+          case None =>
+            identicalSteps += (stepId -> QName.in(Prefix.Formula, safeAxName))
+        }
         Out.lp_debug_info(s"linking to axiom $safeAxName (id: $stepId)")
         axCounter = axCounter + 1
       } else {
@@ -635,7 +669,11 @@ object LPoutput {
         clausifiedSteps ++= newInfo.clausifiedSteps
         identicalSteps ++= newInfo.identicalSteps
         additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
-        val newStepsSeq = if (newProofSteps.isDefined) Seq(newProofSteps.get._1,newProofSteps.get._2) else Seq.empty
+        val newStepsSeq =
+          if (newProofSteps.isDefined) {
+            if (gdv_mode) Seq(newProofSteps.get._2)
+            else Seq(newProofSteps.get._1,newProofSteps.get._2)
+          } else Seq.empty
         proofSteps = proofSteps ++ newStepsSeq
       }
     }
@@ -697,9 +735,11 @@ object LPoutput {
 
     // construct the proof based on all the individual steps
     // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
+    proofSteps = gdvParentProofSteps ++ proofSteps
     proofSteps = LpProofScript.Assume(Seq(conjName.local)) +: proofSteps
     val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]))))
     proofSteps = refineStep +: proofSteps
+    gdvProofParam.foreach { proofParamName => proofSteps = LpProofScript.Assume(Seq(Name(proofParamName))) +: proofSteps}
     // finally, test if the derived last clause is the empty clause or a flex-flex clause.
     // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
     val emptyClause = NewLpDatastructures.lpClauseInst(Seq(),Seq()).asMl//lpClause(Seq(), Seq(lpOlBot))
@@ -749,7 +789,10 @@ object LPoutput {
       Out.lp_debug_info(s"can encode: \n$encSt")
     }
      */
-    val completeProof = Stmt.Definition(Name("encodedProof"),Seq.empty,Some(LpType.Prf(conjecture)),Stmt.DefBody.ProofBody(proofSteps),Seq(),Seq(Opaque))
+    val gdvParams = gdvProofParam.toSeq.map { proofParamName =>
+      Name(proofParamName) -> LpType.Prf(LpTerm.Const[Level.Obj](SymRef.LP(QName.in(Prefix.Formula, gdvNegatedConjectureName))))
+    }
+    val completeProof = Stmt.Definition(Name("encodedProof"),gdvParams,Some(LpType.Prf(conjecture)),Stmt.DefBody.ProofBody(proofSteps),Seq(),Seq(Opaque))
     proofFileSB.append(Renderer.stmt(completeProof,sig,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
 
     (proofFileSB,signatureFileSB,formulaeFileSB)
@@ -839,6 +882,19 @@ object LPoutput {
     val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile" + conjName), Seq.empty,lpConstantTerm(nameProofFile))
     proofFileSB.append("\n")
     proofFileSB.append(finalRule.pretty)
+    proofFileSB.toString()
+  }
+  def proof2GDVLP(state: LocalState): String = {
+    val targetFormulaName = gdvTargetNameFromState(state)
+    val (proofFileSB,_,_) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
+    proofFileSB.insert(0, s"$gdvRequireOpenLine\n")
+
+    val sig = LpSig.fromLeo(state.signature)
+    val proofParam = LpTerm.Var[Level.Meta](Name(gdvNegatedConjectureProofName), None)
+    val encodedProof = LpTerm.App[Level.Meta](LpTerm.Const[Level.Meta](SymRef.LP(QName.local(nameProofFile))), Seq(Arg.Explicit[Level.Meta](proofParam)))
+    val finalRule = Stmt.Rule(LpTerm.Const[Level.Meta](SymRef.LP(QName.in(Prefix.Formula, targetFormulaName))), Seq.empty, LpTerm.Lam[Level.Meta](Name(gdvNegatedConjectureProofName) -> None, encodedProof))
+    proofFileSB.append("\n")
+    proofFileSB.append(Renderer.stmt(finalRule, sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
     proofFileSB.toString()
   }
 }
