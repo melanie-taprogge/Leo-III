@@ -403,8 +403,8 @@ object ModularProofEncoding {
             }
             assert(allBvars.contains(uq.corrChildVar), "Error in LP encoding: Generalized universal quantifier but used variable is not in child")
             val corVar = var2Lp(uq.corrChildVar._1, uq.corrChildVar._2, bV, sig, true)
-            val univTactic = Left(lpAssume(Seq(corVar)).olTermApp)
-            (insts :+ lpOlFunctionApp(neededProcedure, Seq(univTactic)), ordVars :+ corVar)
+            val assumeName = Left(lpOlConstantTerm(s"\"${corVar.name.name}\""))
+            (insts :+ lpOlFunctionApp(neededProcedure, Seq(assumeName)), ordVars :+ corVar)
         }
       }
     }
