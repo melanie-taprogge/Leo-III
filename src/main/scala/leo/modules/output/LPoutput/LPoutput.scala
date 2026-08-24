@@ -58,7 +58,7 @@ object LPoutput {
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
   val gdvRequireOpenLine: String =
-    s"require open $calcRuleLibStr $permLibStr $simpTacLibStr Stdlib.Epsilon Stdlib.Disj Stdlib.Conj;"
+    s"require open $calcRuleLibStr $permLibStr $simpTacLibStr Stdlib.Epsilon Stdlib.Disj Stdlib.Conj Stdlib.String;"
 
   final class lpProofObject {
     var etaExpFlag: Boolean = true
@@ -821,7 +821,7 @@ object LPoutput {
     Out.info("Writing the Lambdapi files")
 
     // todo: only require what we need
-    lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.Epsilon","Stdlib.Disj","Stdlib.Conj",calcRuleLibStr,permLibStr)
+    lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.String","Stdlib.Epsilon","Stdlib.Disj","Stdlib.Conj",calcRuleLibStr,permLibStr)
     lazy val reqString = reqList.map(s => s"require open $s;\n").mkString("")
     var additions = ""
     val singleProof: mutable.StringBuilder = new StringBuilder()
@@ -875,7 +875,7 @@ object LPoutput {
 
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
-    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
+    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.String Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
     val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
     proofFileSB.insert(0, reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
