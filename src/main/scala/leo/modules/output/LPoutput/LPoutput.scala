@@ -52,6 +52,8 @@ object LPoutput {
   val nameTempFile = "UserTactic"
   val customUserTacFile = false
 
+  val setBuiltins = true
+
   val applyAllDefsTacName0 = "applyAllDefinitions"
 
   val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
@@ -320,21 +322,21 @@ object LPoutput {
             case leo.modules.calculus.Simp =>
               if (cl.furtherInfo.addInfoSimpRule.isDefined) {
                 if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp") {
-                  if (cl.furtherInfo.rwUnderBinder) {
-                    (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
-                  }
-                  else {
+//                  if (cl.furtherInfo.rwUnderBinder) {
+//                    (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
+//                  }
+//                  else {
                     val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig)
                     (toProofStepOld(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None),outputInfo)
-                  }
+//                  }
                 } else if (cl.furtherInfo.addInfoSimpRule.get == "paraSimp") {
-                  if (cl.furtherInfo.rwUnderBinder) {
-                    (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
-                  }
-                  else {
+//                  if (cl.furtherInfo.rwUnderBinder) {
+//                    (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
+//                  }
+//                  else {
                     val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, Seq(cl.annotation.parents.head.cl.lits.length - 1))
                     (toProofStepOld(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None), outputInfo)
-                  }
+//                  }
                 }else if (cl.furtherInfo.addInfoSimpRule.get == "detUniInferences") {
                   val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,Name(parentInLpEncID.head.name),sig)
                   encProof match {
@@ -681,7 +683,9 @@ object LPoutput {
     val (typeDecSB, skDecSB, defSB, tacticSB) = generateObjectDeclaartions(proof, sig)
 
     // set necessary flags
-    if (flagSt.etaExpFlag) proofFileSB.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n")
+    if (flagSt.etaExpFlag) proofFileSB.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n\n")
+
+    if (setBuiltins) proofFileSB.append("// BUILTINS /////////////////////////////////\n\nbuiltin \"arr\" ≔ ⤳;\nbuiltin \"funExt\" ≔ funExt;\n")
 
 
     // Generate declarations of symbols that are implicit in TPTP but not mapped to a Lambdapi encoding
