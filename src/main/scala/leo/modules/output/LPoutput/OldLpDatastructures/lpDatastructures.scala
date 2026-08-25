@@ -363,7 +363,9 @@ object lpDatastructures {
   )
 
   val tptpDefinedTypeMap: Map[String, lpOlMonoType] = Map(
-    "$int" -> lpIntType
+    "$int" -> lpOlUserDefinedType("tptp_int"),
+    "$rat" -> lpOlUserDefinedType("tptp_rat"),
+    "$real" -> lpOlUserDefinedType("tptp_real")
   )
 
   case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlMonoType {
@@ -570,7 +572,17 @@ object lpDatastructures {
 
   val tptpDefinedSymbolMap: Map[String, lpOlTerm] = Map(
     "$false" -> lpOlBot,
-    "$true" -> lpOlTop)
+    "$true" -> lpOlTop,
+    "$less" -> lpOlConstantTerm("tptp_less"),
+    "$lesseq" -> lpOlConstantTerm("tptp_lesseq"),
+    "$greater" -> lpOlConstantTerm("tptp_greater"),
+    "$greatereq" -> lpOlConstantTerm("tptp_greatereq"),
+    "$uminus" -> lpOlConstantTerm("tptp_uminus"),
+    "$sum" -> lpOlConstantTerm("tptp_sum"),
+    "$difference" -> lpOlConstantTerm("tptp_difference"),
+    "$product" -> lpOlConstantTerm("tptp_product"),
+    "$quotient" -> lpOlConstantTerm("tptp_quotient")
+  )
 
   case class lpOlConstantTerm(name : String) extends lpOlTerm{
     override def pretty (implicit prefix : PrettyConfig): String = name

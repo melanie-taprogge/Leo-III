@@ -368,13 +368,8 @@ object Encodings {
 
       // match pattern of application
       case _@Symbol(id) ∙ args if leo.modules.input.InputProcessing.adHocPolymorphicArithmeticConstants.contains(id) =>
-        val opName = lpEscapeName(sig(id).name, sig, false)
-        val prefixedName = if (prefix) s"${abbreviationSignatureFile}$opName" else opName
-        val (opType,tyVars) = polyType2Lp(sig(id)._ty,sig)
-        val arithmeticOperator = lpTptpOperator(opName,opType,tyVars)
-        val prefixedOperator = lpTptpOperator(prefixedName,opType,tyVars)
-        Out.lp_debug_info(s"adding operator ${arithmeticOperator.pretty}")
-        var updatedUsedSymbols = usedSymbols+arithmeticOperator
+        val translatedF = tptpDefinedSymbolMap.getOrElse(sig(id).name, lpEscapeTerm(sig(id).name, sig, prefix))
+        var updatedUsedSymbols = usedSymbols
 
         var arguments: Seq[Either[lpOlTerm, lpOlType]] = Seq.empty
         args foreach { arg =>
@@ -388,7 +383,7 @@ object Encodings {
               arguments = arguments :+ Right(encArg)
           }
         }
-        (lpOlFunctionApp(prefixedOperator,arguments), updatedUsedSymbols)
+        (lpOlFunctionApp(translatedF,arguments), updatedUsedSymbols)
 
       case f ∙ args =>
         val (translatedF, updatedUsedSymbols0) = term2LP(f, bVars, sig, usedSymbols ,supressReduction,prefix)

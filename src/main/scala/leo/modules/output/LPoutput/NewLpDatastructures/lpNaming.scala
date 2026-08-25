@@ -37,7 +37,23 @@ object lpEncSig {
   val tptpRationalStr = "tptp_rat"
   val tptpRealStr = "tptp_real"
 
-  val allAscii: Seq[String] = Seq(oTyStr, eqStr, tptpIntStr, tptpRealStr, tptpRationalStr)
+  val tptpLessStr = "tptp_less"
+  val tptpLessEqStr = "tptp_lesseq"
+  val tptpGreaterStr = "tptp_greater"
+  val tptpGreaterEqStr = "tptp_greatereq"
+  val tptpUnaryMinusStr = "tptp_uminus"
+  val tptpSumStr = "tptp_sum"
+  val tptpDifferenceStr = "tptp_difference"
+  val tptpProductStr = "tptp_product"
+  val tptpQuotientStr = "tptp_quotient"
+
+  val tptpArithmeticAscii: Seq[String] = Seq(
+    tptpIntStr, tptpRationalStr, tptpRealStr,
+    tptpLessStr, tptpLessEqStr, tptpGreaterStr, tptpGreaterEqStr,
+    tptpUnaryMinusStr, tptpSumStr, tptpDifferenceStr, tptpProductStr, tptpQuotientStr
+  )
+
+  val allAscii: Seq[String] = Seq(oTyStr, eqStr) ++ tptpArithmeticAscii
 }
 
 

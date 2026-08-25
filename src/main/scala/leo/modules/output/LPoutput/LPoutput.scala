@@ -3,7 +3,6 @@ package leo.modules.output.LPoutput
 import leo.{Out, modules}
 import leo.datastructures.Term.Integer
 import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
-import leo.modules.HOLSignature.{HOLDifference, HOLGreater, HOLGreaterEq, HOLLess, HOLLessEq, HOLProduct, HOLQuotient, HOLSum, HOLUnaryMinus}
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
 import leo.modules.prover.LocalState
@@ -23,7 +22,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.nameGeneration.nameInt
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
 import scala.collection.mutable
-import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, DefEncoding, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef, TermEncoding, TypeEncoding}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, DefEncoding, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef, TermEncoding, TypeEncoding, tptpConstMappings}
 import leo.modules.output.LPoutput.UnificationEncoding.encodePatternUni
 import leo.modules.output.LPoutput.PreUniVerification.encodePreUni
 
@@ -40,6 +39,7 @@ object LPoutput {
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
   val leoSimpTacticFile = "UserTactic"
+  val tptpArithmeticFile = "TptpArithmatic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
   val nameSignatureFile = "Signature"
@@ -58,9 +58,10 @@ object LPoutput {
 
   val permLibStr: String = f"${nameLeoIIILPlib}.${permlibFile}"
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
+  val tptpArithmeticLibStr = f"${nameLeoIIILPlib}.${tptpArithmeticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
   val gdvRequireOpenLine: String =
-    s"require open $calcRuleLibStr $permLibStr $simpTacLibStr Stdlib.Epsilon Stdlib.Disj Stdlib.Conj Stdlib.String;"
+    s"require open $calcRuleLibStr $permLibStr $simpTacLibStr $tptpArithmeticLibStr Stdlib.Epsilon Stdlib.Disj Stdlib.Conj Stdlib.String;"
 
   final class lpProofObject {
     var etaExpFlag: Boolean = true
@@ -523,7 +524,8 @@ object LPoutput {
 
     // add symbols of the user defined TPTP problem signature if necessary
     val proofSymbols = symbolsInProof(proof)
-    val signatureSymbols = saturatedUserSignature(proofSymbols)(sig.orig)
+    val builtinSymbols = tptpConstMappings.leoBaseTy.keySet ++ tptpConstMappings.LeoConstants.keySet
+    val signatureSymbols = saturatedUserSignature(proofSymbols)(sig.orig).diff(builtinSymbols)
 
     val numbers = numbersInProof(proof)
 
@@ -547,25 +549,9 @@ object LPoutput {
         )
 
       if (intsSB.length() != 0){
-        // add the tptp type of the found numbers
-        val intDec = Stmt.Declaration(sig.typeNames(HolBaseTypes.intTyN.id).local, Seq(), LpType.LpSet)
         typeDecSB.append("// Integers\n")
-        typeDecSB.append(NewLpDatastructures.Renderer.stmt(intDec, sig, RenderOptions(false, !outputSingleFile, monomorphic)))
         typeDecSB.append(intsSB)
         typeDecSB.append("\n")
-      }
-
-      // declare necessary connectives
-      val arithmaticConnecitves: Set[Signature.Key] = Set(HOLLess.key, HOLLessEq.key, HOLGreater.key, HOLGreaterEq.key, HOLUnaryMinus.key, HOLSum.key, HOLDifference.key, HOLProduct.key, HOLQuotient.key)
-      val conInProof = proofSymbols.intersect(arithmaticConnecitves)
-
-      conInProof foreach{con =>
-        val sName = sig.termNames(con)
-        if (sig.orig(con).hasType) {
-          Out.lp_debug_info(s"declaring $sName")
-          val typeDec = TypeEncoding.polyType2Lp(sig.orig(con)._ty)
-          typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, typeDec), sig, RenderOptions(false, false, monomorphic)))
-        }
       }
 
     }
@@ -825,7 +811,7 @@ object LPoutput {
     Out.info("Writing the Lambdapi files")
 
     // todo: only require what we need
-    lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.String","Stdlib.Epsilon","Stdlib.Disj","Stdlib.Conj",calcRuleLibStr,permLibStr)
+    lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.String","Stdlib.Epsilon","Stdlib.Disj","Stdlib.Conj",calcRuleLibStr,permLibStr,tptpArithmeticLibStr)
     lazy val reqString = reqList.map(s => s"require open $s;\n").mkString("")
     var additions = ""
     val singleProof: mutable.StringBuilder = new StringBuilder()
@@ -879,7 +865,7 @@ object LPoutput {
 
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
-    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.String Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
+    val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.String Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tptpArithmeticLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
     val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
     proofFileSB.insert(0, reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
