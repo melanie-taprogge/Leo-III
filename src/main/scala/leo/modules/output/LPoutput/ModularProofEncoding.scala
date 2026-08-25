@@ -25,6 +25,20 @@ import scala.collection.mutable
 
 object ModularProofEncoding {
 
+  private val arithmeticSimpRuleHeads: Set[Signature.Key] = Set(
+    HOLDifference.key,
+    HOLLessEq.key,
+    HOLGreater.key,
+    HOLGreaterEq.key
+  )
+
+  private def literalContainsArithmeticSimpHead(lit: Literal): Boolean =
+    lit.left.symbols.distinct.exists(arithmeticSimpRuleHeads) ||
+      lit.right.symbols.distinct.exists(arithmeticSimpRuleHeads)
+
+  private def simplificationNeedsArithmeticTactic(before: Seq[Literal], after: Seq[Literal]): Boolean =
+    (before.iterator ++ after.iterator).exists(literalContainsArithmeticSimpHead)
+
   ////////////////////////////////////////////////////////////////
   ////////// Additional Leo-III Inferences
   ////////////////////////////////////////////////////////////////
@@ -177,7 +191,8 @@ object ModularProofEncoding {
       val (maybeSimpStep, refineName) : (Seq[lpHave],lpTerm) = if (encExpTerm != encChild){
         // Use the encoding of formula simplification to generate the proofs
         // We only need the exhaustive simplification step, as the implicit transformations will only occur when operating on literals
-        val (simpStep, simpStepName) = encSimpProofSubstep(Seq.empty, encExpTerm, encChild)
+        val needsArithmeticTactic = simplificationNeedsArithmeticTactic(Seq(reducedTerm), child.cl.lits)
+        val (simpStep, simpStepName) = encSimpProofSubstep(Seq.empty, encExpTerm, encChild, useArithmeticTactic = needsArithmeticTactic)
         (Seq(simpStep), lpFunctionApp(lpConstantTerm(simpStepName),Seq(appliedParent)))
       }else (Seq(), appliedParent)
 
@@ -1568,10 +1583,11 @@ object ModularProofEncoding {
     haveSimpAppStep
   }
 
-  def encSimpProofSubstep(disappearingVars: Seq[lpTypedVar], termBefore: lpOlTerm, termAfter: lpOlTerm, addSteps: Seq[lpProofScriptStep] = Seq())={
+  def encSimpProofSubstep(disappearingVars: Seq[lpTypedVar], termBefore: lpOlTerm, termAfter: lpOlTerm, addSteps: Seq[lpProofScriptStep] = Seq(), useArithmeticTactic: Boolean = false)={
     // Step applying all of the RW-rules encoding the simplifications
     val simpAppStepName = "SimpApp"
-    val haveSimpAppStep = lpImpHaveStepConstructor(simpAppStepName, disappearingVars, termBefore, termAfter, addSteps ++ Seq(allSimpRuleApplicationStep))
+    val simpRuleApplicationStep = if (useArithmeticTactic) allSimpWithArithmeticRuleApplicationStep else allSimpRuleApplicationStep
+    val haveSimpAppStep = lpImpHaveStepConstructor(simpAppStepName, disappearingVars, termBefore, termAfter, addSteps ++ Seq(simpRuleApplicationStep))
     Out.lp_debug_info("Substep applying the boolean identities generated")
 
     (haveSimpAppStep, simpAppStepName)
@@ -1602,7 +1618,8 @@ object ModularProofEncoding {
     val disappearingVars = encParent.metaVars.diff(encRemainingVars)
     Out.lp_debug_info(s"Vars in parent: ${encParent.metaVars.map(_.pretty)}, Vars after Simp: ${encRemainingVars.map(_.pretty)} => Disappearing implicitly quantified variables: ${disappearingVars.map(_.pretty)}")
 
-    val (haveSimpAppStep, simpAppStepName) = encSimpProofSubstep(disappearingVars, encParent.term, clauseToProve, implicitRwTransf)
+    val needsArithmeticTactic = simplificationNeedsArithmeticTactic(pLits, cLits)
+    val (haveSimpAppStep, simpAppStepName) = encSimpProofSubstep(disappearingVars, encParent.term, clauseToProve, implicitRwTransf, needsArithmeticTactic)
 
 
 

@@ -13,8 +13,10 @@ import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 object SimplificationEncoding {
 
   val allSimpRulesTermName = lpConstantTerm("applyAllSimplifications")
+  val allSimpRulesWithArithmeticTermName = lpConstantTerm("applyAllSimplificationsWithArithmatic")
 
   val allSimpRuleApplicationStep = lpEval(allSimpRulesTermName)
+  val allSimpWithArithmeticRuleApplicationStep = lpEval(allSimpRulesWithArithmeticTermName)
   
   
   // Idempotence and Contradiction for ∧ and ∨
