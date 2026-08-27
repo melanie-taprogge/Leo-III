@@ -917,6 +917,22 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm, tab)))
   }
 
+  case class lpOrElse(tacticTerm0: lpStatement, tacticTerm1: lpStatement, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+
+    def addTab(i: Int): lpOrElse = lpOrElse(tacticTerm0, tacticTerm1, tab + i)
+
+    override def pretty(implicit prefix: PrettyConfig): String = {
+      val tabs: String = "\t" * tab
+      s"${tabs}orelse ${tacticTerm0.pretty} ${tacticTerm1.pretty}"
+    }
+
+    val tabs = "\t" * tab
+
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix: PrettyConfig): String = s"${tabs}{orelse ${tacticTerm0.pretty} ${tacticTerm1.pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpOrElse(tacticTerm0, tacticTerm1, tab)))
+  }
+
   abstract class lpUserTactic extends lpOlTerm {
     override def prf: lpMlType = throw new Exception(s"Error in LP encoding: Trying to generate proof for user tactic")
   }
@@ -1019,19 +1035,21 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpSetTac(name, dfn, tab)))
   }
 
-  case class lpTacSimplify(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
-    def addTab(i: Int): lpTacSimplify = lpTacSimplify(tab + i)
+  case class lpTacSimplify(ruleOff: Boolean = false, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    def addTab(i: Int): lpTacSimplify = lpTacSimplify(ruleOff, tab + i)
+
+    val ruleOffStr = if (ruleOff) " rule off" else ""
 
     override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t" * tab
-      s"${tabs}simplify"
+      s"${tabs}simplify$ruleOffStr"
     }
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"${tabs}{simplify"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"${tabs}{simplify$ruleOffStr"
 
-    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpTacSimplify(tab)))
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpTacSimplify(ruleOff, tab)))
   }
 
   case class lpRepeat(stepToRepeat: lpStatement, tab: Int = 0) extends lpProofScriptStep(tab: Int) {

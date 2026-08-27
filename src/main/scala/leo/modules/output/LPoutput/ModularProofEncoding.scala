@@ -1586,7 +1586,7 @@ object ModularProofEncoding {
   def encSimpProofSubstep(disappearingVars: Seq[lpTypedVar], termBefore: lpOlTerm, termAfter: lpOlTerm, addSteps: Seq[lpProofScriptStep] = Seq(), useArithmeticTactic: Boolean = false)={
     // Step applying all of the RW-rules encoding the simplifications
     val simpAppStepName = "SimpApp"
-    val simpRuleApplicationStep = if (useArithmeticTactic) allSimpWithArithmeticRuleApplicationStep else allSimpRuleApplicationStep
+    val simpRuleApplicationStep = if (useArithmeticTactic) allSimpRuleWithArithmaticTactic else allSimpRuleTactic
     val haveSimpAppStep = lpImpHaveStepConstructor(simpAppStepName, disappearingVars, termBefore, termAfter, addSteps ++ Seq(simpRuleApplicationStep))
     Out.lp_debug_info("Substep applying the boolean identities generated")
 

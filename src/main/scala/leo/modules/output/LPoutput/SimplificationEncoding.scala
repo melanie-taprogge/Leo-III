@@ -14,9 +14,23 @@ object SimplificationEncoding {
 
   val allSimpRulesTermName = lpConstantTerm("applyAllSimplifications")
   val allSimpRulesWithArithmeticTermName = lpConstantTerm("applyAllSimplificationsWithArithmatic")
+  val allSimpRulesOnceTermName = lpConstantTerm("applyAllSimplificationsOnce")
+  val allSimpRulesWithArithmeticOnceTermName = lpConstantTerm("applyAllSimplificationsWithArithmaticOnce")
+  val etaExpTermName = lpConstantTerm("eta_exp")
 
-  val allSimpRuleApplicationStep = lpEval(allSimpRulesTermName)
-  val allSimpWithArithmeticRuleApplicationStep = lpEval(allSimpRulesWithArithmeticTermName)
+//  val allSimpRuleApplicationStep = lpEval(allSimpRulesTermName)
+//  val allSimpWithArithmeticRuleApplicationStep = lpEval(allSimpRulesWithArithmeticTermName)
+
+  val allSimpRuleOnceApplicationStep = lpEval(allSimpRulesOnceTermName)
+  val allSimpWithArithmeticOnceRuleApplicationStep = lpEval(allSimpRulesWithArithmeticOnceTermName)
+
+  // tactic involving simplification and eta expansion
+
+  val rwEtaTac = lpRewrite(None,etaExpTermName,true)
+  def constructSimpTac(tacticName: lpEval) = lpRepeat(lpOrElse(tacticName,lpOrElse(lpTacSimplify(true),rwEtaTac)))
+
+  val allSimpRuleTactic = constructSimpTac(allSimpRuleOnceApplicationStep)
+  val allSimpRuleWithArithmaticTactic = constructSimpTac(allSimpWithArithmeticOnceRuleApplicationStep)
   
   
   // Idempotence and Contradiction for ∧ and ∨
