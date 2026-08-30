@@ -1815,7 +1815,7 @@ object ModularProofEncoding {
     // 1. Abstract over free variables
     // For each of the rewrite clauses applied:
     //    2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal. The exact form depends on the kind of clause used as a rewrite rule by Leo-III:
-    //        a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
+    //       a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
     //       a) case II) If the rewrite-clause is an equational single literal, use eqSym_eq to prove the reverse rewrite rule
     //       b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly
     //   For each of the literals that are transformed:
@@ -1834,9 +1834,14 @@ object ModularProofEncoding {
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     // temporariy: If versions of the rule are needed that are not encoded yet, return admit
     var allTransformationsEncoded = true
+    val notEncodedReasons: mutable.LinkedHashSet[String] = mutable.LinkedHashSet.empty
+    def markNotEncoded(reason: String): Unit = {
+      allTransformationsEncoded = false
+      notEncodedReasons += reason
+    }
     if (addInfoSimp.nonEmpty) {
       Out.lp_debug_info("Simplification steps not yet encoded")
-      allTransformationsEncoded = false
+      markNotEncoded("RW: Literal simplification or transformation not encoded")
     }
 
     // 1. Abstract over free variables
@@ -1870,7 +1875,7 @@ object ModularProofEncoding {
 
       // check that none of the things not yet encoded occur
       if (rewriteEqClause.implicitlyBound.nonEmpty || rewriteEqClause.typeVars.nonEmpty) {
-        allTransformationsEncoded = false
+        markNotEncoded("RW: Non-ground rewrite rule requires instantiation")
         Out.lp_debug_info(s"Rewriting with ${sourceBeforeEq.name} : ${if (!rwPol) lpNot.pretty} (${rwLhs.pretty} = ${rwRhs.pretty}) is non-ground and therefore not yet encoded")
       } else {
         Out.lp_debug_info(s"Rewriting with ${sourceBeforeEq.name} : ${if (!rwPol) lpNot.pretty} (${rwLhs.pretty} = ${rwRhs.pretty})")
@@ -1915,7 +1920,7 @@ object ModularProofEncoding {
         rewriteenLits.foreach {encLit =>
           val (patternTerm, rewrittenLit, counter, rwUnderBinder) = findRWTerm0(Seq((rwLhs, rwRhs)).toMap, encLit)
           if (rwUnderBinder) {
-            allTransformationsEncoded = false
+            markNotEncoded("RW: Rewrite under binder required")
             Out.lp_debug_info(s"Rewriting-Tactic can not be used on literal of the parent clause: ${encLit.pretty} since term is under binder")
           } else if (counter != 0) {
             rewriteenLits = rewriteenLits.updated(litCount,rewrittenLit)
@@ -1942,7 +1947,7 @@ object ModularProofEncoding {
           if (canEncode) Out.lp_debug_info(s"proposed Steps: \n${additionalSteps.map(_.pretty).mkString("\n")}")
           else {
             Out.lp_debug_info(s"unable to encode the transformation of ${encLitChild.pretty} to ${rewrittenLit.pretty}}")
-            allTransformationsEncoded = false
+            markNotEncoded("RW: Literal simplification or transformation not encoded")
           }
           allSteps = allSteps :++ additionalSteps
         }
@@ -1968,7 +1973,7 @@ object ModularProofEncoding {
     val finishedProof = lpProofScript(allSteps)
 
     if (allTransformationsEncoded) (finishedProof, None)
-    else (finishedProof, Some("RW: Non-ground rewrite step or missing transformation"))
+    else (finishedProof, Some(notEncodedReasons.mkString("; ")))
   }
 
   ////////////////////////////////////////////////////////////////
