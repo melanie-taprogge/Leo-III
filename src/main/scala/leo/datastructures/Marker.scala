@@ -204,6 +204,10 @@ case class AddInfoPara(withClause: Clause,
                        preSimpClause: Clause,
                        typeSubstNeeded: Boolean)
 
+case class AddInfoRewrite(rewriteRule: Clause,
+                          origTermSubst: Subst = Subst.id,
+                          origTypeSubst: Subst = Subst.id)
+
 sealed trait UniTermRhs
 case class UniTermByTerm(term: Term,
                          tyVarCount: Int,
@@ -323,6 +327,7 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
   var addInfoUni: AddInfoUni = AddInfoUni()
   var addInfoDetUni: AddInfoDetUni = AddInfoDetUni()
   var addInfoRewriting: Option[Clause] = None
+  var addInfoRw: Seq[AddInfoRewrite] = Seq.empty
   var addInfoLiftEq: Seq[Seq[Int]] = Seq.empty
 }
 
