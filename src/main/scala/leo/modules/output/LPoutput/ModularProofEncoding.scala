@@ -161,7 +161,7 @@ object ModularProofEncoding {
     val allDefs = keysWithDefn.map(key => s"${lpEscapeName(sig.apply(key).name, sig, false)}_def") //todo: have a unified name generation method for def file generation and this
 
 
-    //if(!additionalInfoSimp){
+    if(keysWithDefn.length <= 20){
 
       val (encParent,encChild, _, _) =  initialEncUnclausified(parent.cl, child.cl, sig)
       Out.lp_debug_info(s"Encoding defExSimp of ${encParent.pretty} to ${encChild.pretty}")
@@ -200,10 +200,10 @@ object ModularProofEncoding {
 
       ((defExpStep ++ maybeSimpStep) :+ refineStep, None)
 
-//    }else{
-//      Out.lp_debug_info("Rweriting under binder required in order to encode Simplification step")
-//      (Seq(), Some("Rweriting under binder required in order to encode Simplification step"))
-//    }
+    }else{
+      Out.lp_debug_info(s"Skipping DefExp with more than 20 definitions (${keysWithDefn.length})")
+      (Seq(), Some("Skipping DefExp with more than 50 definitions"))
+    }
   }
 
   object RwCnfEncoding {
