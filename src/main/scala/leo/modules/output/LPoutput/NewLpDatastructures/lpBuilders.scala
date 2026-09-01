@@ -131,6 +131,14 @@ case class lpLiteralInst(term: LpTerm[Level.Obj], polarity: Boolean, eq: Boolean
     }
   }
 
+  /** Type of the sides of an equational literal, ignoring leading negations. */
+  def equalitySideType: Option[OlMonoType] = {
+    stripLeadingNeg(term)._1 match {
+      case LogicConst.Eq(ty, _, _) => Some(ty)
+      case _ => None
+    }
+  }
+
   def termEq(lit2: lpLiteralInst) = {
     this.term == lit2.term
   }
