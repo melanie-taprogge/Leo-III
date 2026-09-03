@@ -2300,9 +2300,12 @@ package inferenceControl {
         leo.Out.finest(s"vargen in rewriteSimp: ${vargen.existingVars.toString()}")
         val newLits = cl.cl.lits.map(lit => rewriteLit(vargen, lit, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, rewriteInfo)(sig))
         val newCl = Clause(newLits)
-        val information: FurtherInfo = cl.furtherInfo
         val result0 = if (rewriteRulesUsed.isEmpty) cl else {
           leo.Out.finest(s"Rewriting happend!")
+          // Rewrite metadata is specific to this inference. Reusing the mutable
+          // FurtherInfo of the rewritten parent lets later RewriteSimp steps
+          // overwrite the substitutions needed to reconstruct this proof step.
+          val information = FurtherInfo()
           information.addInfoRewriting = Some(newCl)
           information.addInfoRw = rewriteInfo.toSeq
           val newAnnotation = if (rewriteRulesUsed.exists(_.cl.lits.head.left.ty == HOLSignature.o))
@@ -2340,7 +2343,7 @@ package inferenceControl {
         val (res, origin) = groundRewriteTable(term)
         leo.Out.finest(s"Yeah! replace ${term.pretty(sig)} by ${res.pretty(sig)}")
         rewriteRulesUsed += origin
-        rewriteInfo += AddInfoRewrite(origin.cl)
+        rewriteInfo += AddInfoRewrite(origin.id, origin.cl)
         res
       } else {
         val toFind = nonGroundRewriteTable.keysIterator
@@ -2366,7 +2369,7 @@ package inferenceControl {
               leo.Out.finest(s"via subst ${termSubst.pretty}")
               if (term != result) {
                 rewriteRulesUsed += origin
-                rewriteInfo += AddInfoRewrite(origin.cl, termSubst, typeSubst)
+                rewriteInfo += AddInfoRewrite(origin.id, origin.cl, termSubst, typeSubst)
                 return result
               } else {
                 leo.Out.finest(s"...ignored")

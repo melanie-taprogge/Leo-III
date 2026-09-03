@@ -204,7 +204,9 @@ case class AddInfoPara(withClause: Clause,
                        preSimpClause: Clause,
                        typeSubstNeeded: Boolean)
 
-case class AddInfoRewrite(rewriteRule: Clause,
+/** One ordered rewrite application and the exact proof parent justifying it. */
+case class AddInfoRewrite(rewriteRuleParentId: Long,
+                          rewriteRule: Clause,
                           origTermSubst: Subst = Subst.id,
                           origTypeSubst: Subst = Subst.id)
 

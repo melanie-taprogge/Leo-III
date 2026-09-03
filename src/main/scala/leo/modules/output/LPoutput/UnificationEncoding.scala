@@ -17,7 +17,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Obj, Wildcard}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, Prf}
 import leo.modules.output.LPoutput.NewLpDatastructures.Substitution.removeLeadingTypeArgs
-import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{args2LP, term2LP, var2Lp}
+import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{args2LP, term2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.{polyType2LP, safeEncTy, safeEncTypes, type2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures._
 import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, extractVarNames}
@@ -50,74 +50,6 @@ object Util {
   // Encode the Substitution steps
 
   /**
-    * encodeUniInfo — Encode the RHS entry of a term substitution as an LP argument.
-    *
-    * The produced argument is intended to be used to instantiate the parent clause in
-    * unification/ substitution steps.
-    *
-    * Cases:
-    *  - UniTermByBoundVar(j):
-    *    -> If j refers to a variable that is available in the child’s context, return that variable.
-    *    -> Otherwise, j denotes an out-of-scope bound index;
-    *    in this case we generate a witness term of the appropriate HOL type using lpWitnessCon.
-    *  - UniTermByTerm(t, ...):
-    *    Encode the concrete term t directly and return it as an explicit argument.
-    *
-    * @param termUni           The RHS of a unification substitution entry.
-    * @param childBoundIndices Bound indices that are in scope for the child clause.
-    * @param sharedVarMap      Mapping from bound indices to LP variable names (for in-scope vars).
-    * @param bndIdxToType      Mapping from bound indices to HOL types (used to build witness terms).
-    * @return An explicit LP argument to be applied to the encoded parent.
-    */
-  private def encodeUniInfo(termUni: UniTermRhs, childBoundIndices: Seq[Int], sharedVarMap: Map[Int, String], bndIdxToType: Map[Int, leo.datastructures.Type]): Arg[Level.Obj] = {
-    termUni match {
-      case UniTermByBoundVar(targetIndex) =>
-        if (childBoundIndices.contains(targetIndex)) {
-          Out.lp_debug_info(s"bind by variable with index $targetIndex")
-          val encVar = LpTerm.Var[Level.Obj](Name(sharedVarMap(targetIndex)), None)
-          Arg.Explicit(encVar)
-        } else {
-          Out.lp_debug_info(s"creating a witness term for variable of scope $targetIndex")
-          val ty = bndIdxToType(targetIndex)
-          val freshWitness = LpTerm.App[Level.Obj](lpWitnessCon, Seq(Arg.ExplicitTypeArg(type2LP(ty))))
-          Arg.Explicit(freshWitness)
-        }
-
-      case UniTermByTerm(term, _, _) =>
-        val encTargetTerm = term2LP(term, sharedVarMap, suppressReduction = false, replaceUnknownVars = true)
-        Out.lp_debug_info(s"bind by term $encTargetTerm}")
-        Arg.Explicit(encTargetTerm)
-    }
-  }
-
-  /**
-    * Encode the refine step encoding instantiation of the parent during a substitution step
-    *
-    * @param parentVars The free variables of the parent to be instantiated
-    * @param childVars The free variables of the child to be proved
-    * @param termToApply A mapping of the Integers encoding the variable to be instantiated to the encoded LP Term
-    * @param sharedVarMap The mapping assigning unambiguous variables to the free variables of the parent and child clause
-    * @param parentNameLpEnc The Term in the LP encoding representing the proved step of the parent
-    * @return LP refine tactic with the applied parent
-    */
-  private def constructSubstStep(parentVars: Seq[(Int, Type)], childVars: Seq[(Int, Type)], termToApply: Map[Int, Arg[Level.Obj]], sharedVarMap: Map[Int, String], parentNameLpEnc: LpTerm[Level.Obj]): Refine = {
-    assert(termToApply.nonEmpty)
-    // todo: should i not instead test for the non-emptiness of parent.cl.implicitlyBound ?
-
-    val orderedTerms: Seq[Arg[Level.Obj]] = parentVars.map(id =>
-      // case var instantiated by some term
-      if (termToApply.keySet.contains(id._1)) termToApply(id._1)
-      // case var instantiated by a var of the parent
-      else if (childVars.contains(id)) Arg.Explicit(var2Lp(id._1, id._2, sharedVarMap))
-      // case var instantiated by a witness term
-      else Arg.Explicit(LpTerm.App(lpWitnessCon, Seq(Arg.ExplicitTypeArg(type2LP(id._2))))))
-
-    val appliedParentName = if (orderedTerms.nonEmpty) LpTerm.App(parentNameLpEnc, orderedTerms) else parentNameLpEnc
-
-    Refine(Obj(appliedParentName))
-  }
-
-  /**
     * Orchestrator for the construction of a proof step encoding the substitution and any potential implicit transformations entailed by it.
     *
     * @param ctxt The encoding context
@@ -133,22 +65,15 @@ object Util {
     */
   def encodeSubstitutionSubstep(nameStep: Name, ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, encSubstParent: Seq[lpLiteralInst], childImpBound: Seq[(Int, Type)], parentImpB: Seq[(Int, Type)], idxMap: Int => Int = identity): (LpTerm[Level.Obj], Seq[Have]) = {
 
-    // a mapping of the id of the free variable to the encoded term that it is instanciated with
-    val termToApply: Map[Int, Arg[Level.Obj]] =
-    termSubst.foldLeft(Map.empty[Int, Arg[Level.Obj]]) { (acc, termUni) =>
-      val lpUnboundVar = termUni.sourceIndex
-      val encSubstTerm = encodeUniInfo(termUni.rhs, childImpBound.map(_._1), ctxt.sharedVarMap.view.filterKeys(childImpBound.map(_._1).contains(_)).toMap, parentImpB.toMap)
-      acc + (lpUnboundVar -> encSubstTerm)
-    }
-
     // construct the application
     Out.lp_debug_info(s"vars of parent: ${parentImpB.map(_._1)}")
     Out.lp_debug_info(s"vars of child: ${childImpBound.map(_._1)}")
-    if (termToApply.nonEmpty) {
+    if (termSubst.nonEmpty) {
       // detect potential flipping or normalisazion of literals that may be necessary in this step
       val maybeFlipAndNormalize: Seq[Rewrite] = verifySubstitutionLiteralNormalisazion(litTransf, encSubstParent.map(_.polarity), ctxt.substClauseLen, idxMap)
       // construct the refine step carrying out the substitution
-      val refineStep = constructSubstStep(parentImpB, childImpBound, termToApply, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
+      val instantiatedParent = SubstitutionEncoding.instantiateProofTerm(parentImpB, childImpBound, termSubst, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
+      val refineStep = Refine(Obj(instantiatedParent))
 
       // have substitution step
       val haveSubstStep = Have(nameStep, Prf(nAry.disjunction(encSubstParent.map(_.term))), (maybeFlipAndNormalize :+ refineStep).map(Left(_)))
