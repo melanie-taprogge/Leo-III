@@ -981,6 +981,32 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab)))
   }
 
+  /**
+    * Rewrite with a workaround for Lambdapi matching failures involving dependent arrows.
+    *
+    * The ordinary rewrite is attempted first. If it fails, the tactic tries to unfold the
+    * dependent-arrow encoding before retrying the exact same rewrite. The simplification is
+    * optional because a functional equality need not expose a dependent-arrow redex.
+    */
+  case class lpRewriteWithDepArrowFallback(rewritePattern0: Option[lpRewritePattern], rewriteTerm: lpTerm, rwRhs: Boolean = false, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    def addTab(i: Int): lpRewriteWithDepArrowFallback =
+      lpRewriteWithDepArrowFallback(rewritePattern0, rewriteTerm, rwRhs, tab + i)
+
+    private def rewrite(implicit prefix: PrettyConfig): String =
+      lpRewrite(rewritePattern0, rewriteTerm, rwRhs).pretty
+
+    override def pretty(implicit prefix: PrettyConfig): String = {
+      val tabs = "\t" * tab
+      s"${tabs}orelse $rewrite compose try simplify ⤳d; $rewrite"
+    }
+
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix: PrettyConfig): String =
+      s"${"\t" * tab}{${lpRewriteWithDepArrowFallback(rewritePattern0, rewriteTerm, rwRhs).pretty}"
+
+    override def toProofScrips: lpProofScript =
+      lpProofScript(Seq(lpRewriteWithDepArrowFallback(rewritePattern0, rewriteTerm, rwRhs, tab)))
+  }
+
   case class lpReflexivity(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
     def addTab(i : Int): lpReflexivity = lpReflexivity(tab + i)
     override def pretty (implicit prefix : PrettyConfig): String = {

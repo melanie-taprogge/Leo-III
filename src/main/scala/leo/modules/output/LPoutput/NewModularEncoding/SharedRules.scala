@@ -7,10 +7,11 @@ import leo.modules.output.LPoutput.LpLibs.LeoTactics.EvalApp.removeBot
 import leo.modules.output.LPoutput.LpLibs.MetaTheorems.Inst.deleteBots
 import leo.modules.output.LPoutput.LpLibs.ND.Terms.eqSym
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Eval, Have, Refine, Rewrite, Side}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Eval, Have, Refine, Rewrite, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Obj}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.Prf
 import leo.modules.output.LPoutput.NewLpDatastructures._
+import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig.depTyConStr
 
 
 object AssumeStep {
@@ -180,6 +181,7 @@ object EqualityProofSteps {
         Prf(LogicConst.Eq(HolBaseTypes.O, targetLit.term, intermediateLit.term)),
         Seq(
           Left(Eval(NormalizeEqLitTactic)),
+          Left(Try(Simplify(Seq(Name(depTyConStr))))),
           Left(Eval(closeEqTactic(closeEqType)))
         )
       ),

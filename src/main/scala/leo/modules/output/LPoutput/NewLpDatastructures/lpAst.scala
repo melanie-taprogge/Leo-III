@@ -165,6 +165,9 @@ object LpProofScript {
   final case class Repeat(step: LpProofScript) extends LpProofScript
   /** Evaluate a tactic defined in the term language of Lambdapi */
   final case class Eval(tactic: LpTerm[Level.Meta]) extends LpProofScript
+
+  /** Try to apply a given tactic to the goal */
+  final case class Try(step: LpProofScript) extends LpProofScript
   /** Give up ad assume the current goal as an axiom */
   final case object Admit extends LpProofScript
   /** Instantiate the dependant types/ the arguments of function types of the current goals with variables */

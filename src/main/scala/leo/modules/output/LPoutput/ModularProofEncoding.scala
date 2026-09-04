@@ -938,7 +938,7 @@ object ModularProofEncoding {
 
       // Prepare the intoLit in the child (if necessary, carry out transform and flip steps)
       val transformIntoLitSteps = transformIntoLit(newCtxt)
-      val maybeFlipIntoLitStep = flipIntoLit(newCtxt, info)
+      val maybeFlipIntoLitStep = flipIntoLit(newCtxt, info, useFallback = true)
 
       // Combine the proof snippets that do not depend on the length of the with Literal:
       val proofBricks = EncParaProofSteps(transformIntoLitSteps, maybeFlipIntoLitStep, rewriteWithUniLit, childIntoTermPattern, vIntro1_intoClause_uniLit, assumeUniConsT)
@@ -1074,14 +1074,18 @@ object ModularProofEncoding {
       }
     }
 
-    private def flipIntoLit(ctxt: EncParaCtx, info: AddInfoPara): Seq[lpProofScriptStep] = {
+    private def flipIntoLit(ctxt: EncParaCtx, info: AddInfoPara, useFallback: Boolean = false): Seq[lpProofScriptStep] = {
 
       val writeIntoLhs = if (info.intoSide) true else false
       val intoLitInChildNeedsflip = if (writeIntoLhs) !alphaEquivalent(ctxt.intoC.encIntoLit.right, ctxt.childC.encIntoLit.right) else !alphaEquivalent(ctxt.intoC.encIntoLit.left, ctxt.childC.encIntoLit.left)
       if (intoLitInChildNeedsflip) {
         Out.lp_debug_info(s"intoLit in child needs to be flipped")
         val flipPattern = generateClausePattern(Seq(ctxt.childC.intoLitIdx), ctxt.childC.len, ctxt.childC.intoLit.polarity)
-        val flipStep = lpRewrite(Some(lpRewritePattern(flipPattern)), flipLiteral.instanciate(ctxt.intoC.encIntoLit.tyLhs))
+        val ordinaryFlipStep = lpRewrite(Some(lpRewritePattern(flipPattern)), flipLiteral.instanciate(ctxt.intoC.encIntoLit.tyLhs))
+        val flipStep =
+          if (useFallback && ctxt.intoC.encIntoLit.tyLhs.isInstanceOf[lpOlFunctionType]) {
+            lpRewriteWithDepArrowFallback(ordinaryFlipStep.rewritePattern0, ordinaryFlipStep.rewriteTerm, ordinaryFlipStep.rwRhs)
+          } else ordinaryFlipStep
         Seq(lpProofScriptCommentLine("Target literal needs to be flipped"), flipStep)
       } else Seq.empty
     }
@@ -1271,7 +1275,7 @@ object ModularProofEncoding {
     val otherLitBeforeEqFact : (lpOlTerm, lpOlTerm, lpOlTerm) = {
       if (!otherLit.equational){
         val transformOtherLit0 = equationalForm(otherLitEnc,polarityOfRule)
-        val (newSteps, newCanEncode) = transformLiteral(transformOtherLit0._1,otherLitEnc,permutaion(posOtherLit),lenParent)
+        val (newSteps, newCanEncode) = transformLiteral(transformOtherLit0._1,otherLitEnc,permutaion(posOtherLit),lenParent, useFallback = true)
         allTransformSteps =  allTransformSteps ++ newSteps
         if (!newCanEncode) {
           canEncode = false
@@ -1299,7 +1303,7 @@ object ModularProofEncoding {
     val maxLitBeforeEqFact = {
       if (!maxLit.equational) {
         val transformMaxLit0 = equationalForm(maxLitEnc, polarityOfRule)
-        val (newSteps, newCanEncode) = transformLiteral(transformMaxLit0._1,maxLitEnc, permutaion(posMaxLit), lenParent)
+        val (newSteps, newCanEncode) = transformLiteral(transformMaxLit0._1,maxLitEnc, permutaion(posMaxLit), lenParent, useFallback = true)
         allTransformSteps = allTransformSteps ++ newSteps
         if (!newCanEncode) {
           canEncode = false
@@ -1338,7 +1342,7 @@ object ModularProofEncoding {
     var allBackTransformSteps : Seq[lpProofScriptStep] = Seq.empty
     Out.lp_debug_info(s"derived other lit = ${otherLitBeforeEqFact._1.pretty}, found other lit = ${childOtherLitEnc.pretty}")
     if (otherLitBeforeEqFact._1 != childOtherLitEnc){
-      val (newSteps, newCanEncode) = transformLiteral(childOtherLitEnc,otherLitBeforeEqFact._1,0,currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childOtherLitEnc,otherLitBeforeEqFact._1,0,currentLits.length, useFallback = true)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(0,childOtherLitEnc)
       if (!newCanEncode) {
@@ -1348,7 +1352,7 @@ object ModularProofEncoding {
       Out.lp_debug_info(s"transformed other literal to ${childOtherLitEnc.pretty}")
     }
     if (currentLits(1) != childUc1Enc){
-      val (newSteps, newCanEncode) = transformLiteral(childUc1Enc, currentLits(1), 1, currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childUc1Enc, currentLits(1), 1, currentLits.length, useFallback = true)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(1,childUc1Enc)
       if (!newCanEncode) {
@@ -1358,7 +1362,7 @@ object ModularProofEncoding {
       Out.lp_debug_info(s"transformed UC1 to ${childUc1Enc.pretty}")
     }
     if (currentLits(2) != childUc2Enc) {
-      val (newSteps, newCanEncode) = transformLiteral(childUc2Enc, currentLits(2), 2, currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childUc2Enc, currentLits(2), 2, currentLits.length, useFallback = true)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(2,childUc2Enc)
       if (!newCanEncode) {
@@ -1764,7 +1768,7 @@ object ModularProofEncoding {
           if (finalLit != encCorrespondingLit){
             // transformation to or from bottom or order has changed
             Out.lp_debug_info(s"corresponding lit in child: ${encCorrespondingLit.pretty}, transformation necessary")
-            val (transformationSteps, canEncode0) = transformLiteral(encCorrespondingLit,finalLit,permutation.indexOf(indx), indices.length)
+            val (transformationSteps, canEncode0) = transformLiteral(encCorrespondingLit, finalLit, permutation.indexOf(indx), indices.length, useFallback = true)
             if (canEncode0){
               allSteps = allSteps ++ transformationSteps
               Out.lp_debug_info(s"transformation successful")

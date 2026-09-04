@@ -19,6 +19,7 @@ object lpEncSig {
   val oTyStr = "o"
   val iTyStr = "ι"
   val tyConStr = "⤳"
+  val depTyConStr = "⤳d"
   // ** Standard Library Propositional Constants
   val topStr = "⊤"
   val botStr = "⊥"
@@ -100,6 +101,5 @@ object nameGeneration {
   /** Generate Lambdapi names for encoded real numbers */
   def nameReal(n0: BigInt, n1: BigInt , n2: BigInt): String = s"real_${n0}_${n1}_$n2"
 }
-
 
 
