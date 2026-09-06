@@ -330,6 +330,9 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
   var addInfoDetUni: AddInfoDetUni = AddInfoDetUni()
   var addInfoRewriting: Option[Clause] = None
   var addInfoRw: Seq[AddInfoRewrite] = Seq.empty
+  /** Raw clause after each maximal consecutive block using one rewrite parent. */
+  var addInfoRwBlockResults: Seq[Clause] = Seq.empty
+  var addInfoRwLiteralTransformation: LiteralTransformation = LiteralTransformation()
   var addInfoLiftEq: Seq[Seq[Int]] = Seq.empty
 }
 

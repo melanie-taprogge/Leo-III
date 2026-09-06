@@ -216,9 +216,9 @@ object FunRules {
       */
     def LiftedDecompStepResult(binders: Seq[LpTerm.Var[Level.Obj]], argTy: OlMonoType, resultTy: OlMonoType, lhsArg: LpTerm[Level.Obj], rhsArg: LpTerm[Level.Obj], lhsFun: LpTerm[Level.Obj], rhsFun: LpTerm[Level.Obj]): (lpLiteralInst, Vector[lpLiteralInst]) = {
       val funTy = OlMonoType.Fun(Seq(argTy,resultTy))
-      val initial = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(lhsFun,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(rhsFun,Seq(Arg.Explicit(rhsArg)))))
-      val residual = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,funTy), lpTermBuilder.lam(binders,lhsFun), lpTermBuilder.lam(binders,rhsFun))
-      val argLit = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
+      val initial = lpLiteralInst.equality(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(lhsFun,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(rhsFun,Seq(Arg.Explicit(rhsArg)))), polarity = false)
+      val residual = lpLiteralInst.equality(lpTermBuilder.funTy(binders,funTy), lpTermBuilder.lam(binders,lhsFun), lpTermBuilder.lam(binders,rhsFun), polarity = false)
+      val argLit = lpLiteralInst.equality(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg), polarity = false)
       (initial,Vector(residual,argLit))
     }
 
@@ -245,8 +245,8 @@ object FunRules {
       *   ↦ ¬((λ xs. s xs) = (λ xs. t xs))
       */
     def LiftedDecompSingleResult(binders: Seq[LpTerm.Var[Level.Obj]], argTy: OlMonoType, resultTy: OlMonoType, lhsArg: LpTerm[Level.Obj], rhsArg: LpTerm[Level.Obj], hd: LpTerm[Level.Obj]): (lpLiteralInst, Vector[lpLiteralInst]) = {
-      val initial = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(rhsArg)))))
-      val argLit = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
+      val initial = lpLiteralInst.equality(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(rhsArg)))), polarity = false)
+      val argLit = lpLiteralInst.equality(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg), polarity = false)
       (initial,Vector(argLit))
     }
   }

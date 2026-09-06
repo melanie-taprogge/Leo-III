@@ -87,10 +87,6 @@ object lpTermBuilder {
   def funTy(binders: Seq[Var[Level.Obj]], bodyTy: OlMonoType): OlMonoType =
     if (binders.isEmpty) bodyTy else OlMonoType.Fun(binders.map(olTy) :+ bodyTy)
 
-  /** Build a negated equational literal. */
-  def negEq(ty: OlMonoType, lhs: LpTerm[Level.Obj], rhs: LpTerm[Level.Obj]): lpLiteralInst =
-    lpLiteralInst(Not(Eq(ty,lhs,rhs)),polarity = false,eq = true)
-
   /** Build a proof type of the form `π premise -> π (l1 ∨ ... ∨ ln)`. */
   def proofArrow(premise: lpLiteralInst, derived: Seq[lpLiteralInst]): LpType =
     LpType.Arrow(LpType.Prf(premise.term), LpType.Prf(nAry.disjunction(derived.map(_.term))))
@@ -120,6 +116,21 @@ case class lpLiteralInst(term: LpTerm[Level.Obj], polarity: Boolean, eq: Boolean
     else term0
   }
 
+  /**
+    * The proposition represented by this literal without its polarity wrapper.
+    *
+    * A negative encoded literal is expected to store its proposition below one
+    * leading negation. `None` reports a malformed value instead of silently
+    * returning the already-negated term.
+    */
+  def unsignedTerm: Option[LpTerm[Level.Obj]] = {
+    if (polarity) Some(term)
+    else term match {
+      case LogicConst.Not(body) => Some(body)
+      case _ => None
+    }
+  }
+
   def flipIfEq: lpLiteralInst = {
     val strippedEq = stripLeadingNeg(term)
     strippedEq._1 match {
@@ -141,6 +152,21 @@ case class lpLiteralInst(term: LpTerm[Level.Obj], polarity: Boolean, eq: Boolean
 
   def termEq(lit2: lpLiteralInst) = {
     this.term == lit2.term
+  }
+}
+
+object lpLiteralInst {
+  /** Construct an equational literal; `sideType` is the type of `lhs` and `rhs`. */
+  def equality(sideType: OlMonoType,
+               lhs: LpTerm[Level.Obj],
+               rhs: LpTerm[Level.Obj],
+               polarity: Boolean): lpLiteralInst = {
+    val equality = LogicConst.Eq(sideType, lhs, rhs)
+    lpLiteralInst(
+      if (polarity) equality else LogicConst.Not(equality),
+      polarity,
+      eq = true
+    )
   }
 }
 

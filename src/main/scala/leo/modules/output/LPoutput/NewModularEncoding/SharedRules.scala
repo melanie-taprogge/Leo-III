@@ -2,14 +2,14 @@ package leo.modules.output.LPoutput.NewModularEncoding
 
 import leo.Out
 import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.eqImp
-import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.{lpSimp_botEq, lpSimp_topEq}
+import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.{lpSimp_eqBot, lpSimp_eqTop}
 import leo.modules.output.LPoutput.LpLibs.LeoTactics.EvalApp.removeBot
 import leo.modules.output.LPoutput.LpLibs.MetaTheorems.Inst.deleteBots
 import leo.modules.output.LPoutput.LpLibs.ND.Terms.eqSym
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Eval, Have, Refine, Rewrite, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Obj}
-import leo.modules.output.LPoutput.NewLpDatastructures.LpType.Prf
+import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{Pi, Prf}
 import leo.modules.output.LPoutput.NewLpDatastructures._
 import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig.depTyConStr
 
@@ -76,28 +76,29 @@ object EqualityProofSteps {
   /**
     * Prove the Boolean equality form of a non-equational rewrite-rule parent.
     *
-    * A positive proposition `P` becomes `⊤ = P`; a negative proposition becomes
-    * `⊥ = P`. The returned RHS is the Boolean term that the focused goal should
-    * be rewritten to.
+    * A positive proposition `P` becomes `P = ⊤`; a negative proposition becomes
+    * `P = ⊥`. This is the same forward orientation used by Leo's rewrite table.
     */
-  def provePropLiteralAsBooleanEquality(stepName: Name,
-                                        litTerm: LpTerm[Level.Obj],
-                                        polarity: Boolean,
-                                        sourceProof: LpTerm[Level.Obj]): RewriteRuleEqualityProof = {
+  def provePropLiteralAsForwardBooleanEquality(stepName: Name,
+                                               litTerm: LpTerm[Level.Obj],
+                                               polarity: Boolean,
+                                               sourceProof: LpTerm[Level.Obj],
+                                               binders: Seq[LpTerm.Var[Level.Meta]] = Seq.empty,
+                                               binderNames: Seq[Name] = Seq.empty): RewriteRuleEqualityProof = {
     val transformedRewriteEq =
-      if (polarity) LogicConst.Eq(HolBaseTypes.O, LogicConst.Top, litTerm)
-      else LogicConst.Eq(HolBaseTypes.O, LogicConst.Bot, litTerm)
+      if (polarity) LogicConst.Eq(HolBaseTypes.O, litTerm, LogicConst.Top)
+      else LogicConst.Eq(HolBaseTypes.O, litTerm, LogicConst.Bot)
     val rewriteRule =
-      if (polarity) lpSimp_topEq[Level.Meta]
-      else lpSimp_botEq[Level.Meta]
+      if (polarity) lpSimp_eqTop[Level.Meta]
+      else lpSimp_eqBot[Level.Meta]
     val rwRhs =
       if (polarity) LogicConst.Top
       else LogicConst.Bot
 
     val haveTransformStep = Have(
       stepName,
-      Prf(transformedRewriteEq),
-      Seq(
+      if (binders.isEmpty) Prf(transformedRewriteEq) else Pi(binders, Prf(transformedRewriteEq)),
+      AssumeStep.encAssumeStep(binderNames).map(Left(_)) ++ Seq(
         Left(Rewrite(None, rewriteRule)),
         Left(Refine(Obj(sourceProof)))
       )

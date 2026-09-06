@@ -4,7 +4,7 @@ import leo.Out
 import leo.datastructures.Clause.vars
 import leo.datastructures._
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
-import leo.modules.output.LPoutput.ImplicitTransformationUtil.{LiteralInfo2LiteralTransforamtion, litNorm2lpRule, verifySubstitutionLiteralNormalisazion}
+import leo.modules.output.LPoutput.ImplicitTransformationUtil.{LiteralInfo2LiteralTransforamtion, applyLiteralTransformations, verifySubstitutionLiteralNormalisazion}
 import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.mkExpandLit
 import leo.modules.output.LPoutput.LpLibs.FunRules.AsTerms.{DecompSingleResult, DecompStepRes, LiftedDecompSingleResult, LiftedDecompStepResult, mkDecompSingleObj, mkDecompStepObj, mkLiftDecompSingleBinderObj, mkLiftDecompStepBinderObj}
 import leo.modules.output.LPoutput.LpLibs.MetaTheorems
@@ -110,36 +110,6 @@ object Util {
     val substParent = parentCl.substitute(origTermSubst, origTypeSubst)
     val encSubstParent = lits2Lp(substParent.lits, ctxt.childVarMap, replaceUnknownVars = true)
     applyLiteralTransformations(encSubstParent, litTransf)
-  }
-
-  /**
-    * Apply recorded literal transformations to an encoded clause.
-    *
-    * The returned literals represent the post-substitution clause shape expected
-    * by the later proof target, while the rewrite proof for these transformations
-    * is still generated separately by `verifySubstitutionLiteralNormalisazion`.
-    */
-  def applyLiteralTransformations(encLits: Seq[lpLiteralInst], litTransf: LiteralTransformation): Option[Seq[lpLiteralInst]] = {
-    val normalisazionMap = litTransf.normalizedEq.toMap
-    if (litTransf.transforamtionsHappened) {
-      Some(encLits.zipWithIndex.map { taggedLit =>
-        val (lit, idx) = taggedLit
-        if (litTransf.flippedLits.contains(idx)) {
-          lit.flipIfEq
-        } else if (normalisazionMap.contains(idx)) {
-          val appliedRule = litNorm2lpRule(normalisazionMap(idx))
-          Out.lp_debug_info(s"trying to apply normalisazion $appliedRule to ${lit.term}")
-          val transformedLit = appliedRule.applyTo(lit)
-          Out.lp_debug_info(s"resulting in $transformedLit ")
-          transformedLit match {
-            case Some(res) => res
-            case None => return None
-          }
-        } else {
-          lit
-        }
-      })
-    } else Some(encLits)
   }
 
 }
@@ -749,7 +719,7 @@ object DetUniSimpEncoding {
                           val rawReplacement = lhsArgs.zip(rhsArgs).zip(fullTypeSpine.take(n)).map {
                             case ((lhsArg, rhsArg), argTy) =>
                               if (binders.isEmpty) DecompSingleResult(argTy, lhsArg, rhsArg)
-                              else lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
+                              else lpLiteralInst.equality(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg), polarity = false)
                           }
                           Out.lp_debug_info(s"callsite 1")
                           val localLitTransf = LiteralInfo2LiteralTransforamtion(mapping.LitTransf, 0)
