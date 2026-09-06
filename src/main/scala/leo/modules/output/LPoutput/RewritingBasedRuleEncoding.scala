@@ -99,6 +99,18 @@ object RewritingBasedRuleEncoding {
     }
 
     /**
+      * Move quantified rewrite-rule variables beyond every variable index used
+      * by the enclosing RewriteSimp proof.
+      */
+    def shiftRewriteRulesPast(rewriteRules: Seq[Clause],
+                              enclosingClauses: Seq[Clause]): Seq[Clause] = {
+      val termOffset = enclosingClauses.foldLeft(0) { case (currentMax, clause) =>
+        math.max(currentMax, Clause.maxImplicitlyBound(clause))
+      }
+      rewriteRules.map(_.substitute(Subst.shift(termOffset)))
+    }
+
+    /**
       * Reconstruct one rewrite-rule instance in the same variable space used by
       * Leo's matcher. Non-ground rewrite rules are shifted past the variables of
       * the rewritten clause before matching; the recorded substitution is
@@ -109,8 +121,7 @@ object RewritingBasedRuleEncoding {
       if (use.rewriteRule.typeVars.nonEmpty || use.origTypeSubst != Subst.id) {
         Left("RW: Polymorphic rewrite-rule instantiation not encoded")
       } else {
-        val termOffset = Clause.maxImplicitlyBound(rewrittenParent)
-        val shiftedRule = use.rewriteRule.substitute(Subst.shift(termOffset))
+        val shiftedRule = shiftRewriteRulesPast(Seq(use.rewriteRule), Seq(rewrittenParent)).head
         val instantiatedRule = shiftedRule.substitute(use.origTermSubst, use.origTypeSubst)
         val currentVarIndices = rewrittenParent.implicitlyBound.map(_._1).toSet
         val residualRuleVars = instantiatedRule.implicitlyBound.map(_._1).filterNot(currentVarIndices)
@@ -255,8 +266,29 @@ object RewriteSimpEncoding {
     if (groupedRewriteUses.exists(_.head.rewriteRule.typeVars.nonEmpty)) {
       return NotEncodable("RW: Polymorphic quantified rewrite rules are not encoded")
     }
-    val ctxt = initRewriteRuleCtxt(cl.cl, parent.cl, blockResults, Seq.empty, sourceBeforeParent, Seq.empty)
-    val EncRewriteCtx(encChild, encParent, encBlockResults, _, sharedVarMap, _, parentNameLpEnc0, _) = ctxt
+    val enclosingClauses = Seq(cl.cl, parent.cl) ++ blockResults
+    val shiftedRewriteRules = shiftRewriteRulesPast(
+      groupedRewriteUses.map(_.head.rewriteRule),
+      enclosingClauses
+    )
+    val ctxt = initRewriteRuleCtxt(
+      cl.cl,
+      parent.cl,
+      blockResults,
+      shiftedRewriteRules,
+      sourceBeforeParent,
+      rewriteRuleSourceNames
+    )
+    val EncRewriteCtx(
+      encChild,
+      encParent,
+      encBlockResults,
+      encRewriteRules,
+      sharedVarMap,
+      _,
+      parentNameLpEnc0,
+      rewriteRuleNamesLpEnc
+    ) = ctxt
 
     Out.lp_debug_info(s"Encoding application or RW-rule on ${sourceBeforeParent.value}")
     Out.lp_debug_info(s"Found ${rwCtx.rewriteUses.length} recorded rewrite rule use(s) in ${groupedRewriteUses.length} block(s)")
@@ -288,15 +320,14 @@ object RewriteSimpEncoding {
     // Prepare one quantified equality proof per uninterrupted rule block.
     // Concrete instantiation support is intentionally retained in this module
     // so it can be restored as a fallback without changing the recorded trace.
-    groupedRewriteUses.zip(rewriteRuleSourceNames).foreach {
-      case (rewriteUses, rewriteRuleName) =>
+    groupedRewriteUses.zip(encRewriteRules).zip(rewriteRuleNamesLpEnc).foreach {
+      case ((rewriteUses, encRewriteRule), rewriteRuleName) =>
         val rewriteUse = rewriteUses.head
-        val encRewriteRule = lpClauseInst.apply_to_set(Seq(rewriteUse.rewriteRule))._2.head
         val rewriteEq = rewriteUse.rewriteRule.lits.head
         val (nextState, forwardEqualities) = provideQuantifiedRewriteEqualityProof(
           rewriteEq,
           encRewriteRule,
-          proofName(rewriteRuleName),
+          rewriteRuleName,
           state
         )
         state = nextState.copy(forwardRewriteRules = nextState.forwardRewriteRules :+ forwardEqualities)
