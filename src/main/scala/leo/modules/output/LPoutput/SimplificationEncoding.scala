@@ -67,7 +67,7 @@ object SimplificationEncoding {
   // 20
   /** Rule (T : Set) (x : τ T): (π ((x = x) = ⊤)) */
   case object lpSimp_eq_idem extends lpNameRef {
-    override def name: lpConstantTerm = lpConstantTerm("=_idem")
+    override def name: lpConstantTerm = lpConstantTerm("=_refl")
     def instanciate(ty: lpOlType, term: Option[lpOlTerm]): lpFunctionApp = {
       val args = if (term.isDefined) Seq(ty, term.get) else Seq(ty)
       lpFunctionApp(name, args)
@@ -77,7 +77,7 @@ object SimplificationEncoding {
   // 21
   /** Rule (T : Set) (x : τ T): π (¬ (x = x) = ⊥) */
   case object lpSimp_negEq_idem extends lpNameRef {
-    override def name: lpConstantTerm = lpConstantTerm("¬=_idem")
+    override def name: lpConstantTerm = lpConstantTerm("¬=_irrefl")
 
     def instanciate(ty: lpOlType, term: Option[lpOlTerm]):lpFunctionApp ={
       val args = if (term.isDefined) Seq(ty, term.get) else Seq(ty)

@@ -11,7 +11,7 @@ object EqRules {
 
     // ** Names as Strings
     // Simplifications of PropExt.lp in Standard Library
-    private val negEq_idem = "¬=_idem"
+    private val negEq_idem = "¬=_irrefl"
     private val orBot = "∨⊥"
     private val eqTop = "=⊤"
     private val topEq = "⊤="
