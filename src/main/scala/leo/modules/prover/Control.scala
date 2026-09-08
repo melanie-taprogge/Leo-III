@@ -2327,7 +2327,9 @@ package inferenceControl {
         val vargen = freshVarGen(cl.cl)
         val rewriteRulesUsed: mutable.Set[AnnotatedClause] = mutable.Set.empty
         leo.Out.finest(s"vargen in rewriteSimp: ${vargen.existingVars.toString()}")
-        val rewrittenLits = cl.cl.lits.map(lit => rewriteLit(vargen, lit, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig))
+        val rewrittenLits = cl.cl.lits.zipWithIndex.map { case (lit, literalIndex) =>
+          rewriteLit(vargen, lit, literalIndex, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig)
+        }
         // extract normalized rewritten literals
         val newLits = rewrittenLits.map(_.ordered)
         val newCl = Clause(newLits)
@@ -2381,12 +2383,13 @@ package inferenceControl {
     }
     private def rewriteLit(vargen: FreshVarGen,
                            lit: Literal,
+                           literalIndex: Int,
                            groundRewriteTable: RewriteTable,
                            nonGroundRewriteTable: RewriteTable,
                            rewriteRulesUsed: mutable.Set[AnnotatedClause])(sig: Signature): RewrittenLiteral = {
       if (lit.equational) {
-        val rewrittenLeft = rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig)
-        val rewrittenRight = rewriteTerm(vargen, lit.right, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig)
+        val rewrittenLeft = rewriteTerm(vargen, lit.left, literalIndex, Literal.leftSide, Position.root, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig)
+        val rewrittenRight = rewriteTerm(vargen, lit.right, literalIndex, Literal.rightSide, Position.root, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig)
         val leftSteps = rewrittenLeft.steps.map { case (rewriteUse, leftAfterUse) =>
           rewriteUse -> Literal.mkLit(leftAfterUse, lit.right, lit.polarity, oriented = false)
         }
@@ -2397,7 +2400,7 @@ package inferenceControl {
         val (orderedLiteral, literalInfo) = Literal.mkOrdered(rewrittenLeft.result, rewrittenRight.result, lit.polarity)(sig)
         RewrittenLiteral(orderedLiteral, rawLiteral, literalInfo, leftSteps ++ rightSteps)
       } else {
-        val rewrittenTerm = rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig)
+        val rewrittenTerm = rewriteTerm(vargen, lit.left, literalIndex, Literal.leftSide, Position.root, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig)
         val steps = rewrittenTerm.steps.map { case (rewriteUse, termAfterUse) =>
           rewriteUse -> Literal(termAfterUse, lit.polarity)
         }
@@ -2409,6 +2412,9 @@ package inferenceControl {
 
     private def rewriteTerm(vargen: FreshVarGen,
                             term: Term,
+                            literalIndex: Int,
+                            side: Literal.Side,
+                            position: Position,
                             groundRewriteTable: RewriteTable,
                             nonGroundRewriteTable: RewriteTable,
                             rewriteRulesUsed: mutable.Set[AnnotatedClause],
@@ -2420,7 +2426,8 @@ package inferenceControl {
         val (res, origin) = groundRewriteTable(term)
         leo.Out.finest(s"Yeah! replace ${term.pretty(sig)} by ${res.pretty(sig)}")
         rewriteRulesUsed += origin
-        val rewriteUse = AddInfoRewrite(origin.id, origin.cl)
+        val occurrence = RewriteOccurrence(literalIndex, side, position, term, res)
+        val rewriteUse = AddInfoRewrite(origin.id, origin.cl, occurrence = Some(occurrence))
         RewriteTrace(res, Vector(rewriteUse -> res))
       } else {
         val toFind = nonGroundRewriteTable.keysIterator
@@ -2446,7 +2453,8 @@ package inferenceControl {
               leo.Out.finest(s"via subst ${termSubst.pretty}")
               if (term != result) {
                 rewriteRulesUsed += origin
-                val rewriteUse = AddInfoRewrite(origin.id, origin.cl, termSubst, typeSubst)
+                val occurrence = RewriteOccurrence(literalIndex, side, position, term, result)
+                val rewriteUse = AddInfoRewrite(origin.id, origin.cl, termSubst, typeSubst, Some(occurrence))
                 return RewriteTrace(result, Vector(rewriteUse -> result))
               } else {
                 leo.Out.finest(s"...ignored")
@@ -2458,7 +2466,7 @@ package inferenceControl {
         term match {
           case Bound(_,_) | Symbol(_) | Integer(_) | Rational(_, _) | Real(_, _, _) => RewriteTrace(term, Vector.empty)
           case hd ∙ args =>
-            val rewrittenHd = rewriteTerm(vargen, hd, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth)(sig)
+            val rewrittenHd = rewriteTerm(vargen, hd, literalIndex, side, position.headPos, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth)(sig)
             val (tyArgs, termArgs) = partitionArgs(args)
 
             def rebuild(head: Term, arguments: Seq[Term]): Term =
@@ -2471,7 +2479,8 @@ package inferenceControl {
               applicationSteps += rewriteUse -> rebuild(headAfterUse, currentArgs)
             }
             termArgs.indices.foreach { argIndex =>
-              val rewrittenArg = rewriteTerm(vargen, termArgs(argIndex), groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth)(sig)
+              val argumentPosition = position.argPos(tyArgs.length + argIndex + 1)
+              val rewrittenArg = rewriteTerm(vargen, termArgs(argIndex), literalIndex, side, argumentPosition, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth)(sig)
               rewrittenArg.steps.foreach { case (rewriteUse, argAfterUse) =>
                 applicationSteps += rewriteUse -> rebuild(currentHead, currentArgs.updated(argIndex, argAfterUse))
               }
@@ -2479,7 +2488,7 @@ package inferenceControl {
             }
             RewriteTrace(rebuild(currentHead, currentArgs), applicationSteps.result())
           case ty :::> body => /* term */
-            val rewrittenBody = rewriteTerm(vargen, body, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth + 1)(sig)
+            val rewrittenBody = rewriteTerm(vargen, body, literalIndex, side, position.abstrPos, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth + 1)(sig)
             RewriteTrace(
               Term.mkTermAbs(ty, rewrittenBody.result),
               rewrittenBody.steps.map { case (rewriteUse, bodyAfterUse) =>

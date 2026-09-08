@@ -204,11 +204,19 @@ case class AddInfoPara(withClause: Clause,
                        preSimpClause: Clause,
                        typeSubstNeeded: Boolean)
 
+/** Exact occurrence changed by one application of a rewrite rule. */
+case class RewriteOccurrence(literalIndex: Int,
+                             side: Literal.Side,
+                             position: Position,
+                             redex: Term,
+                             contractum: Term)
+
 /** One ordered rewrite application and the exact proof parent justifying it. */
 case class AddInfoRewrite(rewriteRuleParentId: Long,
                           rewriteRule: Clause,
                           origTermSubst: Subst = Subst.id,
-                          origTypeSubst: Subst = Subst.id)
+                          origTypeSubst: Subst = Subst.id,
+                          occurrence: Option[RewriteOccurrence] = None)
 
 sealed trait UniTermRhs
 case class UniTermByTerm(term: Term,
