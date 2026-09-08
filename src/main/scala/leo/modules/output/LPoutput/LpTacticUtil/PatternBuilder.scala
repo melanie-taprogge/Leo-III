@@ -1,10 +1,127 @@
 package leo.modules.output.LPoutput.LpTacticUtil
 
+import leo.datastructures.Term.{:::>, TypeLambda, ∙}
+import leo.datastructures.{Position, Term}
+import leo.modules.HOLSignature.{&, Choice, Exists, Forall, Impl, Not, TyForall, ===, !===, |||}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Wildcard}
+import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpTerm, OlMonoType, QName, SymRef, nAry}
 
 object PatternBuilder {
+
+  /** A Lambdapi pattern focused at one Leo term position and the selected Leo subterm. */
+  final case class PositionPattern(pattern: LpTerm[Level.Obj], subterm: Term)
+
+  private val RewriteUnderBinderReason = "Rewriting under binders not possible"
+
+  /**
+    * Translate a Leo term position into a Lambdapi rewrite pattern.
+    *
+    * The returned pattern contains exactly one occurrence of `patternVar`, at
+    * the position selected by `position`; all other term components are
+    * wildcards. Explicit type arguments are retained because they occupy
+    * positions in Leo's application spine and must remain well-typed in the
+    * generated Lambdapi pattern.
+    *
+    * Positions below object- or type-level binders are currently rejected:
+    * Lambdapi patterns for those occurrences require binder-aware pattern
+    * variables, which the output encoding cannot yet express safely.
+    */
+  def leoPosition2LpPattern(term: Term,
+                            position: Position,
+                            patternVar: LpTerm[Level.Obj] = Const[Level.Obj](SymRef.LP(QName.local("x")))): Either[String, PositionPattern] = {
+    if (position == Position.root) {
+      Right(PositionPattern(patternVar, term))
+    } else {
+      val currentPosition = position.posHead
+
+      // if position.tail can be encoded as a a pattern, take the result and wrap it. 
+      def descend(selected: Term,
+                  wrap: LpTerm[Level.Obj] => LpTerm[Level.Obj]): Either[String, PositionPattern] =
+        leoPosition2LpPattern(selected, position.tail, patternVar).map { result =>
+          result.copy(pattern = wrap(result.pattern))
+        }
+
+      def invalidPosition(expected: String): Left[String, PositionPattern] =
+        Left(s"Invalid Leo position ${position.pretty} in ${term.pretty}: expected $expected")
+
+      term match {
+        case left ||| right =>
+          currentPosition match {
+            case 1 => descend(left, LogicConst.Or(_, Wildcard[Level.Obj]()))
+            case 2 => descend(right, LogicConst.Or(Wildcard[Level.Obj](), _))
+            case _ => invalidPosition("disjunction argument 1 or 2")
+          }
+
+        case left & right =>
+          currentPosition match {
+            case 1 => descend(left, LogicConst.And(_, Wildcard[Level.Obj]()))
+            case 2 => descend(right, LogicConst.And(Wildcard[Level.Obj](), _))
+            case _ => invalidPosition("conjunction argument 1 or 2")
+          }
+
+        case Impl(left, right) =>
+          currentPosition match {
+            case 1 => descend(left, LogicConst.Imp(_, Wildcard[Level.Obj]()))
+            case 2 => descend(right, LogicConst.Imp(Wildcard[Level.Obj](), _))
+            case _ => invalidPosition("implication argument 1 or 2")
+          }
+
+        // Equality has one explicit type argument before its two term
+        // arguments, hence the Leo positions 2 and 3.
+        case left === right =>
+          val encodedType = type2LP(left.ty)
+          currentPosition match {
+            case 2 => descend(left, LogicConst.Eq(encodedType, _, Wildcard[Level.Obj]()))
+            case 3 => descend(right, LogicConst.Eq(encodedType, Wildcard[Level.Obj](), _))
+            case _ => invalidPosition("equality argument 2 or 3")
+          }
+
+        case left !=== right =>
+          val encodedType = type2LP(left.ty)
+          currentPosition match {
+            case 2 => descend(left, pattern => LogicConst.Not(LogicConst.Eq(encodedType, pattern, Wildcard[Level.Obj]())))
+            case 3 => descend(right, pattern => LogicConst.Not(LogicConst.Eq(encodedType, Wildcard[Level.Obj](), pattern)))
+            case _ => invalidPosition("disequality argument 2 or 3")
+          }
+
+        case Not(body) =>
+          if (currentPosition == 1) descend(body, LogicConst.Not.apply)
+          else invalidPosition("negation argument 1")
+
+        case _ :::> _ | Forall(_) | Exists(_) | Choice(_) | TyForall(_) | TypeLambda(_) =>
+          Left(RewriteUnderBinderReason)
+
+        case head ∙ args =>
+          val wildcardArguments: Seq[Arg[Level.Obj]] = args.map {
+            case Left(_) => Arg.Explicit(Wildcard[Level.Obj]())
+            case Right(ty) => Arg.ExplicitTypeArg(type2LP(ty))
+          }
+
+          if (currentPosition == 0) {
+            descend(head, pattern => LpTerm.App[Level.Obj](pattern, wildcardArguments))
+          } else if (currentPosition > 0 && currentPosition <= args.length) {
+            args(currentPosition - 1) match {
+              case Left(argument) =>
+                descend(argument, pattern =>
+                  LpTerm.App[Level.Obj](
+                    Wildcard[Level.Obj](),
+                    wildcardArguments.updated(currentPosition - 1, Arg.Explicit(pattern))
+                  )
+                )
+              case Right(_) =>
+                Left(s"Leo position ${position.pretty} points into a type argument; term rewriting there is not encodable")
+            }
+          } else {
+            invalidPosition(s"application head 0 or argument between 1 and ${args.length}")
+          }
+
+        case _ =>
+          invalidPosition("a subterm position")
+      }
+    }
+  }
 
   /**
     * Wrapper for additional information concerning the properties of the literal necessary to generate rewrite pattern for entire clauses
