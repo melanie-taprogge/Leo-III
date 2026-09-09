@@ -1,7 +1,7 @@
 package leo.modules.output.LPoutput.LpTacticUtil
 
 import leo.datastructures.Term.{:::>, TypeLambda, ∙}
-import leo.datastructures.{Position, Term}
+import leo.datastructures.{Clause, Literal, Position, RewriteOccurrence, Term}
 import leo.modules.HOLSignature.{&, Choice, Exists, Forall, Impl, Not, TyForall, ===, !===, |||}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Wildcard}
@@ -14,11 +14,12 @@ object PatternBuilder {
   final case class PositionPattern(pattern: LpTerm[Level.Obj], subterm: Term)
 
   private val RewriteUnderBinderReason = "Rewriting under binders not possible"
+  private val DefaultPatternHole = Const[Level.Obj](SymRef.LP(QName.local("x")))
 
   /**
     * Translate a Leo term position into a Lambdapi rewrite pattern.
     *
-    * The returned pattern contains exactly one occurrence of `patternVar`, at
+    * The returned pattern contains exactly one occurrence of `targetPattern`, at
     * the position selected by `position`; all other term components are
     * wildcards. Explicit type arguments are retained because they occupy
     * positions in Leo's application spine and must remain well-typed in the
@@ -30,16 +31,16 @@ object PatternBuilder {
     */
   def leoPosition2LpPattern(term: Term,
                             position: Position,
-                            patternVar: LpTerm[Level.Obj] = Const[Level.Obj](SymRef.LP(QName.local("x")))): Either[String, PositionPattern] = {
+                            targetPattern: LpTerm[Level.Obj] = DefaultPatternHole): Either[String, PositionPattern] = {
     if (position == Position.root) {
-      Right(PositionPattern(patternVar, term))
+      Right(PositionPattern(targetPattern, term))
     } else {
       val currentPosition = position.posHead
 
-      // if position.tail can be encoded as a a pattern, take the result and wrap it. 
+      // if position.tail can be encoded as a a pattern, take the result and wrap it.
       def descend(selected: Term,
                   wrap: LpTerm[Level.Obj] => LpTerm[Level.Obj]): Either[String, PositionPattern] =
-        leoPosition2LpPattern(selected, position.tail, patternVar).map { result =>
+        leoPosition2LpPattern(selected, position.tail, targetPattern).map { result =>
           result.copy(pattern = wrap(result.pattern))
         }
 
@@ -124,6 +125,52 @@ object PatternBuilder {
   }
 
   /**
+    * Build a Lambdapi rewrite pattern for one recorded RewriteSimp occurrence.
+    *
+    * The recorded position is relative to one side of one Leo literal. This
+    * method restores the surrounding literal and clause structure while keeping
+    * every component outside the selected path as a wildcard. `targetPattern`
+    * describes what should be placed at the recorded occurrence; it is `x` for
+    * an ordinary rewrite and may, for example, be `x _` when a lifted equality
+    * rewrites the head of the recorded application.
+    */
+  def generateClausePositionPattern(clause: Clause,
+                                    occurrence: RewriteOccurrence,
+                                    targetPattern: RewritePattern = RewritePattern(DefaultPatternHole, DefaultPatternHole)): Either[String, RewritePattern] = {
+    if (!clause.lits.isDefinedAt(occurrence.literalIndex)) {
+      Left(s"RW: Recorded literal index ${occurrence.literalIndex} is out of bounds for clause of length ${clause.lits.length}")
+    } else {
+      val literal = clause.lits(occurrence.literalIndex)
+      if (!literal.equational && occurrence.side == Literal.rightSide) {
+        Left("RW: Recorded a right-side rewrite occurrence in a non-equational literal")
+      } else {
+        val selectedSide = Literal.selectSide(literal, occurrence.side)
+        leoPosition2LpPattern(selectedSide, occurrence.position, targetPattern.LpTerm).flatMap { positionPattern =>
+          if (positionPattern.subterm != occurrence.redex) {
+            Left(s"RW: Recorded redex does not match the subterm at position ${occurrence.position.pretty}")
+          } else {
+            val sidePattern = if (literal.equational) {
+              val encodedType = type2LP(literal.left.ty)
+              if (occurrence.side == Literal.leftSide) {
+                LogicConst.Eq(encodedType, positionPattern.pattern, Wildcard[Level.Obj]())
+              } else {
+                LogicConst.Eq(encodedType, Wildcard[Level.Obj](), positionPattern.pattern)
+              }
+            } else positionPattern.pattern
+            val literalPattern = if (literal.polarity) sidePattern else LogicConst.Not(sidePattern)
+            Right(generateClausePattern(
+              occurrence.literalIndex,
+              clause.lits.length,
+              literalPattern,
+              targetPattern.hole
+            ))
+          }
+        }
+      }
+    }
+  }
+
+  /**
     * Wrapper for additional information concerning the properties of the literal necessary to generate rewrite pattern for entire clauses
     *
     * @param position The index of the literal in the clause
@@ -189,12 +236,18 @@ object PatternBuilder {
 
   /** Enclose the pattern given in a Lambdapi-Rewrite-Pattern in an equality, useful when proving steps like "clause A = Clause B" */
   def embedPatternInEq(pat: RewritePattern, side: Side): RewritePattern = {
-    val term = pat.LpTerm
-    val embTerm = side match {
-      case Side.Left => LogicConst.Eq(HolBaseTypes.O, term, Wildcard[Level.Obj]())
-      case Side.Right => LogicConst.Eq(HolBaseTypes.O, Wildcard[Level.Obj](), term)
+    embedPatternInBinaryConnective(pat, side, LogicConst.Eq(HolBaseTypes.O, _, _))
+  }
+
+  /** Enclose a rewrite pattern on one selected side of a binary connective. */
+  def embedPatternInBinaryConnective(pat: RewritePattern,
+                                     side: Side,
+                                     connective: (LpTerm[Level.Obj], LpTerm[Level.Obj]) => LpTerm[Level.Obj]): RewritePattern = {
+    val embeddedTerm = side match {
+      case Side.Left => connective(pat.LpTerm, Wildcard[Level.Obj]())
+      case Side.Right => connective(Wildcard[Level.Obj](), pat.LpTerm)
     }
-    RewritePattern(embTerm, pat.hole)
+    RewritePattern(embeddedTerm, pat.hole)
   }
 
   /**

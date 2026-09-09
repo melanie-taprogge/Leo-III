@@ -65,6 +65,48 @@ object lpTermBuilder {
   def app(f: LpTerm[Level.Obj], args: Seq[LpTerm[Level.Obj]]): LpTerm[Level.Obj] =
     if (args.isEmpty) f else LpTerm.App(f,args.map(Arg.Explicit[Level.Obj]))
 
+  /** Substitute a free, named object-level variable without crossing a same-named binder. */
+  def substituteVariable(term: LpTerm[Level.Obj],
+                         variable: Name,
+                         replacement: LpTerm[Level.Obj]): LpTerm[Level.Obj] = term match {
+    case current @ LpTerm.Var(name, _) => if (name == variable) replacement else current
+    case current @ LpTerm.Const(_) => current
+    case current @ LpTerm.Wildcard() => current
+    case current @ LpTerm.TptpInt(_) => current
+    case current @ LpTerm.LpInt(_) => current
+    case current @ LpTerm.TptpRational(_, _) => current
+    case current @ LpTerm.TptpReal(_, _, _) => current
+    case LpTerm.LpList(elements) =>
+      LpTerm.LpList(elements.map(substituteVariable(_, variable, replacement)))
+    case current @ LpTerm.Lam((binderName, _), _) if binderName == variable => current
+    case LpTerm.Lam(binder, body) =>
+      LpTerm.Lam(binder, substituteVariable(body, variable, replacement))
+    case LpTerm.App(function, args) =>
+      LpTerm.App(
+        substituteVariable(function, variable, replacement),
+        args.map {
+          case Arg.Explicit(argument) => Arg.Explicit(substituteVariable(argument, variable, replacement))
+          case Arg.Implicit(argument) => Arg.Implicit(substituteVariable(argument, variable, replacement))
+          case typeArgument => typeArgument
+        }
+      )
+  }
+
+  /** Apply arguments and beta-reduce the leading object-level lambda binders. */
+  def betaApply(function: LpTerm[Level.Obj],
+                args: Seq[Arg[Level.Obj]]): LpTerm[Level.Obj] = {
+    def applyRemaining(current: LpTerm[Level.Obj], remaining: Seq[Arg[Level.Obj]]): LpTerm[Level.Obj] =
+      (current, remaining) match {
+        case (LpTerm.Lam((binderName, _), body), Arg.Explicit(argument) +: tail) =>
+          applyRemaining(substituteVariable(body, binderName, argument), tail)
+        case (LpTerm.Lam((binderName, _), body), Arg.Implicit(argument) +: tail) =>
+          applyRemaining(substituteVariable(body, binderName, argument), tail)
+        case (_, Seq()) => current
+        case _ => LpTerm.App(current, remaining)
+      }
+    applyRemaining(function, args)
+  }
+
   /** Reference to a proof-local Lambdapi symbol. */
   def localObj(name: Name): LpTerm[Level.Obj] =
     LpTerm.Const[Level.Obj](SymRef.LP(QName.local(name.value)))
