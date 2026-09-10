@@ -13,6 +13,20 @@ object PatternBuilder {
   /** A Lambdapi pattern focused at one Leo term position and the selected Leo subterm. */
   final case class PositionPattern(pattern: LpTerm[Level.Obj], subterm: Term)
 
+  /**
+    * The surrounding pattern of one recorded clause position, with the concrete
+    * pattern at that position left open until the rewrite form has been chosen.
+    */
+  final case class ClausePositionPatternContext(selectedTerm: Term,
+                                                plugTerm: LpTerm[Level.Obj] => LpTerm[Level.Obj]) {
+    def plug(targetPattern: RewritePattern): RewritePattern =
+      RewritePattern(plugTerm(targetPattern.LpTerm), targetPattern.hole)
+  }
+
+  /** The surrounding pattern of one term position, before its target is supplied. */
+  private final case class PositionPatternContext(plugTerm: LpTerm[Level.Obj] => LpTerm[Level.Obj],
+                                                  subterm: Term)
+
   private val RewriteUnderBinderReason = "Rewriting under binders not possible"
   private val DefaultPatternHole = Const[Level.Obj](SymRef.LP(QName.local("x")))
 
@@ -31,20 +45,26 @@ object PatternBuilder {
     */
   def leoPosition2LpPattern(term: Term,
                             position: Position,
-                            targetPattern: LpTerm[Level.Obj] = DefaultPatternHole): Either[String, PositionPattern] = {
+                            targetPattern: LpTerm[Level.Obj] = DefaultPatternHole): Either[String, PositionPattern] =
+    leoPosition2LpPatternContext(term, position).map { context =>
+      PositionPattern(context.plugTerm(targetPattern), context.subterm)
+    }
+
+  private def leoPosition2LpPatternContext(term: Term,
+                                           position: Position): Either[String, PositionPatternContext] = {
     if (position == Position.root) {
-      Right(PositionPattern(targetPattern, term))
+      Right(PositionPatternContext(identity, term))
     } else {
       val currentPosition = position.posHead
 
       // if position.tail can be encoded as a a pattern, take the result and wrap it.
       def descend(selected: Term,
-                  wrap: LpTerm[Level.Obj] => LpTerm[Level.Obj]): Either[String, PositionPattern] =
-        leoPosition2LpPattern(selected, position.tail, targetPattern).map { result =>
-          result.copy(pattern = wrap(result.pattern))
+                  wrap: LpTerm[Level.Obj] => LpTerm[Level.Obj]): Either[String, PositionPatternContext] =
+        leoPosition2LpPatternContext(selected, position.tail).map { result =>
+          PositionPatternContext(target => wrap(result.plugTerm(target)), result.subterm)
         }
 
-      def invalidPosition(expected: String): Left[String, PositionPattern] =
+      def invalidPosition(expected: String): Left[String, PositionPatternContext] =
         Left(s"Invalid Leo position ${position.pretty} in ${term.pretty}: expected $expected")
 
       term match {
@@ -125,6 +145,50 @@ object PatternBuilder {
   }
 
   /**
+    * Validate and prepare the context surrounding one recorded RewriteSimp
+    * occurrence without yet deciding the concrete pattern used at that site.
+    */
+  def prepareClausePositionPattern(clause: Clause,
+                                   occurrence: RewriteOccurrence): Either[String, ClausePositionPatternContext] = {
+    if (!clause.lits.isDefinedAt(occurrence.literalIndex)) {
+      Left(s"RW: Recorded literal index ${occurrence.literalIndex} is out of bounds for clause of length ${clause.lits.length}")
+    } else {
+      val literal = clause.lits(occurrence.literalIndex)
+      if (!literal.equational && occurrence.side == Literal.rightSide) {
+        Left("RW: Recorded a right-side rewrite occurrence in a non-equational literal")
+      } else {
+        val selectedSide = Literal.selectSide(literal, occurrence.side)
+        leoPosition2LpPatternContext(selectedSide, occurrence.position).flatMap { positionContext =>
+          if (positionContext.subterm != occurrence.redex) {
+            Left(s"RW: Recorded redex does not match the subterm at position ${occurrence.position.pretty}")
+          } else {
+            val wrapSide: LpTerm[Level.Obj] => LpTerm[Level.Obj] = if (literal.equational) {
+              val encodedType = type2LP(literal.left.ty)
+              if (occurrence.side == Literal.leftSide) {
+                term => LogicConst.Eq(encodedType, term, Wildcard[Level.Obj]())
+              } else {
+                term => LogicConst.Eq(encodedType, Wildcard[Level.Obj](), term)
+              }
+            } else identity
+
+            val plugTerm = (target: LpTerm[Level.Obj]) => {
+              val sidePattern = wrapSide(positionContext.plugTerm(target))
+              val literalPattern = if (literal.polarity) sidePattern else LogicConst.Not(sidePattern)
+              generateClausePattern(
+                occurrence.literalIndex,
+                clause.lits.length,
+                literalPattern,
+                DefaultPatternHole
+              ).LpTerm
+            }
+            Right(ClausePositionPatternContext(positionContext.subterm, plugTerm))
+          }
+        }
+      }
+    }
+  }
+
+  /**
     * Build a Lambdapi rewrite pattern for one recorded RewriteSimp occurrence.
     *
     * The recorded position is relative to one side of one Leo literal. This
@@ -136,39 +200,8 @@ object PatternBuilder {
     */
   def generateClausePositionPattern(clause: Clause,
                                     occurrence: RewriteOccurrence,
-                                    targetPattern: RewritePattern = RewritePattern(DefaultPatternHole, DefaultPatternHole)): Either[String, RewritePattern] = {
-    if (!clause.lits.isDefinedAt(occurrence.literalIndex)) {
-      Left(s"RW: Recorded literal index ${occurrence.literalIndex} is out of bounds for clause of length ${clause.lits.length}")
-    } else {
-      val literal = clause.lits(occurrence.literalIndex)
-      if (!literal.equational && occurrence.side == Literal.rightSide) {
-        Left("RW: Recorded a right-side rewrite occurrence in a non-equational literal")
-      } else {
-        val selectedSide = Literal.selectSide(literal, occurrence.side)
-        leoPosition2LpPattern(selectedSide, occurrence.position, targetPattern.LpTerm).flatMap { positionPattern =>
-          if (positionPattern.subterm != occurrence.redex) {
-            Left(s"RW: Recorded redex does not match the subterm at position ${occurrence.position.pretty}")
-          } else {
-            val sidePattern = if (literal.equational) {
-              val encodedType = type2LP(literal.left.ty)
-              if (occurrence.side == Literal.leftSide) {
-                LogicConst.Eq(encodedType, positionPattern.pattern, Wildcard[Level.Obj]())
-              } else {
-                LogicConst.Eq(encodedType, Wildcard[Level.Obj](), positionPattern.pattern)
-              }
-            } else positionPattern.pattern
-            val literalPattern = if (literal.polarity) sidePattern else LogicConst.Not(sidePattern)
-            Right(generateClausePattern(
-              occurrence.literalIndex,
-              clause.lits.length,
-              literalPattern,
-              targetPattern.hole
-            ))
-          }
-        }
-      }
-    }
-  }
+                                    targetPattern: RewritePattern = RewritePattern(DefaultPatternHole, DefaultPatternHole)): Either[String, RewritePattern] =
+    prepareClausePositionPattern(clause, occurrence).map(_.plug(targetPattern))
 
   /**
     * Wrapper for additional information concerning the properties of the literal necessary to generate rewrite pattern for entire clauses

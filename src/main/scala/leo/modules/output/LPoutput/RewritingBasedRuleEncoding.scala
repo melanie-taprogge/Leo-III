@@ -440,6 +440,13 @@ object RewriteSimpEncoding {
     val rewriteEqClause = rewriteUse.instantiatedRule
     assert(rewriteEqClause.lits.length == 1, s"trying to encode RW rule application with RW clause of length ${rewriteEqClause.lits.length}")
 
+    val patternContext = PatternBuilder.prepareClausePositionPattern(rewrittenParent, rewriteUse.occurrence) match {
+      case Left(reason) => return Left(reason)
+      case Right(context) => context
+    }
+    // TODO: Once Lambdapi supports rewriting under binders, collect the bound-variable context while
+    // constructing this pattern so it can be used to encode the recorded redex and contractum below.
+
     val rewriteEq = rewriteEqClause.lits.head
     val residualBinders = rewriteUse.residualRuleVars.map { case (index, ty) =>
       var2Lp(index, ty, sharedVarMap)
@@ -481,18 +488,13 @@ object RewriteSimpEncoding {
           (nextState, liftedProof)
         } else (state2, pointwise.proof)
 
-        PatternBuilder.generateClausePositionPattern(
-          rewrittenParent,
-          rewriteUse.occurrence,
-          targetPattern
-        ).map { clausePattern =>
-          val implicationPattern = PatternBuilder.embedPatternInBinaryConnective(
-            clausePattern,
-            Side.Left,
-            LogicConst.Imp.apply
-          )
-          (state3, FocusedRewrite(implicationPattern, selectedProof))
-        }
+        val clausePattern = patternContext.plug(targetPattern)
+        val implicationPattern = PatternBuilder.embedPatternInBinaryConnective(
+          clausePattern,
+          Side.Left,
+          LogicConst.Imp.apply
+        )
+        Right((state3, FocusedRewrite(implicationPattern, selectedProof)))
     }
   }
 
