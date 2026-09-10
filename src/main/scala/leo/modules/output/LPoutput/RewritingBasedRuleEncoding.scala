@@ -61,20 +61,21 @@ object RewritingBasedRuleEncoding {
       */
     def initRewriteRuleCtxt(childCl: Clause,
                             parentCl: Clause,
-                            blockResultCls: Seq[Clause],
+                            blockResultCls: Seq[RawClause],
                             rewriteRuleCls: Seq[Clause],
                             parentNameLpEnc0: Name,
                             rewriteRuleNameLpEnc0: Seq[Name]): EncRewriteCtx = {
       require(rewriteRuleCls.length == rewriteRuleNameLpEnc0.length,
         "Each rewrite-rule clause must have a corresponding Lambdapi proof name")
 
-      val allClauses = Seq(childCl, parentCl) ++ blockResultCls ++ rewriteRuleCls
-      val (sharedVarMap, encClauses) = lpClauseInst.apply_to_set(allClauses)
+      val allClauses = Seq(childCl, parentCl) ++ rewriteRuleCls
+      val rawClauseVars = blockResultCls.flatMap(_.implicitlyBound)
+      val (sharedVarMap, encClauses) = lpClauseInst.apply_to_set(allClauses, rawClauseVars)
 
       val encChild = encClauses.head
       val encParent = encClauses(1)
-      val encBlockResults = encClauses.slice(2, 2 + blockResultCls.length)
-      val encRewriteRules = encClauses.drop(2 + blockResultCls.length)
+      val encBlockResults = blockResultCls.map(RawClauseEncoding.clause2Lp(_, sharedVarMap))
+      val encRewriteRules = encClauses.drop(2)
       val childVarMap = sharedVarMap.view.filterKeys(vars(childCl).distinct).toMap
 
       EncRewriteCtx(
@@ -362,6 +363,12 @@ object RewriteSimpEncoding {
 
     val rewriteConclusion = nAry.disjunction(beforeLiteralNormalisation.map(_.term))
     if (encBlockResults.lastOption.forall(_.term != rewriteConclusion)) {
+      Out.lp_debug_info(    s"rewrite Conclusion: ${Renderer.termP(rewriteConclusion, RenderOptions(),0,_sig)}")
+      if (encBlockResults.lastOption.isDefined) {
+          Out.lp_debug_info(s"last Block result:  ${Renderer.termP(encBlockResults.lastOption.get.term, RenderOptions(),0,_sig)}")
+        } else {
+        Out.lp_debug_info(s"No result for rewrite block found")
+      }
       return NotEncodable("RW: Last recorded rewrite block does not produce the clause before literal normalization")
     }
     val blockStarts = encParent +: encBlockResults.dropRight(1)

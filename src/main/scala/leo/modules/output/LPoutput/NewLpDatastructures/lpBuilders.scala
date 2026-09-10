@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 
 import LogicConst._
 import leo.Out
-import leo.datastructures.{Clause, fuseMaps}
+import leo.datastructures.{Clause, Type, fuseMaps}
 import leo.modules.output.LPoutput.NewLpDatastructures.Lifting.{ProofTerm, liftOlVars}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.Pi
@@ -259,7 +259,16 @@ object lpClauseInst {
     * clause instances and a map of all implicitly bound variables.
     */
   def apply_to_set(cls: Seq[Clause]): (Map[Int, String], Seq[lpClauseInst]) = {
-    val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
+    apply_to_set(cls, Seq.empty)
+  }
+
+  /**
+    * Encode clauses with additional variables that must use the same Lambdapi
+    * names, for example variables occurring in raw proof-trace clauses.
+    */
+  def apply_to_set(cls: Seq[Clause],
+                   additionalImplicitlyBound: Seq[(Int, Type)]): (Map[Int, String], Seq[lpClauseInst]) = {
+    val allImpBoundVars = (cls.flatMap(_.implicitlyBound) ++ additionalImplicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
     val encCls = cls.map(cl => apply_to_single(cl, fullBvarsMap))
     (fullBvarsMap, encCls)

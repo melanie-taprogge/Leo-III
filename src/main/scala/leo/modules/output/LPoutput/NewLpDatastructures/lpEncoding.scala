@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 
 import leo.Out
 import leo.datastructures.Signature.Key
-import leo.datastructures.{Clause, Literal, Term, Type}
+import leo.datastructures.{Clause, Literal, RawClause, RawEqLiteral, RawLiteral, RawNonEqLiteral, Term, Type}
 import leo.datastructures.Type._
 import leo.datastructures.Term._
 import leo.modules.HOLSignature._
@@ -377,6 +377,35 @@ object ClauseEncoding {
 
 }
 
+/** Translation of raw clauses that must retain pre-normalization literal shape. */
+object RawClauseEncoding {
+  import TypeEncoding.type2LP
+  import TermEncoding.{term2LP, vars2Lp}
+
+  def lit2Lp(lit: RawLiteral, bVarMap: Map[Int, String]): lpLiteralInst = lit match {
+    case RawEqLiteral(left, right, polarity) =>
+      lpLiteralInst.equality(
+        type2LP(left.ty),
+        term2LP(left, bVarMap),
+        term2LP(right, bVarMap),
+        polarity
+      )
+    case RawNonEqLiteral(term, polarity) =>
+      val encodedTerm = term2LP(term, bVarMap)
+      lpLiteralInst(
+        if (polarity) encodedTerm else LogicConst.Not(encodedTerm),
+        polarity,
+        eq = false
+      )
+  }
+
+  def clause2Lp(clause: RawClause, bVarMap: Map[Int, String]): lpClauseInst = {
+    val encodedLits = clause.lits.map(lit2Lp(_, bVarMap))
+    val encodedVars = vars2Lp(clause.implicitlyBound, bVarMap).map(Left(_))
+    lpClauseInst(encodedLits, encodedVars)
+  }
+}
+
   // ** Encode definitions
   object DefEncoding {
     import TypeEncoding.type2LP
@@ -418,8 +447,6 @@ object ClauseEncoding {
     }
 
   }
-
-
 
 
 
