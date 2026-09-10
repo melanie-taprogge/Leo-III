@@ -587,7 +587,7 @@ object DetUniSimpEncoding {
       if (expandedLit == lit) Right(EtaExpansion(lit,None))
       else splitOlFun(ty) match {
         case Some((argTy, resultTy)) =>
-          val pattern = PatternBuilder.generateClausePattern(Seq(PatternBuilder.PatternInfo(idxInClause,None,polarity = true)), clauseLen)
+          val pattern = PatternBuilder.generateClausePattern(Seq(PatternBuilder.PatternInfo(idxInClause, None, polarity = true, target = PatternBuilder.WholeLiteral)), clauseLen)
           Right(EtaExpansion(expandedLit,Some(Rewrite(Some(pattern),mkExpandLit(argTy,resultTy,left,right),Side.Left))))
         case None =>
           Left("DetUniSimp: eta expansion changed a non-functional decomp literal")

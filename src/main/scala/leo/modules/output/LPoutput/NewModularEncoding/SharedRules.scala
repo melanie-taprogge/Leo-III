@@ -207,7 +207,7 @@ object InstMetaTheorems {
     val impToProve = Prf(LogicConst.Eq(HolBaseTypes.O, nAry.disjunction(encSubstParent.map(_.term)), nAry.disjunction(encChildLits.map(_.term))))
     val proofScript: Seq[LpProofScript] = deletePositions.map(posInSubs => {
       Out.lp_debug_info(s"orig pos is ${posInSubs}")
-      val patternLitInfo = PatternBuilder.PatternInfo(posInSubs, None, polarity = true)
+      val patternLitInfo = PatternBuilder.PatternInfo(posInSubs, None, polarity = true, target = PatternBuilder.WholeLiteral)
       val pattern = PatternBuilder.generateClausePattern(Seq(patternLitInfo), encSubstParent.length)
       val embeddedPattern = PatternBuilder.embedPatternInEq(pattern, Side.Left)
       removeBot(embeddedPattern)

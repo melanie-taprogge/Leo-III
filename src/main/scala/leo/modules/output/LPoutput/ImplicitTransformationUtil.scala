@@ -183,12 +183,13 @@ object ImplicitTransformationUtil {
     //val polarities = goalLits.map(_.polarity)
 
     // helper for looking up the mapped index and polarity of a given index
-    def generatePatternInfo(id: Int): PatternBuilder.PatternInfo = {
+    def generatePatternInfo(id: Int,
+                            target: PatternBuilder.LiteralPatternTarget): PatternBuilder.PatternInfo = {
       val idxInGoal = idxMap(id)
-      if (goalLitPolarities.isDefinedAt(idxInGoal)) PatternBuilder.PatternInfo(idxInGoal, None, goalLitPolarities(idxInGoal))
+      if (goalLitPolarities.isDefinedAt(idxInGoal)) PatternBuilder.PatternInfo(idxInGoal, None, goalLitPolarities(idxInGoal), target)
       else {
         Out.lp_debug_info(s"Warning: trying to generate pattern for literal with index $id, which is out of bounds for goal literals. Using default polarity positive")
-        PatternBuilder.PatternInfo(idxInGoal, None, true)
+        PatternBuilder.PatternInfo(idxInGoal, None, true, target)
       }
     }
 
@@ -200,8 +201,9 @@ object ImplicitTransformationUtil {
       Out.lp_debug_info(s"need to normalize: ${addInfo.normalizedEq}")
       addInfo.normalizedEq.map { pair =>
         val (pos, normMode) = pair
-        val rule: LpTerm[Level.Meta] = litNorm2lpRule(normMode).lpConst
-        val patternInfo = generatePatternInfo(pos)
+        val normalisationRule = litNorm2lpRule(normMode)
+        val rule: LpTerm[Level.Meta] = normalisationRule.lpConst
+        val patternInfo = generatePatternInfo(pos, normalisationRule.patternTarget)
         val pattern = PatternBuilder.generateClausePattern(Seq(patternInfo), clauseLen)
         Rewrite(Some(pattern), rule, Side.Left)
       }
@@ -215,7 +217,7 @@ object ImplicitTransformationUtil {
     val allFlipSteps = (addInfo.flippedLits).sorted
     val maybeFlipStep: Seq[Rewrite] = if (allFlipSteps.nonEmpty) {
       Out.lp_debug_info(s"the following literals need to be flipped: $allFlipSteps")
-      val flipInfo = allFlipSteps.map(generatePatternInfo)
+      val flipInfo = allFlipSteps.map(generatePatternInfo(_, PatternBuilder.LiteralBody))
       Out.lp_debug_info(s"pattern info: $flipInfo")
       val flipPatterns = flipInfo.map(flipInfo0 => PatternBuilder.generateClausePattern(Seq(flipInfo0), clauseLen))
       flipPatterns.map(flipPattern0 => Rewrite(Some(flipPattern0), eqSym))

@@ -203,26 +203,29 @@ object PatternBuilder {
                                     targetPattern: RewritePattern = RewritePattern(DefaultPatternHole, DefaultPatternHole)): Either[String, RewritePattern] =
     prepareClausePositionPattern(clause, occurrence).map(_.plug(targetPattern))
 
+  /** Selects whether a clause pattern exposes a complete literal or its unsigned body as its hole. */
+  sealed trait LiteralPatternTarget
+  case object WholeLiteral extends LiteralPatternTarget
+  case object LiteralBody extends LiteralPatternTarget
+
   /**
-    * Wrapper for additional information concerning the properties of the literal necessary to generate rewrite pattern for entire clauses
+    * Information needed to generate a clause-level rewrite pattern.
     *
-    * @param position The index of the literal in the clause
-    * @param sideIfEq Indicates if the pattern is supposed to only target one side of an equational literal.
-    *                 None => Literal is targeted as a whole
-    *                 Some(Side.Left) / Some(Side.Right) => The pattern will target the specific side
-    * @param polarity Indicates if the pattern is supposed to only target the body of a literal with negative polarity
-    *                 True: Polarity is positive or entire (potentially negated) literal should be targeted
-    *                 False: Literal is negative and pattern should target the body only.
+    * @param position The index of the literal in the clause.
+    * @param sideIfEq Optional equality side to expose; `None` adds no equality-side wrapper.
+    * @param polarity Polarity of the literal containing the target.
+    * @param target Whether the pattern hole represents the entire literal or its unsigned body.
     */
   case class PatternInfo(position: Int,
                          sideIfEq: Option[(Side, OlMonoType)],
-                         polarity: Boolean)
+                         polarity: Boolean,
+                         target: LiteralPatternTarget)
 
   /**
     * Generator for pattern-terms targeting specific sub-structures of Literals.
     *
     * @param info Wrapped information regarding the sub-structures to be targeted
-    * @param hole Shape of the term to be used as a whole, typically a pattern variable like "x"
+    * @param hole Shape of the selected term, typically a pattern variable like "x"
     * @return A term to be used to construct a rewrite pattern for the Lambdapi rewrite-tactic
     */
   def generatePatternLit(info: PatternInfo, hole: LpTerm[Level.Obj]): LpTerm[Level.Obj] = {
@@ -230,7 +233,11 @@ object PatternBuilder {
       case (Side.Left, ty) => LogicConst.Eq(ty, Wildcard[Level.Obj](), hole)
       case (Side.Right, ty) => LogicConst.Eq(ty, hole, Wildcard[Level.Obj]())
     } else hole
-    if (info.polarity) maybeEqLit else LogicConst.Not(maybeEqLit)
+    info.target match {
+      case WholeLiteral => maybeEqLit
+      case LiteralBody if info.polarity => maybeEqLit
+      case LiteralBody => LogicConst.Not(maybeEqLit)
+    }
   }
 
   /**
