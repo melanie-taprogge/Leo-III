@@ -1,7 +1,6 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.Clause.vars
 import leo.datastructures._
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.ImplicitTransformationUtil.{reconstructBeforeLiteralNormalisation, verifySubstitutionLiteralNormalisazion}
@@ -34,7 +33,6 @@ object RewritingBasedRuleEncoding {
                                    encBlockResults: Seq[lpClauseInst],
                                    encRewriteRules: Seq[lpClauseInst],
                                    sharedVarMap: Map[Int, String],
-                                   childVarMap: Map[Int, String],
                                    parentNameLpEnc: LpTerm[Level.Obj],
                                    rewriteRuleNamesLpEnc: Seq[LpTerm[Level.Obj]])
 
@@ -45,7 +43,6 @@ object RewritingBasedRuleEncoding {
                                     occurrence: Option[RewriteOccurrence])
 
     final case class PreparedRewriteRuleUse(rewriteRuleParentId: Long,
-                                            originalRule: Clause,
                                             shiftedRule: Clause,
                                             instantiatedRule: Clause,
                                             termSubst: Seq[UniTermSubst],
@@ -76,7 +73,6 @@ object RewritingBasedRuleEncoding {
       val encParent = encClauses(1)
       val encBlockResults = blockResultCls.map(RawClauseEncoding.clause2Lp(_, sharedVarMap))
       val encRewriteRules = encClauses.drop(2)
-      val childVarMap = sharedVarMap.view.filterKeys(vars(childCl).distinct).toMap
 
       EncRewriteCtx(
         encChild,
@@ -84,7 +80,6 @@ object RewritingBasedRuleEncoding {
         encBlockResults,
         encRewriteRules,
         sharedVarMap,
-        childVarMap,
         proofName(parentNameLpEnc0),
         rewriteRuleNameLpEnc0.map(proofName)
       )
@@ -93,14 +88,8 @@ object RewritingBasedRuleEncoding {
     /**
       * Normalize rewrite-use information from `FurtherInfo`.
       */
-    def initRewriteRuleUses(addInfoRw: Seq[AddInfoRewrite],
-                            rewriteRuleParents: Seq[ClauseProxy]): Seq[RewriteRuleUse] = {
-      if (addInfoRw.nonEmpty) {
-        addInfoRw.map(info => RewriteRuleUse(info.rewriteRuleParentId, info.rewriteRule, info.origTermSubst, info.origTypeSubst, info.occurrence))
-      } else {
-        rewriteRuleParents.map(parent => RewriteRuleUse(parent.id, parent.cl, Subst.id, Subst.id, None))
-      }
-    }
+    def initRewriteRuleUses(addInfoRw: Seq[AddInfoRewrite]): Seq[RewriteRuleUse] =
+      addInfoRw.map(info => RewriteRuleUse(info.rewriteRuleParentId, info.rewriteRule, info.origTermSubst, info.origTypeSubst, info.occurrence))
 
     /**
       * Move quantified rewrite-rule variables beyond every variable index used
@@ -139,7 +128,6 @@ object RewritingBasedRuleEncoding {
             shiftedRule.implicitlyBound
           ).map(termSubst => PreparedRewriteRuleUse(
             use.rewriteRuleParentId,
-            use.rewriteRule,
             shiftedRule,
             instantiatedRule,
             termSubst,
@@ -161,11 +149,9 @@ object RewriteSimpEncoding {
   import RewritingBasedRuleEncoding.Util._
 
   // Define reasons for proofs being non-encodable
-  private val MissingRewriteSubstitutionReason = "RW: Non-ground rewrite rule has no recorded instantiation"
+  private val MissingRewriteMetadataReason = "RW: Rewrite application metadata not recorded"
   private val LiteralTransformationReason = "RW: Literal simplification or transformation not encoded"
   private val LiteralReconstructionReason = "RW: Could not reconstruct literal normalization"
-
-  final case class RewriteSimpCtx(rewriteUses: Seq[RewriteRuleUse])
 
   final case class FocusedRewrite(pattern: RewritePattern,
                                   proof: LpTerm[Level.Obj])
@@ -189,12 +175,6 @@ object RewriteSimpEncoding {
     }
     def allTransformationsEncoded: Boolean = notEncodedReasons.isEmpty
   }
-
-  def initRewriteSimpCtxt(child: ClauseProxy,
-                          rewriteRuleParents: Seq[ClauseProxy]): RewriteSimpCtx = {
-    RewriteSimpCtx(initRewriteRuleUses(child.furtherInfo.addInfoRw, rewriteRuleParents))
-  }
-
 
   /**
     * Orchestrator for the migrated encoding of Leo-III's `RewriteSimp` rule.
@@ -236,7 +216,6 @@ object RewriteSimpEncoding {
   def encRewrite(cl: ClauseProxy,
                  parents: Seq[ClauseProxy],
                  addInfoSimp: Seq[(Seq[Int], Int)],
-                 _parentModuloRw: Option[Clause],
                  parentNameLpEnc: Seq[Name],
                  _sig: LpSig): EncodeResult = {
     Out.lp_debug_info("Encoding instance of rewrite simplification")
@@ -250,13 +229,12 @@ object RewriteSimpEncoding {
     val sourceBeforeParent = parentNameLpEnc.head
     val sourcesBeforeEq = parentNameLpEnc.tail
 
-    val rwCtx = initRewriteSimpCtxt(cl, rewriteRules)
-
-    if (cl.furtherInfo.addInfoRw.isEmpty && rewriteRules.exists(rule => rule.cl.implicitlyBound.nonEmpty)) {
-      return NotEncodable(MissingRewriteSubstitutionReason)
+    if (cl.furtherInfo.addInfoRw.isEmpty) {
+      return NotEncodable(MissingRewriteMetadataReason)
     }
+    val rewriteUses = initRewriteRuleUses(cl.furtherInfo.addInfoRw)
 
-    val groupedRewriteUses = rwCtx.rewriteUses.foldLeft(Vector.empty[Vector[RewriteRuleUse]]) {
+    val groupedRewriteUses = rewriteUses.foldLeft(Vector.empty[Vector[RewriteRuleUse]]) {
       case (groups, rewriteUse) if groups.lastOption.exists(_.head.rewriteRuleParentId == rewriteUse.rewriteRuleParentId) =>
         groups.updated(groups.length - 1, groups.last :+ rewriteUse)
       case (groups, rewriteUse) =>
@@ -303,13 +281,12 @@ object RewriteSimpEncoding {
       encBlockResults,
       encRewriteRules,
       sharedVarMap,
-      _,
       parentNameLpEnc0,
       rewriteRuleNamesLpEnc
     ) = ctxt
 
     Out.lp_debug_info(s"Encoding application or RW-rule on ${sourceBeforeParent.value}")
-    Out.lp_debug_info(s"Found ${rwCtx.rewriteUses.length} recorded rewrite rule use(s) in ${groupedRewriteUses.length} block(s)")
+    Out.lp_debug_info(s"Found ${rewriteUses.length} recorded rewrite rule use(s) in ${groupedRewriteUses.length} block(s)")
 
     val initialReasons = mutable.LinkedHashSet.empty[String]
     val childVarNames = extractVarNames(encChild)
@@ -586,8 +563,6 @@ object RewriteSimpEncoding {
                                           pointwiseEquality: LpTerm[Level.Obj],
                                           liftedShape: LiftedRewriteShape,
                                           state0: RewriteState): (RewriteState, LpTerm[Level.Obj]) = {
-    if (binders.isEmpty) return (state0, pointwiseEquality)
-
     val binderNames = binders.map(_.name)
     val appliedPointwiseProof = applyProofToVars(pointwiseEquality, binderNames)
     val funExt = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("funExt")))

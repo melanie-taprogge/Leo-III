@@ -2350,7 +2350,6 @@ package inferenceControl {
           // FurtherInfo of the rewritten parent lets later RewriteSimp steps
           // overwrite the substitutions needed to reconstruct this proof step.
           val information = FurtherInfo()
-          information.addInfoRewriting = Some(newCl)
           information.addInfoRw = rewriteInfo
           information.addInfoRwBlockResults = rewriteBlockResults
           information.addInfoRwLiteralTransformation = rewrittenLits.zipWithIndex.foldLeft(LiteralTransformation()) {

@@ -336,7 +336,6 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
   //var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
   var addInfoUni: AddInfoUni = AddInfoUni()
   var addInfoDetUni: AddInfoDetUni = AddInfoDetUni()
-  var addInfoRewriting: Option[Clause] = None
   var addInfoRw: Seq[AddInfoRewrite] = Seq.empty
   /** Raw clause after each maximal consecutive block using one rewrite parent. */
   var addInfoRwBlockResults: Seq[RawClause] = Seq.empty

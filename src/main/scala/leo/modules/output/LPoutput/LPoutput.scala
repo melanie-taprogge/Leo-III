@@ -361,7 +361,7 @@ object LPoutput {
               }
 
             case leo.modules.calculus.RewriteSimp =>
-              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, cl.furtherInfo.addInfoRewriting, parentInLpEncID.map(id => Name(id.name)), sig)
+              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentInLpEncID.map(id => Name(id.name)), sig)
               encodingRewrite match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "RewriteSimp", Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, "RewriteSimp", Left(Seq.empty), Some(reason)), outputInfo)
