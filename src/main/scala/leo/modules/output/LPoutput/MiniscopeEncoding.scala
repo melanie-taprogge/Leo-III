@@ -2,13 +2,13 @@ package leo.modules.output.LPoutput
 
 import leo.Out
 import leo.datastructures.Term._
-import leo.datastructures.{Clause, ClauseProxy, Literal, MiniscopeCrossNegation, MiniscopeTrace, Position, Signature, Term, Type}
+import leo.datastructures.{Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopeTrace, Position, Signature, Term, Type}
 import leo.modules.HOLSignature.{Exists, Forall, Impl, Not, &, |||}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Rewrite, RewritePattern, Side, Simplify}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Const
-import leo.modules.output.LPoutput.NewLpDatastructures.{ClauseEncoding, Level, LogicConst, LpSig, LpTerm, Name, QName, RenderOptions, Renderer, SymRef, lpClauseInst}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LogicConst, LpSig, LpTerm, LpType, Name, QName, RenderOptions, Renderer, SymRef, TypeEncoding, lpClauseInst}
 
 /** Reconstruction of one recorded Miniscope inference. */
 object MiniscopeEncoding {
@@ -21,10 +21,14 @@ object MiniscopeEncoding {
   private case object ForallNotEqNotExists extends NegationLaw { val name = "forall_not_eq_not_exists" }
 
   // A binder remains pending while the traversal follows its body. Its kind
-  // changes when a recorded crossing moves it under a negation.
-  private final case class PendingBinder(typ: Type, universal: Boolean) {
+  // changes when a recorded crossing moves it under a negation. The pattern
+  // name is local to the wrapper; matching does not require the goal's name.
+  private final case class PendingBinder(typ: Type, universal: Boolean, patternName: Name) {
     def crossed: PendingBinder = copy(universal = !universal)
   }
+
+  /** Wrap a hole with the part of the Lambdapi goal already traversed. */
+  private type PatternContext = LpTerm[Level.Obj] => LpTerm[Level.Obj]
 
   // Each pattern targets the post-move term. The script consumes moves backward,
   // starting from the recorded child goal.
@@ -126,12 +130,14 @@ object MiniscopeEncoding {
     // The source visit resolves trace ordinals. Pending binders and enclosing
     // negations describe the current context of this source subterm.
     def visit(term: Term, pending: Vector[PendingBinder], at: Position,
-              outerNegations: Int): Either[String, Term] = term match {
+              outerNegations: Int, outerPattern: PatternContext): Either[String, Term] = term match {
       // Delay rebuilding a quantifier until a crossing or the final leaf.
       case Exists(ty :::> body) =>
-        visit(body, pending :+ PendingBinder(ty, false), at.argPos(2).abstrPos, outerNegations)
+        visit(body, pending :+ PendingBinder(ty, false, Name(s"mini${pending.size}")),
+          at.argPos(2).abstrPos, outerNegations, outerPattern)
       case Forall(ty :::> body) =>
-        visit(body, pending :+ PendingBinder(ty, true), at.argPos(2).abstrPos, outerNegations)
+        visit(body, pending :+ PendingBinder(ty, true, Name(s"mini${pending.size}")),
+          at.argPos(2).abstrPos, outerNegations, outerPattern)
       case Not(body) =>
         // Consecutive events naming this visit form its crossing group.
         val start = cursor
@@ -147,30 +153,23 @@ object MiniscopeEncoding {
           if (crossings.map(_.pendingBinderOrdinal) != pending.indices.toVector)
             Left(s"Miniscope R1: incomplete or reordered crossings at ${at.pretty}")
           else {
-            // inner holds the binders already moved below this negation;
-            // crossedPending tracks their current quantifier kinds.
-            var inner = body
+            // Each event changes one binder kind and captures the context of
+            // its post-move target. The term inside the hole is not needed.
             var crossedPending = pending
-            // The innermost binder is adjacent to the negation. Each crossing
-            // turns Q(¬A) into ¬Q'(A), then records the post-move goal pattern.
-            val planned = crossings.reverse.foldLeft[Either[String, Unit]](Right(())) { (step, event) =>
-              step.flatMap { _ =>
-                val crossed = crossedPending(event.pendingBinderOrdinal).crossed
-                crossedPending = crossedPending.updated(event.pendingBinderOrdinal, crossed)
-                inner = quant(crossed, inner)
-                // Binders before this ordinal still surround the negation.
-                // The moved suffix is already part of inner.
-                val after = surround(prefix(crossedPending.take(event.pendingBinderOrdinal), Not(inner)), outerNegations)
-                makePattern(after, polarity, outerNegations, event.pendingBinderOrdinal, crossed.universal).map { pattern =>
-                  val law = if (crossed.universal) ExistsNotEqNotForall else ForallNotEqNotExists
-                  moves += PlannedMove(event, law, pattern)
-                }
-              }
+            // The innermost binder crosses first, so the remaining outer
+            // binders are exactly the wrappers around this event's target.
+            crossings.reverse.foreach { event =>
+              val ordinal = event.pendingBinderOrdinal
+              val crossed = crossedPending(ordinal).crossed
+              crossedPending = crossedPending.updated(ordinal, crossed)
+              val pattern = makePattern(polarity, outerPattern, crossedPending.take(ordinal))
+              val law = if (crossed.universal) ExistsNotEqNotForall else ForallNotEqNotExists
+              moves += PlannedMove(event, law, pattern)
             }
-            // All pending binders are now inside this negation. Continue at its
-            // source body with their crossed kinds and one more outer negation.
-            planned.flatMap(_ =>
-              visit(body, crossedPending, at.argPos(1), outerNegations + 1))
+            // This negation remains outside subsequent source visits. Reuse
+            // that wrapper when planning patterns deeper in its body.
+            val insideNegation: PatternContext = hole => outerPattern(LogicConst.Not(hole))
+            visit(body, crossedPending, at.argPos(1), outerNegations + 1, insideNegation)
           }
         }
       case (_ & _) | (_ ||| _) | Impl(_, _) =>
@@ -180,7 +179,8 @@ object MiniscopeEncoding {
         Right(surround(prefix(pending, leaf), outerNegations))
     }
 
-    visit(ctx.parent.lits.head.left, Vector.empty, Position.root, 0).flatMap { result =>
+    val identityPattern: PatternContext = identity
+    visit(ctx.parent.lits.head.left, Vector.empty, Position.root, 0, identityPattern).flatMap { result =>
       val planned = moves.result()
       if (cursor != observations.size)
         Left(s"Miniscope R1: ${observations.size - cursor} unconsumed source observations")
@@ -192,41 +192,18 @@ object MiniscopeEncoding {
     }
   }
 
-  /**
-    * In the post-move goal, outerNegations negations and outerBinders
-    * quantifiers surround the crossed pair. Preserve their encoded binders
-    * while replacing that pair with the rewrite-pattern hole.
-    */
-  private def makePattern(after: Term, polarity: Boolean, outerNegations: Int,
-                          outerBinders: Int, afterUniversal: Boolean): Either[String, RewritePattern] = {
-    val encoded = ClauseEncoding.clause2LP(Clause(Literal(after, polarity)))
+  /** Compose the reusable outer context with this move's pending binders. */
+  private def makePattern(polarity: Boolean, outer: PatternContext,
+                          binders: Vector[PendingBinder]): RewritePattern = {
     val hole = Const[Level.Obj](SymRef.LP(QName.local("x")))
-
-    // Descend through the known outer context, then replace the entire
-    // quantified negation that the selected theorem rewrites.
-    def focus(term: LpTerm[Level.Obj], negations: Int, binders: Int): Either[String, LpTerm[Level.Obj]] = {
-      if (negations > 0) term match {
-        case LogicConst.Not(body) => focus(body, negations - 1, binders).map(LogicConst.Not(_))
-        case _ => Left("Miniscope R1: expected a negation around the target")
-      } else if (binders > 0) term match {
-        case LogicConst.Forall(binder, body) => focus(body, 0, binders - 1).map(LogicConst.Forall(binder, _))
-        case LogicConst.Exists(binder, body) => focus(body, 0, binders - 1).map(LogicConst.Exists(binder, _))
-        case _ => Left("Miniscope R1: expected a binder around the target")
-      } else term match {
-        case LogicConst.Not(LogicConst.Forall(_, _)) if afterUniversal => Right(hole)
-        case LogicConst.Not(LogicConst.Exists(_, _)) if !afterUniversal => Right(hole)
-        case _ => Left("Miniscope R1: planned law does not match the encoded target")
-      }
-    }
-
-    encoded.lits.head.unsignedTerm match {
-      case None => Left("Miniscope R1: cannot expose the unsigned literal body")
-      case Some(body) => focus(body, outerNegations, outerBinders).map { bodyPattern =>
-        // PatternBuilder adds the signed literal and unit-clause context.
-        val info = PatternBuilder.PatternInfo(0, None, polarity, PatternBuilder.LiteralBody)
-        val literalPattern = PatternBuilder.generatePatternLit(info, bodyPattern)
-        PatternBuilder.generateClausePattern(0, 1, literalPattern)
-      }
-    }
+    val bodyPattern = outer(binders.reverseIterator.foldLeft[LpTerm[Level.Obj]](hole) { (body, binder) =>
+      val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
+      if (binder.universal) LogicConst.Forall(typedName, body)
+      else LogicConst.Exists(typedName, body)
+    })
+    // PatternBuilder adds the signed literal and unit-clause context.
+    val info = PatternBuilder.PatternInfo(0, None, polarity, PatternBuilder.LiteralBody)
+    val literalPattern = PatternBuilder.generatePatternLit(info, bodyPattern)
+    PatternBuilder.generateClausePattern(0, 1, literalPattern)
   }
 }
