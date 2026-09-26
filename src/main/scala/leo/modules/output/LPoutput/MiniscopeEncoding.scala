@@ -2,12 +2,12 @@ package leo.modules.output.LPoutput
 
 import leo.Out
 import leo.datastructures.Term._
-import leo.datastructures.{Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopeTrace, Position, Signature, Term, Type}
+import leo.datastructures.{Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopePushAtConnective, MiniscopeStopAtConnective, MiniscopeTrace, Position, Signature, Term, Type}
 import leo.modules.HOLSignature.{Exists, Forall, Impl, Not, &, |||}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Rewrite, RewritePattern, Side, Simplify}
-import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Const
+import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Wildcard}
 import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LogicConst, LpSig, LpTerm, LpType, Name, QName, RenderOptions, Renderer, SymRef, TypeEncoding, lpClauseInst}
 
 /** Reconstruction of one recorded Miniscope inference. */
@@ -127,6 +127,44 @@ object MiniscopeEncoding {
     def surround(body: Term, negations: Int): Term =
       (0 until negations).foldLeft(body)((term, _) => Not(term))
 
+    // A stopped prefix stays outside the connective. Its branches have no
+    // pending binders, but their patterns retain that prefix and select one
+    // branch with a wildcard for the other.
+    def visitConnective(left: Term, right: Term, pending: Vector[PendingBinder], at: Position,
+                        outerNegations: Int, outerPattern: PatternContext,
+                        sourceConnective: (Term, Term) => Term,
+                        patternConnective: (LpTerm[Level.Obj], LpTerm[Level.Obj]) => LpTerm[Level.Obj]): Either[String, Term] = {
+      val start = cursor
+      while (cursor < observations.size && observations(cursor).sourceVisit == at) cursor += 1
+      val here = observations.slice(start, cursor)
+      val validStop = here match {
+        case Vector(MiniscopeStopAtConnective(_, ordinal)) => ordinal == pending.size - 1
+        case _ => false
+      }
+      if (here.exists(_.isInstanceOf[MiniscopePushAtConnective]))
+        Left(s"Miniscope R1: connective push is outside the supported SCHEMA-01 path at ${at.pretty}")
+      else if ((pending.isEmpty && here.nonEmpty) ||
+               (pending.nonEmpty && !validStop))
+        Left(s"Miniscope R1: missing or inconsistent connective stop at ${at.pretty}")
+      else {
+        Out.lp_debug_info(s"Miniscope R1: unchanged connective at ${at.pretty}, ${pending.size} retained binder(s)")
+        val retainedPattern: PatternContext = hole => outerPattern(
+          pending.reverseIterator.foldLeft(hole) { (body, binder) =>
+            val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
+            if (binder.universal) LogicConst.Forall(typedName, body)
+            else LogicConst.Exists(typedName, body)
+          })
+        val leftPattern: PatternContext = hole =>
+          retainedPattern(patternConnective(hole, Wildcard[Level.Obj]()))
+        val rightPattern: PatternContext = hole =>
+          retainedPattern(patternConnective(Wildcard[Level.Obj](), hole))
+        for {
+          rebuiltLeft <- visit(left, Vector.empty, at.argPos(1), 0, leftPattern)
+          rebuiltRight <- visit(right, Vector.empty, at.argPos(2), 0, rightPattern)
+        } yield surround(prefix(pending, sourceConnective(rebuiltLeft, rebuiltRight)), outerNegations)
+      }
+    }
+
     // The source visit resolves trace ordinals. Pending binders and enclosing
     // negations describe the current context of this source subterm.
     def visit(term: Term, pending: Vector[PendingBinder], at: Position,
@@ -172,8 +210,15 @@ object MiniscopeEncoding {
             visit(body, crossedPending, at.argPos(1), outerNegations + 1, insideNegation)
           }
         }
-      case (_ & _) | (_ ||| _) | Impl(_, _) =>
-        Left(s"Miniscope R1: connective moves are outside the supported SCHEMA-01 path at ${at.pretty}")
+      case (left & right) =>
+        visitConnective(left, right, pending, at, outerNegations, outerPattern,
+          (a, b) => &(a, b), LogicConst.And.apply)
+      case (left ||| right) =>
+        visitConnective(left, right, pending, at, outerNegations, outerPattern,
+          (a, b) => |||(a, b), LogicConst.Or.apply)
+      case Impl(left, right) =>
+        visitConnective(left, right, pending, at, outerNegations, outerPattern,
+          (a, b) => Impl(a, b), LogicConst.Imp.apply)
       case leaf =>
         // No more decisions remain on this path; restore its pending context.
         Right(surround(prefix(pending, leaf), outerNegations))
