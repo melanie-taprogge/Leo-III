@@ -835,6 +835,7 @@ object LPoutput {
     } //else singleProof.append(tempLib)
     additions = additions + s"require open $tempLibStr;\n"
     additions = additions + "require open Stdlib.Experimental.Miniscope.Interfaces;\n"
+    additions = additions + "require open Leo-III-lambdapi-lib.MiniscopeAdapters;\n"
 
     if (signatureFileSB.length != 0) {
       if (!outputSingleFile){

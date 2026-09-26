@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput
 
 import leo.Out
 import leo.datastructures.Term._
-import leo.datastructures.{Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopeObservation, MiniscopePushAtConnective, MiniscopePushBoth, MiniscopeStopAtConnective, MiniscopeTrace, Position, Signature, Term, Type}
+import leo.datastructures.{BoundFront, Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopeObservation, MiniscopePushAtConnective, MiniscopePushBoth, MiniscopePushRight, MiniscopeStopAtConnective, MiniscopeTrace, Position, Signature, Subst, Term, Type}
 import leo.modules.HOLSignature.{Exists, Forall, Impl, Not, &, |||}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
@@ -20,6 +20,7 @@ object MiniscopeEncoding {
   private case object ExistsNotEqNotForall extends ReplayLaw { val name = "exists_not_eq_not_forall" }
   private case object ForallNotEqNotExists extends ReplayLaw { val name = "forall_not_eq_not_exists" }
   private case object ForallAndBoth extends ReplayLaw { val name = "forall_and_both" }
+  private case object ForallOrRightReplay extends ReplayLaw { val name = "forall_or_right_replay" }
 
   // A binder remains pending while the traversal follows its body. Its kind
   // changes when a recorded crossing moves it under a negation. The pattern
@@ -66,6 +67,7 @@ object MiniscopeEncoding {
         val (_, encoded) = lpClauseInst.apply_to_set(Seq(parent, result))
         val ctx = Context(parent, result, parentProofNames.head, encoded.head, encoded(1), trace)
         Out.lp_debug_info(s"Miniscope step ${child.id}: parent ${parents.head.id} as ${ctx.parentProofName.value}, ${ctx.trace.observations.size} source observations")
+        Out.lp_debug_info(s"Miniscope source observations: ${ctx.trace.observations}")
         Out.lp_debug_info(s"Miniscope translated parent: ${ctx.encParent.term}")
         Out.lp_debug_info(s"Miniscope translated child: ${ctx.encChild.term}")
         Right(ctx)
@@ -73,7 +75,7 @@ object MiniscopeEncoding {
   }
 
   /**
-    * BLUEPRINT-MINI-2, bounded SCHEMA-01 and SCHEMA-05 paths:
+    * BLUEPRINT-MINI-2, bounded SCHEMA-01, SCHEMA-03, and SCHEMA-05 paths:
     * 0. Validate and translate the recorded parent and child together.
     * 1. Replay recorded moves against the parent and check the resulting child.
     * 2. Emit patterned rewrites backward and refine the parent proof.
@@ -134,7 +136,7 @@ object MiniscopeEncoding {
     def visitConnective(left: Term, right: Term, pending: Vector[PendingBinder], at: Position,
                         outerNegations: Int, outerPattern: PatternContext,
                         sourceConnective: (Term, Term) => Term,
-                        isConjunction: Boolean,
+                        isConjunction: Boolean, isDisjunction: Boolean,
                         patternConnective: (LpTerm[Level.Obj], LpTerm[Level.Obj]) => LpTerm[Level.Obj]): Either[String, Term] = {
       val start = cursor
       while (cursor < observations.size && observations(cursor).sourceVisit == at) cursor += 1
@@ -147,6 +149,11 @@ object MiniscopeEncoding {
         at == Position.root.argPos(2).abstrPos && outerNegations == 0 &&
         here == Vector(MiniscopePushAtConnective(at, 0, MiniscopePushBoth)) &&
         observations.size == 1
+      val boundedRightPush = isDisjunction && !polarity &&
+        pending.size == 3 && pending.forall(_.universal) &&
+        at == Position.root.argPos(2).abstrPos.argPos(2).abstrPos.argPos(2).abstrPos &&
+        here == Vector(MiniscopePushAtConnective(at, 2, MiniscopePushRight),
+                       MiniscopeStopAtConnective(at, 1)) && observations.size == 3
       if (boundedBothPush) {
         // This bounded case has one root binder, so distributing it needs no
         // branch reindexing. The recorded child still has to match exactly.
@@ -161,6 +168,34 @@ object MiniscopeEncoding {
           moves += PlannedMove(here.head, ForallAndBoth, pattern)
           Out.lp_debug_info(s"Miniscope SCHEMA-05: planned universal Both push at ${at.pretty}")
           Right(moved)
+        }
+      } else if (boundedRightPush) {
+        // The innermost binder leaves the left branch. As in the producer's
+        // one-push substitution, old indices 2 and 3 become 1 and 2 there.
+        if (left.looseBounds.contains(1) || !right.looseBounds.contains(1) ||
+            !left.looseBounds.contains(2) || !right.looseBounds.contains(2))
+          Left(s"Miniscope SCHEMA-03: recorded right push or blocker disagrees with the source branches at ${at.pretty}")
+        else {
+          val retained = pending.take(2)
+          val movedBinder = pending.last
+          val leftAfter = left.substitute(BoundFront(1) +: Subst.shift(0)).betaNormalize
+          val rightAfter = right.betaNormalize
+          val retainedPattern: PatternContext = hole => outerPattern(
+            retained.reverseIterator.foldLeft(hole) { (body, binder) =>
+              val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
+              LogicConst.Forall(typedName, body)
+            })
+          val leftPattern: PatternContext = hole =>
+            retainedPattern(patternConnective(hole, Wildcard[Level.Obj]()))
+          val rightPattern: PatternContext = hole =>
+            retainedPattern(patternConnective(Wildcard[Level.Obj](), hole))
+          moves += PlannedMove(here.head, ForallOrRightReplay,
+            makePattern(polarity, outerPattern, retained))
+          Out.lp_debug_info(s"Miniscope SCHEMA-03: planned right push with a retained blocker at ${at.pretty}")
+          for {
+            rebuiltLeft <- visit(leftAfter, Vector.empty, at.argPos(1), 0, leftPattern)
+            rebuiltRight <- visit(rightAfter, Vector(movedBinder), at.argPos(2), 0, rightPattern)
+          } yield surround(prefix(retained, sourceConnective(rebuiltLeft, rebuiltRight)), outerNegations)
         }
       } else if (here.exists(_.isInstanceOf[MiniscopePushAtConnective]))
         Left(s"Miniscope R1: connective push is outside the supported SCHEMA-01 path at ${at.pretty}")
@@ -233,13 +268,13 @@ object MiniscopeEncoding {
         }
       case (left & right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => &(a, b), true, LogicConst.And.apply)
+          (a, b) => &(a, b), true, false, LogicConst.And.apply)
       case (left ||| right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => |||(a, b), false, LogicConst.Or.apply)
+          (a, b) => |||(a, b), false, true, LogicConst.Or.apply)
       case Impl(left, right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => Impl(a, b), false, LogicConst.Imp.apply)
+          (a, b) => Impl(a, b), false, false, LogicConst.Imp.apply)
       case leaf =>
         // No more decisions remain on this path; restore its pending context.
         Right(surround(prefix(pending, leaf), outerNegations))
