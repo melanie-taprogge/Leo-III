@@ -1886,11 +1886,12 @@ package inferenceControl {
 
       val lit = cl.cl.lits.head
       val term = lit.left
-      val resultterm = Miniscope.apply(term, lit.polarity)
-      val result = if (term != resultterm)
-          AnnotatedClause(Clause(Literal(resultterm, lit.polarity)), InferredFrom(Miniscope, cl), cl.properties)
-        else
-          cl
+      val (resultterm, miniscopeTrace) = Miniscope.applyWithTrace(term, lit.polarity)
+      val result = if (term != resultterm) {
+        val furtherInfo = FurtherInfo()
+        furtherInfo.miniscopeTrace = Some(miniscopeTrace)
+        AnnotatedClause(Clause(Literal(resultterm, lit.polarity)), InferredFrom(Miniscope, cl), cl.properties, furtherInfo)
+      } else cl
       Out.trace(s"Miniscope Result: ${result.pretty(sig)}")
       result
     }

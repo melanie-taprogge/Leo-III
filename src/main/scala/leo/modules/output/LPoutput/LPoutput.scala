@@ -367,6 +367,13 @@ object LPoutput {
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, "RewriteSimp", Left(Seq.empty), Some(reason)), outputInfo)
               }
 
+            case leo.modules.calculus.Miniscope =>
+              val encoding = MiniscopeEncoding.encMiniscope(cl, parentInLpEncID_new.map(_.local), sig)
+              encoding match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "Miniscope", Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, "Miniscope", Left(Seq.empty), Some(reason)), outputInfo)
+              }
+
             case leo.modules.calculus.LiftEq =>
               val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig.orig)
               (toProofStepOld(stepName, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
@@ -827,6 +834,7 @@ object LPoutput {
       }
     } //else singleProof.append(tempLib)
     additions = additions + s"require open $tempLibStr;\n"
+    additions = additions + "require open Stdlib.Experimental.Miniscope.Interfaces;\n"
 
     if (signatureFileSB.length != 0) {
       if (!outputSingleFile){

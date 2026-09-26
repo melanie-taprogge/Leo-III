@@ -325,6 +325,8 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
                         unencodableCNF: Boolean = false,
                         cnfInfo: AddInfoCnf = AddInfoCnf(),
                         cnfConjInfo: Option[AddInfoCnfConj] = None){
+  /** Source decisions for a changed Miniscope result in the uncompressed proof. */
+  var miniscopeTrace: Option[MiniscopeTrace] = None
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
   var addInfoBoolExt: Set[(Literal,Seq[Literal])] = Set.empty
   var addInfoSimp: Seq[(Seq[Int],Int)] = Seq.empty
