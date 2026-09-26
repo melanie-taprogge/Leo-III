@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput
 
 import leo.Out
 import leo.datastructures.Term._
-import leo.datastructures.{Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopePushAtConnective, MiniscopeStopAtConnective, MiniscopeTrace, Position, Signature, Term, Type}
+import leo.datastructures.{Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopeObservation, MiniscopePushAtConnective, MiniscopePushBoth, MiniscopeStopAtConnective, MiniscopeTrace, Position, Signature, Term, Type}
 import leo.modules.HOLSignature.{Exists, Forall, Impl, Not, &, |||}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
@@ -12,13 +12,14 @@ import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LogicConst, LpSig
 
 /** Reconstruction of one recorded Miniscope inference. */
 object MiniscopeEncoding {
-  /** The quantifier inside each post-crossing negation selects the proved law. */
-  private sealed trait NegationLaw {
+  /** A recorded move selects its proved Lambdapi law. */
+  private sealed trait ReplayLaw {
     def name: String
     def theorem: LpTerm[Level.Meta] = Const[Level.Meta](SymRef.LP(QName.local(name)))
   }
-  private case object ExistsNotEqNotForall extends NegationLaw { val name = "exists_not_eq_not_forall" }
-  private case object ForallNotEqNotExists extends NegationLaw { val name = "forall_not_eq_not_exists" }
+  private case object ExistsNotEqNotForall extends ReplayLaw { val name = "exists_not_eq_not_forall" }
+  private case object ForallNotEqNotExists extends ReplayLaw { val name = "forall_not_eq_not_exists" }
+  private case object ForallAndBoth extends ReplayLaw { val name = "forall_and_both" }
 
   // A binder remains pending while the traversal follows its body. Its kind
   // changes when a recorded crossing moves it under a negation. The pattern
@@ -32,8 +33,8 @@ object MiniscopeEncoding {
 
   // Each pattern targets the post-move term. The script consumes moves backward,
   // starting from the recorded child goal.
-  private final case class PlannedMove(observation: MiniscopeCrossNegation,
-                                       law: NegationLaw,
+  private final case class PlannedMove(observation: MiniscopeObservation,
+                                       law: ReplayLaw,
                                        pattern: RewritePattern)
 
   // Inputs shared by replay and script emission after checking the step shape.
@@ -72,9 +73,9 @@ object MiniscopeEncoding {
   }
 
   /**
-    * BLUEPRINT-MINI-2, bounded SCHEMA-01 path:
+    * BLUEPRINT-MINI-2, bounded SCHEMA-01 and SCHEMA-05 paths:
     * 0. Validate and translate the recorded parent and child together.
-    * 1. Apply recorded crossings to the parent and check the resulting child.
+    * 1. Replay recorded moves against the parent and check the resulting child.
     * 2. Emit patterned rewrites backward and refine the parent proof.
     */
   def encMiniscope(child: ClauseProxy, parentProofNames: Seq[Name], sig: LpSig): EncodeResult = {
@@ -82,21 +83,21 @@ object MiniscopeEncoding {
     initContext(child, parentProofNames) match {
       case Left(reason) => NotEncodable(reason)
       case Right(ctx) =>
-        planSchema01Replay(ctx, sig) match {
+        planReplay(ctx, sig) match {
           case Left(reason) =>
             Out.lp_debug_info(reason)
             NotEncodable(reason)
-          case Right(moves) => emitSchema01Script(ctx, moves, sig)
+          case Right(moves) => emitScript(ctx, moves, sig)
         }
     }
   }
 
   /** Reverse the checked source moves to transform the child goal into the parent goal. */
-  private def emitSchema01Script(ctx: Context, moves: Vector[PlannedMove], sig: LpSig): EncodeResult = {
-    if (moves.isEmpty) return NotEncodable("Miniscope R1: no supported negation crossings")
+  private def emitScript(ctx: Context, moves: Vector[PlannedMove], sig: LpSig): EncodeResult = {
+    if (moves.isEmpty) return NotEncodable("Miniscope R1: no supported moves")
 
     // The Lambdapi goal starts at the child. Each rewrite undoes one recorded
-    // crossing; beta cleanup exposes the next target in the resulting goal.
+    // move; beta cleanup exposes the next target in the resulting goal.
     val reverseMoves = moves.reverse
     val rewrites = reverseMoves.zipWithIndex.flatMap { case (move, index) =>
       val rewrite = Rewrite(Some(move.pattern), move.law.theorem, Side.Left)
@@ -109,8 +110,8 @@ object MiniscopeEncoding {
     Encoded(rewrites :+ refine)
   }
 
-  /** Traverse the parent and consume crossings at each source negation. */
-  private def planSchema01Replay(ctx: Context, sig: LpSig): Either[String, Vector[PlannedMove]] = {
+  /** Traverse the parent and consume source decisions at their recorded visits. */
+  private def planReplay(ctx: Context, sig: LpSig): Either[String, Vector[PlannedMove]] = {
     implicit val sourceSig: Signature = sig.orig
     val observations = ctx.trace.observations
     val polarity = ctx.parent.lits.head.polarity
@@ -133,6 +134,7 @@ object MiniscopeEncoding {
     def visitConnective(left: Term, right: Term, pending: Vector[PendingBinder], at: Position,
                         outerNegations: Int, outerPattern: PatternContext,
                         sourceConnective: (Term, Term) => Term,
+                        isConjunction: Boolean,
                         patternConnective: (LpTerm[Level.Obj], LpTerm[Level.Obj]) => LpTerm[Level.Obj]): Either[String, Term] = {
       val start = cursor
       while (cursor < observations.size && observations(cursor).sourceVisit == at) cursor += 1
@@ -141,7 +143,26 @@ object MiniscopeEncoding {
         case Vector(MiniscopeStopAtConnective(_, ordinal)) => ordinal == pending.size - 1
         case _ => false
       }
-      if (here.exists(_.isInstanceOf[MiniscopePushAtConnective]))
+      val boundedBothPush = isConjunction && pending.size == 1 && pending.head.universal &&
+        at == Position.root.argPos(2).abstrPos && outerNegations == 0 &&
+        here == Vector(MiniscopePushAtConnective(at, 0, MiniscopePushBoth)) &&
+        observations.size == 1
+      if (boundedBothPush) {
+        // This bounded case has one root binder, so distributing it needs no
+        // branch reindexing. The recorded child still has to match exactly.
+        if (!polarity)
+          Left(s"Miniscope SCHEMA-05: expected a positive literal at ${at.pretty}")
+        else if (!left.looseBounds.contains(1) || !right.looseBounds.contains(1))
+          Left(s"Miniscope SCHEMA-05: recorded Both push disagrees with the source branches at ${at.pretty}")
+        else {
+          val binder = pending.head
+          val moved = sourceConnective(quant(binder, left), quant(binder, right))
+          val pattern = makePattern(polarity, outerPattern, Vector.empty)
+          moves += PlannedMove(here.head, ForallAndBoth, pattern)
+          Out.lp_debug_info(s"Miniscope SCHEMA-05: planned universal Both push at ${at.pretty}")
+          Right(moved)
+        }
+      } else if (here.exists(_.isInstanceOf[MiniscopePushAtConnective]))
         Left(s"Miniscope R1: connective push is outside the supported SCHEMA-01 path at ${at.pretty}")
       else if ((pending.isEmpty && here.nonEmpty) ||
                (pending.nonEmpty && !validStop))
@@ -212,13 +233,13 @@ object MiniscopeEncoding {
         }
       case (left & right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => &(a, b), LogicConst.And.apply)
+          (a, b) => &(a, b), true, LogicConst.And.apply)
       case (left ||| right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => |||(a, b), LogicConst.Or.apply)
+          (a, b) => |||(a, b), false, LogicConst.Or.apply)
       case Impl(left, right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => Impl(a, b), LogicConst.Imp.apply)
+          (a, b) => Impl(a, b), false, LogicConst.Imp.apply)
       case leaf =>
         // No more decisions remain on this path; restore its pending context.
         Right(surround(prefix(pending, leaf), outerNegations))
@@ -230,7 +251,7 @@ object MiniscopeEncoding {
       if (cursor != observations.size)
         Left(s"Miniscope R1: ${observations.size - cursor} unconsumed source observations")
       else if (planned.isEmpty)
-        Left("Miniscope R1: no supported negation crossings")
+        Left("Miniscope R1: no supported moves")
       else if (result != ctx.child.lits.head.left)
         Left("Miniscope R1: replay does not reach the recorded child")
       else Right(planned)
