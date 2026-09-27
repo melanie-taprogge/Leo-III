@@ -22,6 +22,11 @@ object MiniscopeEncoding {
   private case object ForallAndBoth extends ReplayLaw { val name = "forall_and_both" }
   private case object ForallOrRightReplay extends ReplayLaw { val name = "forall_or_right_replay" }
 
+  private sealed trait ConnectiveKind
+  private case object Conjunction extends ConnectiveKind
+  private case object Disjunction extends ConnectiveKind
+  private case object Implication extends ConnectiveKind
+
   // A binder remains pending while the traversal follows its body. Its kind
   // changes when a recorded crossing moves it under a negation. The pattern
   // name is local to the wrapper; matching does not require the goal's name.
@@ -31,6 +36,13 @@ object MiniscopeEncoding {
 
   /** Wrap a hole with the part of the Lambdapi goal already traversed. */
   private type PatternContext = LpTerm[Level.Obj] => LpTerm[Level.Obj]
+
+  private def wrapPatternBinders(binders: Vector[PendingBinder], hole: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    binders.reverseIterator.foldLeft(hole) { (body, binder) =>
+      val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
+      if (binder.universal) LogicConst.Forall(typedName, body)
+      else LogicConst.Exists(typedName, body)
+    }
 
   // Each pattern targets the post-move term. The script consumes moves backward,
   // starting from the recorded child goal.
@@ -130,13 +142,20 @@ object MiniscopeEncoding {
     def surround(body: Term, negations: Int): Term =
       (0 until negations).foldLeft(body)((term, _) => Not(term))
 
-    // A stopped prefix stays outside the connective. Its branches have no
-    // pending binders, but their patterns retain that prefix and select one
-    // branch with a wildcard for the other.
+    // The source decision chooses branch binders and substitutions. Every
+    // checked plan then uses the same traversal, pattern context, and rebuild.
+    final case class ConnectiveReplay(retained: Vector[PendingBinder],
+                                      leftInput: Term, leftPending: Vector[PendingBinder],
+                                      rightInput: Term, rightPending: Vector[PendingBinder],
+                                      move: Option[(MiniscopeObservation, ReplayLaw)],
+                                      description: String)
+
+    // All connective decisions share the branch traversal and one-hole
+    // contexts; only validation, binder routing, and the proved law vary.
     def visitConnective(left: Term, right: Term, pending: Vector[PendingBinder], at: Position,
                         outerNegations: Int, outerPattern: PatternContext,
                         sourceConnective: (Term, Term) => Term,
-                        isConjunction: Boolean, isDisjunction: Boolean,
+                        kind: ConnectiveKind,
                         patternConnective: (LpTerm[Level.Obj], LpTerm[Level.Obj]) => LpTerm[Level.Obj]): Either[String, Term] = {
       val start = cursor
       while (cursor < observations.size && observations(cursor).sourceVisit == at) cursor += 1
@@ -145,30 +164,26 @@ object MiniscopeEncoding {
         case Vector(MiniscopeStopAtConnective(_, ordinal)) => ordinal == pending.size - 1
         case _ => false
       }
-      val boundedBothPush = isConjunction && pending.size == 1 && pending.head.universal &&
+      val boundedBothPush = kind == Conjunction && pending.size == 1 && pending.head.universal &&
         at == Position.root.argPos(2).abstrPos && outerNegations == 0 &&
         here == Vector(MiniscopePushAtConnective(at, 0, MiniscopePushBoth)) &&
         observations.size == 1
-      val boundedRightPush = isDisjunction && !polarity &&
+      val boundedRightPush = kind == Disjunction && !polarity &&
         pending.size == 3 && pending.forall(_.universal) &&
         at == Position.root.argPos(2).abstrPos.argPos(2).abstrPos.argPos(2).abstrPos &&
         here == Vector(MiniscopePushAtConnective(at, 2, MiniscopePushRight),
                        MiniscopeStopAtConnective(at, 1)) && observations.size == 3
-      if (boundedBothPush) {
+      val replay: Either[String, ConnectiveReplay] = if (boundedBothPush) {
         // This bounded case has one root binder, so distributing it needs no
         // branch reindexing. The recorded child still has to match exactly.
         if (!polarity)
           Left(s"Miniscope SCHEMA-05: expected a positive literal at ${at.pretty}")
         else if (!left.looseBounds.contains(1) || !right.looseBounds.contains(1))
           Left(s"Miniscope SCHEMA-05: recorded Both push disagrees with the source branches at ${at.pretty}")
-        else {
-          val binder = pending.head
-          val moved = sourceConnective(quant(binder, left), quant(binder, right))
-          val pattern = makePattern(polarity, outerPattern, Vector.empty)
-          moves += PlannedMove(here.head, ForallAndBoth, pattern)
-          Out.lp_debug_info(s"Miniscope SCHEMA-05: planned universal Both push at ${at.pretty}")
-          Right(moved)
-        }
+        else Right(ConnectiveReplay(Vector.empty,
+          left, pending, right, pending,
+          Some((here.head, ForallAndBoth)),
+          s"Miniscope SCHEMA-05: planned universal Both push at ${at.pretty}"))
       } else if (boundedRightPush) {
         // The innermost binder leaves the left branch. As in the producer's
         // one-push substitution, old indices 2 and 3 become 1 and 2 there.
@@ -180,44 +195,35 @@ object MiniscopeEncoding {
           val movedBinder = pending.last
           val leftAfter = left.substitute(BoundFront(1) +: Subst.shift(0)).betaNormalize
           val rightAfter = right.betaNormalize
-          val retainedPattern: PatternContext = hole => outerPattern(
-            retained.reverseIterator.foldLeft(hole) { (body, binder) =>
-              val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
-              LogicConst.Forall(typedName, body)
-            })
-          val leftPattern: PatternContext = hole =>
-            retainedPattern(patternConnective(hole, Wildcard[Level.Obj]()))
-          val rightPattern: PatternContext = hole =>
-            retainedPattern(patternConnective(Wildcard[Level.Obj](), hole))
-          moves += PlannedMove(here.head, ForallOrRightReplay,
-            makePattern(polarity, outerPattern, retained))
-          Out.lp_debug_info(s"Miniscope SCHEMA-03: planned right push with a retained blocker at ${at.pretty}")
-          for {
-            rebuiltLeft <- visit(leftAfter, Vector.empty, at.argPos(1), 0, leftPattern)
-            rebuiltRight <- visit(rightAfter, Vector(movedBinder), at.argPos(2), 0, rightPattern)
-          } yield surround(prefix(retained, sourceConnective(rebuiltLeft, rebuiltRight)), outerNegations)
+          Right(ConnectiveReplay(retained,
+            leftAfter, Vector.empty, rightAfter, Vector(movedBinder),
+            Some((here.head, ForallOrRightReplay)),
+            s"Miniscope SCHEMA-03: planned right push with a retained blocker at ${at.pretty}"))
         }
       } else if (here.exists(_.isInstanceOf[MiniscopePushAtConnective]))
         Left(s"Miniscope R1: connective push is outside the supported SCHEMA-01 path at ${at.pretty}")
       else if ((pending.isEmpty && here.nonEmpty) ||
                (pending.nonEmpty && !validStop))
         Left(s"Miniscope R1: missing or inconsistent connective stop at ${at.pretty}")
-      else {
-        Out.lp_debug_info(s"Miniscope R1: unchanged connective at ${at.pretty}, ${pending.size} retained binder(s)")
-        val retainedPattern: PatternContext = hole => outerPattern(
-          pending.reverseIterator.foldLeft(hole) { (body, binder) =>
-            val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
-            if (binder.universal) LogicConst.Forall(typedName, body)
-            else LogicConst.Exists(typedName, body)
-          })
+      else Right(ConnectiveReplay(pending,
+        left, Vector.empty, right, Vector.empty, None,
+        s"Miniscope R1: unchanged connective at ${at.pretty}, ${pending.size} retained binder(s)"))
+
+      replay.flatMap { checked =>
+        Out.lp_debug_info(checked.description)
+        checked.move.foreach { case (event, law) =>
+          moves += PlannedMove(event, law, makePattern(polarity, outerPattern, checked.retained))
+        }
+        val retainedPattern: PatternContext = hole =>
+          outerPattern(wrapPatternBinders(checked.retained, hole))
         val leftPattern: PatternContext = hole =>
           retainedPattern(patternConnective(hole, Wildcard[Level.Obj]()))
         val rightPattern: PatternContext = hole =>
           retainedPattern(patternConnective(Wildcard[Level.Obj](), hole))
         for {
-          rebuiltLeft <- visit(left, Vector.empty, at.argPos(1), 0, leftPattern)
-          rebuiltRight <- visit(right, Vector.empty, at.argPos(2), 0, rightPattern)
-        } yield surround(prefix(pending, sourceConnective(rebuiltLeft, rebuiltRight)), outerNegations)
+          rebuiltLeft <- visit(checked.leftInput, checked.leftPending, at.argPos(1), 0, leftPattern)
+          rebuiltRight <- visit(checked.rightInput, checked.rightPending, at.argPos(2), 0, rightPattern)
+        } yield surround(prefix(checked.retained, sourceConnective(rebuiltLeft, rebuiltRight)), outerNegations)
       }
     }
 
@@ -268,13 +274,13 @@ object MiniscopeEncoding {
         }
       case (left & right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => &(a, b), true, false, LogicConst.And.apply)
+          (a, b) => &(a, b), Conjunction, LogicConst.And.apply)
       case (left ||| right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => |||(a, b), false, true, LogicConst.Or.apply)
+          (a, b) => |||(a, b), Disjunction, LogicConst.Or.apply)
       case Impl(left, right) =>
         visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => Impl(a, b), false, false, LogicConst.Imp.apply)
+          (a, b) => Impl(a, b), Implication, LogicConst.Imp.apply)
       case leaf =>
         // No more decisions remain on this path; restore its pending context.
         Right(surround(prefix(pending, leaf), outerNegations))
@@ -297,11 +303,7 @@ object MiniscopeEncoding {
   private def makePattern(polarity: Boolean, outer: PatternContext,
                           binders: Vector[PendingBinder]): RewritePattern = {
     val hole = Const[Level.Obj](SymRef.LP(QName.local("x")))
-    val bodyPattern = outer(binders.reverseIterator.foldLeft[LpTerm[Level.Obj]](hole) { (body, binder) =>
-      val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
-      if (binder.universal) LogicConst.Forall(typedName, body)
-      else LogicConst.Exists(typedName, body)
-    })
+    val bodyPattern = outer(wrapPatternBinders(binders, hole))
     // PatternBuilder adds the signed literal and unit-clause context.
     val info = PatternBuilder.PatternInfo(0, None, polarity, PatternBuilder.LiteralBody)
     val literalPattern = PatternBuilder.generatePatternLit(info, bodyPattern)
