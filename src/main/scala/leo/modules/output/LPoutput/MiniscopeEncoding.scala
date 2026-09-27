@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput
 
 import leo.Out
 import leo.datastructures.Term._
-import leo.datastructures.{BoundFront, Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopeObservation, MiniscopePushAtConnective, MiniscopePushBoth, MiniscopePushLeft, MiniscopePushRight, MiniscopeStopAtConnective, MiniscopeTrace, Position, Signature, Subst, Term, Type}
+import leo.datastructures.{BoundFront, Clause, ClauseProxy, MiniscopeCrossNegation, MiniscopeObservation, MiniscopePush, MiniscopePushAtConnective, MiniscopePushBoth, MiniscopePushLeft, MiniscopePushRight, MiniscopeStopAtConnective, MiniscopeTrace, Position, Signature, Subst, Term, Type}
 import leo.modules.HOLSignature.{Exists, Forall, Impl, Not, &, |||}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
@@ -20,9 +20,16 @@ object MiniscopeEncoding {
   private case object ExistsNotEqNotForall extends ReplayLaw { val name = "exists_not_eq_not_forall" }
   private case object ForallNotEqNotExists extends ReplayLaw { val name = "forall_not_eq_not_exists" }
   private case object ForallAndBoth extends ReplayLaw { val name = "forall_and_both" }
+  private case object ForallAndLeftReplay extends ReplayLaw { val name = "forall_and_left_replay" }
+  private case object ForallAndRightReplay extends ReplayLaw { val name = "forall_and_right_replay" }
+  private case object ForallOrLeftReplay extends ReplayLaw { val name = "forall_or_left_replay" }
   private case object ForallOrRightReplay extends ReplayLaw { val name = "forall_or_right_replay" }
+  private case object ExistsOrLeft extends ReplayLaw { val name = "exists_or_left" }
+  private case object ExistsOrRight extends ReplayLaw { val name = "exists_or_right" }
   private case object ExistsImpRight extends ReplayLaw { val name = "exists_imp_right" }
+  private case object ExistsImpLeft extends ReplayLaw { val name = "exists_imp_left" }
   private case object ForallImpLeft extends ReplayLaw { val name = "forall_imp_left" }
+  private case object ForallImpRight extends ReplayLaw { val name = "forall_imp_right" }
   private case object ExistsImpBoth extends ReplayLaw { val name = "exists_imp_both" }
   private case object ExistsAndRight extends ReplayLaw { val name = "exists_and_right" }
   private case object ExistsAndLeft extends ReplayLaw { val name = "exists_and_left" }
@@ -32,6 +39,27 @@ object MiniscopeEncoding {
   private case object Conjunction extends ConnectiveKind
   private case object Disjunction extends ConnectiveKind
   private case object Implication extends ConnectiveKind
+
+  /** Each recorded connective move has one proved, source-oriented equality. */
+  private def connectiveLaw(kind: ConnectiveKind, universal: Boolean, movement: MiniscopePush): Option[ReplayLaw] =
+    (kind, universal, movement) match {
+      case (Conjunction, true, MiniscopePushLeft) => Some(ForallAndLeftReplay)
+      case (Conjunction, true, MiniscopePushRight) => Some(ForallAndRightReplay)
+      case (Conjunction, true, MiniscopePushBoth) => Some(ForallAndBoth)
+      case (Conjunction, false, MiniscopePushLeft) => Some(ExistsAndLeft)
+      case (Conjunction, false, MiniscopePushRight) => Some(ExistsAndRight)
+      case (Disjunction, true, MiniscopePushLeft) => Some(ForallOrLeftReplay)
+      case (Disjunction, true, MiniscopePushRight) => Some(ForallOrRightReplay)
+      case (Disjunction, false, MiniscopePushLeft) => Some(ExistsOrLeft)
+      case (Disjunction, false, MiniscopePushRight) => Some(ExistsOrRight)
+      case (Disjunction, false, MiniscopePushBoth) => Some(ExistsOrBoth)
+      case (Implication, true, MiniscopePushLeft) => Some(ForallImpLeft)
+      case (Implication, true, MiniscopePushRight) => Some(ForallImpRight)
+      case (Implication, false, MiniscopePushLeft) => Some(ExistsImpLeft)
+      case (Implication, false, MiniscopePushRight) => Some(ExistsImpRight)
+      case (Implication, false, MiniscopePushBoth) => Some(ExistsImpBoth)
+      case _ => None
+    }
 
   // A binder remains pending while the traversal follows its body. Its kind
   // changes when a recorded crossing moves it under a negation. The pattern
@@ -93,7 +121,7 @@ object MiniscopeEncoding {
   }
 
   /**
-    * BLUEPRINT-MINI-2, bounded SCHEMA-01 through SCHEMA-07 paths:
+    * BLUEPRINT-MINI-2, recorded SCHEMA-01 through SCHEMA-07 replay:
     * 0. Validate and translate the recorded parent and child together.
     * 1. Replay recorded moves against the parent and check the resulting child.
     * 2. Emit patterned rewrites backward and refine the parent proof.
@@ -166,139 +194,82 @@ object MiniscopeEncoding {
       val start = cursor
       while (cursor < observations.size && observations(cursor).sourceVisit == at) cursor += 1
       val here = observations.slice(start, cursor)
-      val validStop = here match {
-        case Vector(MiniscopeStopAtConnective(_, ordinal)) => ordinal == pending.size - 1
-        case _ => false
+      // The producer tests pending binders from inner to outer and stops at
+      // the first binder that cannot move. Validate every recorded decision
+      // against its source occurrences; never choose a move from the formula.
+      var retained = Vector.empty[PendingBinder]
+      var leftQuants = Vector.empty[PendingBinder]
+      var rightQuants = Vector.empty[PendingBinder]
+      var leftIndices = Vector.empty[Int]
+      var rightIndices = Vector.empty[Int]
+      val planned = Vector.newBuilder[(MiniscopeObservation, ReplayLaw, Vector[PendingBinder])]
+      var failure: Option[String] = None
+      var stopped = false
+      var tested = 0
+      while (tested < pending.size && !stopped && failure.isEmpty) {
+        val ordinal = pending.size - 1 - tested
+        val binder = pending(ordinal)
+        val bound = tested + 1
+        val leftOccurs = left.looseBounds.contains(bound)
+        val rightOccurs = right.looseBounds.contains(bound)
+        // The producer permits duplication only for ∀/∧ and ∃/∨,⇒.
+        val canDuplicate = kind match {
+          case Conjunction => binder.universal
+          case Disjunction | Implication => !binder.universal
+        }
+        val expected: Option[MiniscopePush] = (leftOccurs, rightOccurs) match {
+          case (true, false) => Some(MiniscopePushLeft)
+          case (false, true) => Some(MiniscopePushRight)
+          case (true, true) if canDuplicate => Some(MiniscopePushBoth)
+          case _ => None
+        }
+        (here.lift(tested), expected) match {
+          case (Some(event @ MiniscopePushAtConnective(_, `ordinal`, movement)), Some(expectedMovement))
+              if movement == expectedMovement =>
+            connectiveLaw(kind, binder.universal, movement) match {
+              case None => failure = Some(s"Miniscope R1: no proved law for $kind $movement at ${at.pretty}")
+              case Some(law) =>
+                planned += ((event, law, pending.take(ordinal)))
+                if (movement == MiniscopePushLeft || movement == MiniscopePushBoth)
+                  leftQuants = binder.copy(universal = if (kind == Implication) !binder.universal else binder.universal) +: leftQuants
+                if (movement == MiniscopePushRight || movement == MiniscopePushBoth)
+                  rightQuants = binder +: rightQuants
+                leftIndices = (if (leftQuants.nonEmpty) leftQuants.size else 1) +: leftIndices
+                rightIndices = (if (rightQuants.nonEmpty) rightQuants.size else 1) +: rightIndices
+            }
+          case (Some(MiniscopeStopAtConnective(_, `ordinal`)), None) =>
+            retained = pending.take(ordinal + 1)
+            stopped = true
+          case _ =>
+            failure = Some(s"Miniscope R1: missing or inconsistent connective decision at ${at.pretty}, binder $ordinal")
+        }
+        tested += 1
       }
-      val boundedBothPush = kind == Conjunction && pending.size == 1 && pending.head.universal &&
-        at == Position.root.argPos(2).abstrPos && outerNegations == 0 &&
-        here == Vector(MiniscopePushAtConnective(at, 0, MiniscopePushBoth)) &&
-        observations.size == 1
-      val boundedRightPush = kind == Disjunction && !polarity &&
-        pending.size == 3 && pending.forall(_.universal) &&
-        at == Position.root.argPos(2).abstrPos.argPos(2).abstrPos.argPos(2).abstrPos &&
-        here == Vector(MiniscopePushAtConnective(at, 2, MiniscopePushRight),
-                       MiniscopeStopAtConnective(at, 1)) && observations.size == 3
-      val boundedImplicationPushes = kind == Implication && !polarity &&
-        pending.size == 2 && pending.head.universal && !pending.last.universal &&
-        at == Position.root.argPos(2).abstrPos.argPos(2).abstrPos &&
-        here == Vector(MiniscopePushAtConnective(at, 1, MiniscopePushRight),
-                       MiniscopePushAtConnective(at, 0, MiniscopePushLeft)) &&
-        observations.size == 2
-      val boundedImplicationBoth = kind == Implication && !polarity &&
-        pending.size == 1 && !pending.head.universal &&
-        at == Position.root.argPos(2).abstrPos &&
-        here == Vector(MiniscopePushAtConnective(at, 0, MiniscopePushBoth)) &&
-        observations.size == 1
-      val boundedConjunctionSides = kind == Conjunction && !polarity &&
-        pending.size == 2 && pending.forall(!_.universal) &&
-        at == Position.root.argPos(2).abstrPos.argPos(2).abstrPos &&
-        here == Vector(MiniscopePushAtConnective(at, 1, MiniscopePushRight),
-                       MiniscopePushAtConnective(at, 0, MiniscopePushLeft)) &&
-        observations.size == 2
-      val boundedDisjunctionBoth = kind == Disjunction && !polarity &&
-        pending.size == 2 && pending.head.universal && !pending.last.universal &&
-        at == Position.root.argPos(1).argPos(2).abstrPos.argPos(2).abstrPos
-          .argPos(1).argPos(2).abstrPos.argPos(2).abstrPos &&
-        here == Vector(MiniscopePushAtConnective(at, 1, MiniscopePushBoth),
-                       MiniscopeStopAtConnective(at, 0)) &&
-        observations.size == 5
-      val replay: Either[String, ConnectiveReplay] = if (boundedBothPush) {
-        // This bounded case has one root binder, so distributing it needs no
-        // branch reindexing. The recorded child still has to match exactly.
-        if (!polarity)
-          Left(s"Miniscope SCHEMA-05: expected a positive literal at ${at.pretty}")
-        else if (!left.looseBounds.contains(1) || !right.looseBounds.contains(1))
-          Left(s"Miniscope SCHEMA-05: recorded Both push disagrees with the source branches at ${at.pretty}")
-        else Right(ConnectiveReplay(Vector.empty,
-          left, pending, right, pending,
-          Vector((here.head, ForallAndBoth, Vector.empty)),
-          s"Miniscope SCHEMA-05: planned universal Both push at ${at.pretty}"))
-      } else if (boundedRightPush) {
-        // The innermost binder leaves the left branch. As in the producer's
-        // one-push substitution, old indices 2 and 3 become 1 and 2 there.
-        if (left.looseBounds.contains(1) || !right.looseBounds.contains(1) ||
-            !left.looseBounds.contains(2) || !right.looseBounds.contains(2))
-          Left(s"Miniscope SCHEMA-03: recorded right push or blocker disagrees with the source branches at ${at.pretty}")
-        else {
-          val retained = pending.take(2)
-          val movedBinder = pending.last
-          val leftAfter = left.substitute(BoundFront(1) +: Subst.shift(0)).betaNormalize
-          val rightAfter = right.betaNormalize
+      if (failure.isEmpty && here.size != tested)
+        failure = Some(s"Miniscope R1: extra connective decisions at ${at.pretty}")
+      if (failure.isEmpty && pending.isEmpty && here.nonEmpty)
+        failure = Some(s"Miniscope R1: unexpected connective decision at ${at.pretty}")
+
+      // This is the producer's revListToSubst calculation. A moved binder
+      // keeps its branch-local index; a binder absent from a branch shifts out.
+      def branchSubst(indices: Vector[Int], branchBinders: Int): Subst =
+        indices.foldLeft(Subst.shift(branchBinders): Subst) { (subst, index) =>
+          BoundFront(index) +: subst
+        }
+      val replay: Either[String, ConnectiveReplay] = failure match {
+        case Some(reason) => Left(reason)
+        case None =>
+          val leftSubstituted = left.substitute(branchSubst(leftIndices, leftQuants.size))
+          val rightSubstituted = right.substitute(branchSubst(rightIndices, rightQuants.size))
+          val leftInput = if (kind == Implication) leftSubstituted else leftSubstituted.betaNormalize
+          val rightInput = if (kind == Implication) rightSubstituted else rightSubstituted.betaNormalize
           Right(ConnectiveReplay(retained,
-            leftAfter, Vector.empty, rightAfter, Vector(movedBinder),
-            Vector((here.head, ForallOrRightReplay, retained)),
-            s"Miniscope SCHEMA-03: planned right push with a retained blocker at ${at.pretty}"))
-        }
-      } else if (boundedImplicationPushes) {
-        // The inner existential occurs only in the consequent, and the outer
-        // universal only in the antecedent. The latter dualizes when pushed.
-        if (left.looseBounds.contains(1) || !right.looseBounds.contains(1) ||
-            !left.looseBounds.contains(2) || right.looseBounds.contains(2))
-          Left(s"Miniscope SCHEMA-04: recorded implication pushes disagree with the source branches at ${at.pretty}")
-        else {
-          val outer = pending.head
-          val inner = pending.last
-          // Both one-sided pushes were recorded at this visit. This is the
-          // producer's revListToSubst([1, 1], shift = 1) for each branch.
-          val branchSubst = BoundFront(1) +: BoundFront(1) +: Subst.shift(1)
-          Right(ConnectiveReplay(Vector.empty,
-            left.substitute(branchSubst), Vector(outer.crossed),
-            right.substitute(branchSubst), Vector(inner),
-            Vector((here.head, ExistsImpRight, Vector(outer)),
-                   (here(1), ForallImpLeft, Vector.empty)),
-            s"Miniscope SCHEMA-04: planned consequent then antecedent pushes at ${at.pretty}"))
-        }
-      } else if (boundedImplicationBoth) {
-        if (!left.looseBounds.contains(1) || !right.looseBounds.contains(1))
-          Left(s"Miniscope SCHEMA-07: recorded Both push disagrees with the source branches at ${at.pretty}")
-        else {
-          val binder = pending.head
-          Right(ConnectiveReplay(Vector.empty,
-            left, Vector(binder.crossed), right, pending,
-            Vector((here.head, ExistsImpBoth, Vector.empty)),
-            s"Miniscope SCHEMA-07: planned existential Both push at ${at.pretty}"))
-        }
-      } else if (boundedConjunctionSides) {
-        if (left.looseBounds.contains(1) || !right.looseBounds.contains(1) ||
-            !left.looseBounds.contains(2) || right.looseBounds.contains(2))
-          Left(s"Miniscope SCHEMA-02: recorded conjunction pushes disagree with the source branches at ${at.pretty}")
-        else {
-          val outer = pending.head
-          val inner = pending.last
-          // As for two one-sided implication pushes, both original branches
-          // are reindexed with the producer's [1, 1] substitution.
-          val branchSubst = BoundFront(1) +: BoundFront(1) +: Subst.shift(1)
-          Right(ConnectiveReplay(Vector.empty,
-            left.substitute(branchSubst), Vector(outer),
-            right.substitute(branchSubst), Vector(inner),
-            Vector((here.head, ExistsAndRight, Vector(outer)),
-                   (here(1), ExistsAndLeft, Vector.empty)),
-            s"Miniscope SCHEMA-02: planned right then left conjunction pushes at ${at.pretty}"))
-        }
-      } else if (boundedDisjunctionBoth) {
-        if (!left.looseBounds.contains(1) || !right.looseBounds.contains(1) ||
-            !left.looseBounds.contains(2) || !right.looseBounds.contains(2))
-          Left(s"Miniscope SCHEMA-06: recorded Both push or blocker disagrees with the source branches at ${at.pretty}")
-        else {
-          val retained = pending.take(1)
-          val moved = pending.last
-          Right(ConnectiveReplay(retained,
-            left, Vector(moved), right, Vector(moved),
-            Vector((here.head, ExistsOrBoth, retained)),
-            s"Miniscope SCHEMA-06: planned existential Both push with retained blocker at ${at.pretty}"))
-        }
-      } else if (here.exists(_.isInstanceOf[MiniscopePushAtConnective]))
-        Left(s"Miniscope R1: connective push is outside the supported SCHEMA-01 path at ${at.pretty}")
-      else if ((pending.isEmpty && here.nonEmpty) ||
-               (pending.nonEmpty && !validStop))
-        Left(s"Miniscope R1: missing or inconsistent connective stop at ${at.pretty}")
-      else Right(ConnectiveReplay(pending,
-        left, Vector.empty, right, Vector.empty, Vector.empty,
-        s"Miniscope R1: unchanged connective at ${at.pretty}, ${pending.size} retained binder(s)"))
+            leftInput, leftQuants, rightInput, rightQuants, planned.result(),
+            s"Miniscope R1: replayed $tested connective decision(s) at ${at.pretty}"))
+      }
 
       replay.flatMap { checked =>
-        Out.lp_debug_info(checked.description)
+        if (here.nonEmpty) Out.lp_debug_info(checked.description)
         checked.moves.foreach { case (event, law, binders) =>
           moves += PlannedMove(event, law, makePattern(polarity, outerPattern, binders))
         }
