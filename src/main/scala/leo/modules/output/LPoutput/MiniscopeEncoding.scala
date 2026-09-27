@@ -6,7 +6,7 @@ import leo.datastructures.{BoundFront, Clause, ClauseProxy, MiniscopeCrossNegati
 import leo.modules.HOLSignature.{Exists, Forall, Impl, Not, &, |||}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Rewrite, RewritePattern, Side, Simplify}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Rewrite, RewritePattern, Simplify}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Wildcard}
 import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LogicConst, LpSig, LpTerm, LpType, Name, QName, RenderOptions, Renderer, SymRef, TypeEncoding, lpClauseInst}
 
@@ -17,39 +17,39 @@ object MiniscopeEncoding {
     def name: String
     def theorem: LpTerm[Level.Meta] = Const[Level.Meta](SymRef.LP(QName.local(name)))
   }
-  private case object ExistsNotEqNotForall extends ReplayLaw { val name = "exists_not_eq_not_forall" }
-  private case object ForallNotEqNotExists extends ReplayLaw { val name = "forall_not_eq_not_exists" }
-  private case object ForallAndBoth extends ReplayLaw { val name = "forall_and_both" }
-  private case object ForallAndLeftReplay extends ReplayLaw { val name = "forall_and_left_replay" }
-  private case object ForallAndRightReplay extends ReplayLaw { val name = "forall_and_right_replay" }
-  private case object ForallOrLeftReplay extends ReplayLaw { val name = "forall_or_left_replay" }
-  private case object ForallOrRightReplay extends ReplayLaw { val name = "forall_or_right_replay" }
-  private case object ExistsOrLeft extends ReplayLaw { val name = "exists_or_left" }
-  private case object ExistsOrRight extends ReplayLaw { val name = "exists_or_right" }
-  private case object ExistsImpRight extends ReplayLaw { val name = "exists_imp_right" }
-  private case object ExistsImpLeft extends ReplayLaw { val name = "exists_imp_left" }
-  private case object ForallImpLeft extends ReplayLaw { val name = "forall_imp_left" }
-  private case object ForallImpRight extends ReplayLaw { val name = "forall_imp_right" }
-  private case object ExistsImpBoth extends ReplayLaw { val name = "exists_imp_both" }
-  private case object ExistsAndRight extends ReplayLaw { val name = "exists_and_right" }
-  private case object ExistsAndLeft extends ReplayLaw { val name = "exists_and_left" }
-  private case object ExistsOrBoth extends ReplayLaw { val name = "exists_or_both" }
+  private case object NotForallExistsNot extends ReplayLaw { val name = "¬∀=∃¬" }
+  private case object NotExistsForallNot extends ReplayLaw { val name = "¬∃=∀¬" }
+  private case object ForallAndBoth extends ReplayLaw { val name = "∀∧" }
+  private case object ForallAndDistLeft extends ReplayLaw { val name = "∀∧_dist_l" }
+  private case object ForallAndDistRight extends ReplayLaw { val name = "∀∧_dist_r" }
+  private case object ForallOrDistLeft extends ReplayLaw { val name = "∀∨_dist_l" }
+  private case object ForallOrDistRight extends ReplayLaw { val name = "∀∨_dist_r" }
+  private case object ExistsOrLeft extends ReplayLaw { val name = "∃∨_l" }
+  private case object ExistsOrRight extends ReplayLaw { val name = "∃∨_r" }
+  private case object ExistsImpRight extends ReplayLaw { val name = "∃⇒_r" }
+  private case object ExistsImpLeft extends ReplayLaw { val name = "∃⇒_l" }
+  private case object ForallImpLeft extends ReplayLaw { val name = "∀⇒_l" }
+  private case object ForallImpRight extends ReplayLaw { val name = "∀⇒_r" }
+  private case object ExistsImpBoth extends ReplayLaw { val name = "∃⇒" }
+  private case object ExistsAndRight extends ReplayLaw { val name = "∃∧_r" }
+  private case object ExistsAndLeft extends ReplayLaw { val name = "∃∧_l" }
+  private case object ExistsOrBoth extends ReplayLaw { val name = "∃∨" }
 
   private sealed trait ConnectiveKind
   private case object Conjunction extends ConnectiveKind
   private case object Disjunction extends ConnectiveKind
   private case object Implication extends ConnectiveKind
 
-  /** Each recorded connective move has one proved, source-oriented equality. */
+  /** Each recorded connective move has one proved child-to-parent equality. */
   private def connectiveLaw(kind: ConnectiveKind, universal: Boolean, movement: MiniscopePush): Option[ReplayLaw] =
     (kind, universal, movement) match {
-      case (Conjunction, true, MiniscopePushLeft) => Some(ForallAndLeftReplay)
-      case (Conjunction, true, MiniscopePushRight) => Some(ForallAndRightReplay)
+      case (Conjunction, true, MiniscopePushLeft) => Some(ForallAndDistLeft)
+      case (Conjunction, true, MiniscopePushRight) => Some(ForallAndDistRight)
       case (Conjunction, true, MiniscopePushBoth) => Some(ForallAndBoth)
       case (Conjunction, false, MiniscopePushLeft) => Some(ExistsAndLeft)
       case (Conjunction, false, MiniscopePushRight) => Some(ExistsAndRight)
-      case (Disjunction, true, MiniscopePushLeft) => Some(ForallOrLeftReplay)
-      case (Disjunction, true, MiniscopePushRight) => Some(ForallOrRightReplay)
+      case (Disjunction, true, MiniscopePushLeft) => Some(ForallOrDistLeft)
+      case (Disjunction, true, MiniscopePushRight) => Some(ForallOrDistRight)
       case (Disjunction, false, MiniscopePushLeft) => Some(ExistsOrLeft)
       case (Disjunction, false, MiniscopePushRight) => Some(ExistsOrRight)
       case (Disjunction, false, MiniscopePushBoth) => Some(ExistsOrBoth)
@@ -61,23 +61,6 @@ object MiniscopeEncoding {
       case _ => None
     }
 
-  // A binder remains pending while the traversal follows its body. Its kind
-  // changes when a recorded crossing moves it under a negation. The pattern
-  // name is local to the wrapper; matching does not require the goal's name.
-  private final case class PendingBinder(typ: Type, universal: Boolean, patternName: Name) {
-    def crossed: PendingBinder = copy(universal = !universal)
-  }
-
-  /** Wrap a hole with the part of the Lambdapi goal already traversed. */
-  private type PatternContext = LpTerm[Level.Obj] => LpTerm[Level.Obj]
-
-  private def wrapPatternBinders(binders: Vector[PendingBinder], hole: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
-    binders.reverseIterator.foldLeft(hole) { (body, binder) =>
-      val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
-      if (binder.universal) LogicConst.Forall(typedName, body)
-      else LogicConst.Exists(typedName, body)
-    }
-
   // Each pattern targets the post-move term. The script consumes moves backward,
   // starting from the recorded child goal.
   private final case class PlannedMove(observation: MiniscopeObservation,
@@ -87,12 +70,12 @@ object MiniscopeEncoding {
   // Inputs shared by replay and script emission after checking the step shape.
   private final case class Context(parent: Clause,
                                    child: Clause,
-                                   parentProofName: Name,
+                                   parentProofName: QName,
                                    encParent: lpClauseInst,
                                    encChild: lpClauseInst,
                                    trace: MiniscopeTrace)
 
-  private def initContext(child: ClauseProxy, parentProofNames: Seq[Name]): Either[String, Context] = {
+  private def initContext(child: ClauseProxy, parentProofNames: Seq[QName]): Either[String, Context] = {
     // This encoder handles one non-equational literal and one parent proof.
     val parents = child.annotation.parents
     if (parents.size != 1 || parentProofNames.size != 1)
@@ -112,7 +95,7 @@ object MiniscopeEncoding {
         // the same Lambdapi names for shared free variables.
         val (_, encoded) = lpClauseInst.apply_to_set(Seq(parent, result))
         val ctx = Context(parent, result, parentProofNames.head, encoded.head, encoded(1), trace)
-        Out.lp_debug_info(s"Miniscope step ${child.id}: parent ${parents.head.id} as ${ctx.parentProofName.value}, ${ctx.trace.observations.size} source observations")
+        Out.lp_debug_info(s"Miniscope step ${child.id}: parent ${parents.head.id} as ${Renderer.qname(ctx.parentProofName, RenderOptions())}, ${ctx.trace.observations.size} source observations")
         Out.lp_debug_info(s"Miniscope source observations: ${ctx.trace.observations}")
         Out.lp_debug_info(s"Miniscope translated parent: ${ctx.encParent.term}")
         Out.lp_debug_info(s"Miniscope translated child: ${ctx.encChild.term}")
@@ -120,13 +103,15 @@ object MiniscopeEncoding {
     }
   }
 
+  // Orchestrator
+
   /**
     * BLUEPRINT-MINI-2, recorded SCHEMA-01 through SCHEMA-07 replay:
     * 0. Validate and translate the recorded parent and child together.
     * 1. Replay recorded moves against the parent and check the resulting child.
     * 2. Emit patterned rewrites backward and refine the parent proof.
     */
-  def encMiniscope(child: ClauseProxy, parentProofNames: Seq[Name], sig: LpSig): EncodeResult = {
+  def encMiniscope(child: ClauseProxy, parentProofNames: Seq[QName], sig: LpSig): EncodeResult = {
     Out.lp_debug_info(s"Encoding Miniscope step ${child.id} with ${parentProofNames.size} resolved parent name(s)")
     initContext(child, parentProofNames) match {
       case Left(reason) => NotEncodable(reason)
@@ -148,14 +133,23 @@ object MiniscopeEncoding {
     // move; beta cleanup exposes the next target in the resulting goal.
     val reverseMoves = moves.reverse
     val rewrites = reverseMoves.zipWithIndex.flatMap { case (move, index) =>
-      val rewrite = Rewrite(Some(move.pattern), move.law.theorem, Side.Left)
+      val rewrite = Rewrite(Some(move.pattern), move.law.theorem)
       Out.lp_debug_info(s"Miniscope ${move.observation.sourceVisit.pretty}: ${Renderer.proof(rewrite, RenderOptions(), sig)}")
       // beta-reduce between rewrite tactic applications
       if (index < reverseMoves.size - 1) Vector(rewrite, Simplify(onlyBeta = true))
       else Vector(rewrite)
     }
-    val refine = Refine(Const[Level.Meta](SymRef.LP(QName.local(ctx.parentProofName.value))))
+    val refine = Refine(Const[Level.Meta](SymRef.LP(ctx.parentProofName)))
     Encoded(rewrites :+ refine)
+  }
+
+  // Replay of recorded miniscoping traces
+
+  // A binder remains pending while the traversal follows its body. Its kind
+  // changes when a recorded crossing moves it under a negation. The pattern
+  // name is local to the wrapper; matching does not require the goal's name.
+  private final case class PendingBinder(typ: Type, universal: Boolean, patternName: Name) {
+    def crossed: PendingBinder = copy(universal = !universal)
   }
 
   /** Traverse the parent and consume source decisions at their recorded visits. */
@@ -322,7 +316,7 @@ object MiniscopeEncoding {
               val crossed = crossedPending(ordinal).crossed
               crossedPending = crossedPending.updated(ordinal, crossed)
               val pattern = makePattern(polarity, outerPattern, crossedPending.take(ordinal))
-              val law = if (crossed.universal) ExistsNotEqNotForall else ForallNotEqNotExists
+              val law = if (crossed.universal) NotForallExistsNot else NotExistsForallNot
               moves += PlannedMove(event, law, pattern)
             }
             // This negation remains outside subsequent source visits. Reuse
@@ -357,6 +351,16 @@ object MiniscopeEncoding {
       else Right(planned)
     }
   }
+
+  /** Wrap a hole with the part of the Lambdapi goal already traversed. */
+  private type PatternContext = LpTerm[Level.Obj] => LpTerm[Level.Obj]
+
+  private def wrapPatternBinders(binders: Vector[PendingBinder], hole: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    binders.reverseIterator.foldLeft(hole) { (body, binder) =>
+      val typedName = (binder.patternName, LpType.El(TypeEncoding.type2LP(binder.typ)))
+      if (binder.universal) LogicConst.Forall(typedName, body)
+      else LogicConst.Exists(typedName, body)
+    }
 
   /** Compose the reusable outer context with this move's pending binders. */
   private def makePattern(polarity: Boolean, outer: PatternContext,
