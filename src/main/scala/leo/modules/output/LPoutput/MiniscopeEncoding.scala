@@ -6,7 +6,7 @@ import leo.datastructures.{BoundFront, Clause, ClauseProxy, MiniscopeCrossNegati
 import leo.modules.HOLSignature.{Exists, Forall, Impl, Not, &, |||}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Rewrite, RewritePattern, Simplify}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Rewrite, RewritePattern, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Wildcard}
 import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LogicConst, LpSig, LpTerm, LpType, Name, QName, RenderOptions, Renderer, SymRef, TypeEncoding, lpClauseInst}
 
@@ -136,7 +136,7 @@ object MiniscopeEncoding {
       val rewrite = Rewrite(Some(move.pattern), move.law.theorem)
       Out.lp_debug_info(s"Miniscope ${move.observation.sourceVisit.pretty}: ${Renderer.proof(rewrite, RenderOptions(), sig)}")
       // beta-reduce between rewrite tactic applications
-      if (index < reverseMoves.size - 1) Vector(rewrite, Simplify(onlyBeta = true))
+      if (index < reverseMoves.size - 1) Vector(rewrite, Try(Simplify(onlyBeta = true)))
       else Vector(rewrite)
     }
     val refine = Refine(Const[Level.Meta](SymRef.LP(ctx.parentProofName)))
