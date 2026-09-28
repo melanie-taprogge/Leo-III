@@ -37,10 +37,25 @@ object MiniscopeEncoding {
   private case object ExistsAndLeft extends ReplayLaw { val name = "∃∧_l" }
   private case object ExistsOrBoth extends ReplayLaw { val name = "∃∨" }
 
-  private sealed trait ConnectiveKind
-  private case object Conjunction extends ConnectiveKind
-  private case object Disjunction extends ConnectiveKind
-  private case object Implication extends ConnectiveKind
+  private sealed trait ConnectiveKind {
+    def leoRepresentation(left: Term, right: Term): Term
+    def lpRepresentation(left: LpTerm[Level.Obj], right: LpTerm[Level.Obj]): LpTerm[Level.Obj]
+  }
+  private case object Conjunction extends ConnectiveKind {
+    override def leoRepresentation(left: Term, right: Term): Term = &(left, right)
+    override def lpRepresentation(left: LpTerm[Level.Obj], right: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LogicConst.And(left, right)
+  }
+  private case object Disjunction extends ConnectiveKind {
+    override def leoRepresentation(left: Term, right: Term): Term = |||(left, right)
+    override def lpRepresentation(left: LpTerm[Level.Obj], right: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LogicConst.Or(left, right)
+  }
+  private case object Implication extends ConnectiveKind {
+    override def leoRepresentation(left: Term, right: Term): Term = Impl(left, right)
+    override def lpRepresentation(left: LpTerm[Level.Obj], right: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LogicConst.Imp(left, right)
+  }
 
   /** Mapping of recorded connective moves to the corresponding child-to-parent equality. */
   private def connectiveLaw(kind: ConnectiveKind, universal: Boolean, movement: MiniscopePush): Option[ReplayLaw] =
@@ -165,20 +180,25 @@ object MiniscopeEncoding {
                                       moves: Vector[(MiniscopeObservation, ReplayLaw, Vector[PendingBinder])],
                                       description: String)
 
+    // Apply substitutions to fix binders. Necessary to reconstruct and check against child.
+    def branchSubst(indices: Vector[Int], branchBinders: Int): Subst =
+      indices.foldLeft(Subst.shift(branchBinders): Subst) { (subst, index) =>
+        BoundFront(index) +: subst
+      }
+
     // Shared traversal of binary connective terms.
     // All connective decisions share the branch traversal and one-hole
     // contexts; only validation, binder routing, and the proved law vary.
     def visitConnective(left: Term, right: Term, pending: Vector[PendingBinder], at: Position,
                         outerNegations: Int, outerPattern: PatternContext,
-                        sourceConnective: (Term, Term) => Term,
-                        kind: ConnectiveKind,
-                        patternConnective: (LpTerm[Level.Obj], LpTerm[Level.Obj]) => LpTerm[Level.Obj]): Either[String, Term] = {
+                        kind: ConnectiveKind): Either[String, Term] = {
+      // collect all recorded crossings at given position
       val start = cursor
       while (cursor < observations.size && observations(cursor).sourceVisit == at) cursor += 1
       val here = observations.slice(start, cursor)
       // The producer tests pending binders from inner to outer and stops at
       // the first binder that cannot move. Validate every recorded decision
-      // against its source occurrences; never choose a move from the formula.
+      // against its source occurrences.
       var retained = Vector.empty[PendingBinder]
       var leftQuants = Vector.empty[PendingBinder]
       var rightQuants = Vector.empty[PendingBinder]
@@ -192,6 +212,7 @@ object MiniscopeEncoding {
         val ordinal = pending.size - 1 - tested
         val binder = pending(ordinal)
         val bound = tested + 1
+        // test if recorded move is allowed at given position
         val leftOccurs = left.looseBounds.contains(bound)
         val rightOccurs = right.looseBounds.contains(bound)
         // The producer permits duplication only for ∀/∧ and ∃/∨,⇒.
@@ -206,10 +227,11 @@ object MiniscopeEncoding {
           case _ => None
         }
         (here.lift(tested), expected) match {
+          // expected law is applied on trace -> record planned move
           case (Some(event @ MiniscopePushAtConnective(_, `ordinal`, movement)), Some(expectedMovement))
               if movement == expectedMovement =>
             connectiveLaw(kind, binder.universal, movement) match {
-              case None => failure = Some(s"Miniscope R1: no proved law for $kind $movement at ${at.pretty}")
+              case None => failure = Some(s"Miniscope: no proved law for $kind $movement at ${at.pretty}")
               case Some(law) =>
                 planned += ((event, law, pending.take(ordinal)))
                 if (movement == MiniscopePushLeft || movement == MiniscopePushBoth)
@@ -219,25 +241,21 @@ object MiniscopeEncoding {
                 leftIndices = (if (leftQuants.nonEmpty) leftQuants.size else 1) +: leftIndices
                 rightIndices = (if (rightQuants.nonEmpty) rightQuants.size else 1) +: rightIndices
             }
+          // no further crossing of quantifiers possible -> stop miniscoping
           case (Some(MiniscopeStopAtConnective(_, `ordinal`)), None) =>
             retained = pending.take(ordinal + 1)
             stopped = true
           case _ =>
-            failure = Some(s"Miniscope R1: missing or inconsistent connective decision at ${at.pretty}, binder $ordinal")
+            failure = Some(s"Miniscope: missing or inconsistent connective decision at ${at.pretty}, binder $ordinal")
         }
         tested += 1
       }
       if (failure.isEmpty && here.size != tested)
-        failure = Some(s"Miniscope R1: extra connective decisions at ${at.pretty}")
+        failure = Some(s"Miniscope: extra connective decisions at ${at.pretty}")
       if (failure.isEmpty && pending.isEmpty && here.nonEmpty)
-        failure = Some(s"Miniscope R1: unexpected connective decision at ${at.pretty}")
+        failure = Some(s"Miniscope: unexpected connective decision at ${at.pretty}")
 
-      // This is the producer's revListToSubst calculation. A moved binder
-      // keeps its branch-local index; a binder absent from a branch shifts out.
-      def branchSubst(indices: Vector[Int], branchBinders: Int): Subst =
-        indices.foldLeft(Subst.shift(branchBinders): Subst) { (subst, index) =>
-          BoundFront(index) +: subst
-        }
+      // construct a Connective Replay event for successful reconstructions
       val replay: Either[String, ConnectiveReplay] = failure match {
         case Some(reason) => Left(reason)
         case None =>
@@ -247,29 +265,31 @@ object MiniscopeEncoding {
           val rightInput = if (kind == Implication) rightSubstituted else rightSubstituted.betaNormalize
           Right(ConnectiveReplay(retained,
             leftInput, leftQuants, rightInput, rightQuants, planned.result(),
-            s"Miniscope R1: replayed $tested connective decision(s) at ${at.pretty}"))
+            s"Miniscope: replayed $tested connective decision(s) at ${at.pretty}"))
       }
 
       replay.flatMap { checked =>
         if (here.nonEmpty) Out.lp_debug_info(checked.description)
         checked.moves.foreach { case (event, law, binders) =>
+          // extract the individual moves
           moves += PlannedMove(event, law, makePattern(polarity, outerPattern, binders))
         }
+        // construct the necessary patterns
         val retainedPattern: PatternContext = hole =>
           outerPattern(wrapPatternBinders(checked.retained, hole))
         val leftPattern: PatternContext = hole =>
-          retainedPattern(patternConnective(hole, Wildcard[Level.Obj]()))
+          retainedPattern(kind.lpRepresentation(hole, Wildcard[Level.Obj]()))
         val rightPattern: PatternContext = hole =>
-          retainedPattern(patternConnective(Wildcard[Level.Obj](), hole))
+          retainedPattern(kind.lpRepresentation(Wildcard[Level.Obj](), hole))
         for {
+          // traverse the branches and re-construct a term
           rebuiltLeft <- visit(checked.leftInput, checked.leftPending, at.argPos(1), 0, leftPattern)
           rebuiltRight <- visit(checked.rightInput, checked.rightPending, at.argPos(2), 0, rightPattern)
-        } yield surround(prefix(checked.retained, sourceConnective(rebuiltLeft, rebuiltRight)), outerNegations)
+        } yield surround(prefix(checked.retained, kind.leoRepresentation(rebuiltLeft, rebuiltRight)), outerNegations)
       }
     }
 
-    // The source visit resolves trace ordinals. Pending binders and enclosing
-    // negations describe the current context of this source subterm.
+    // Traverse the term building the sequence of checked moves and reconstructing the child from the trace
     def visit(term: Term, pending: Vector[PendingBinder], at: Position,
               outerNegations: Int, outerPattern: PatternContext): Either[String, Term] = term match {
       // Delay rebuilding a quantifier until a crossing or the final leaf.
@@ -280,25 +300,22 @@ object MiniscopeEncoding {
         visit(body, pending :+ PendingBinder(ty, true, Name(s"mini${pending.size}")),
           at.argPos(2).abstrPos, outerNegations, outerPattern)
       case Not(body) =>
-        // Consecutive events naming this visit form its crossing group.
-        val start = cursor
+        val start = cursor // Consecutive events naming this visit form its crossing group.
         // Go through all observations at given position
         while (cursor < observations.size && observations(cursor).sourceVisit == at) cursor += 1
         val here = observations.slice(start, cursor)
         if (here.exists(event => !event.isInstanceOf[MiniscopeCrossNegation]))
-          Left(s"Miniscope R1: connective observation at source negation ${at.pretty}")
+          Left(s"Miniscope: connective observation at source negation ${at.pretty}")
         else {
           val crossings = here.collect { case event: MiniscopeCrossNegation => event }
           // For this schema the recorder emits one crossing per pending binder,
-          // outermost first. A gap would leave an unsupported mixed context.
+          // outermost first. 
           if (crossings.map(_.pendingBinderOrdinal) != pending.indices.toVector)
-            Left(s"Miniscope R1: incomplete or reordered crossings at ${at.pretty}")
+            Left(s"Miniscope: incomplete or reordered crossings at ${at.pretty}")
           else {
-            // Each event changes one binder kind and captures the context of
-            // its post-move target. The term inside the hole is not needed.
+            // Each event changes one binder kind and captures the context of its post-move target.
             var crossedPending = pending
-            // The innermost binder crosses first, so the remaining outer
-            // binders are exactly the wrappers around this event's target.
+            // The innermost binder crosses first, so the remaining outer binders are exactly the wrappers around this event's target.
             crossings.reverse.foreach { event =>
               val ordinal = event.pendingBinderOrdinal
               val crossed = crossedPending(ordinal).crossed
@@ -307,21 +324,17 @@ object MiniscopeEncoding {
               val law = if (crossed.universal) NotForallExistsNot else NotExistsForallNot
               moves += PlannedMove(event, law, pattern)
             }
-            // This negation remains outside subsequent source visits. Reuse
-            // that wrapper when planning patterns deeper in its body.
+            // This negation remains outside subsequent source visits, and is added to the outer pattern.
             val insideNegation: PatternContext = hole => outerPattern(LogicConst.Not(hole))
             visit(body, crossedPending, at.argPos(1), outerNegations + 1, insideNegation)
           }
         }
       case (left & right) =>
-        visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => &(a, b), Conjunction, LogicConst.And.apply)
+        visitConnective(left, right, pending, at, outerNegations, outerPattern, Conjunction)
       case (left ||| right) =>
-        visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => |||(a, b), Disjunction, LogicConst.Or.apply)
+        visitConnective(left, right, pending, at, outerNegations, outerPattern, Disjunction)
       case Impl(left, right) =>
-        visitConnective(left, right, pending, at, outerNegations, outerPattern,
-          (a, b) => Impl(a, b), Implication, LogicConst.Imp.apply)
+        visitConnective(left, right, pending, at, outerNegations, outerPattern, Implication)
       case leaf =>
         // No more decisions remain on this path; restore its pending context.
         Right(surround(prefix(pending, leaf), outerNegations))
@@ -331,11 +344,11 @@ object MiniscopeEncoding {
     visit(ctx.parent.lits.head.left, Vector.empty, Position.root, 0, identityPattern).flatMap { result =>
       val planned = moves.result()
       if (cursor != observations.size)
-        Left(s"Miniscope R1: ${observations.size - cursor} unconsumed source observations")
+        Left(s"Miniscope: ${observations.size - cursor} unconsumed source observations")
       else if (planned.isEmpty)
-        Left("Miniscope R1: no supported moves")
+        Left("Miniscope: no supported moves")
       else if (result != ctx.child.lits.head.left)
-        Left("Miniscope R1: replay does not reach the recorded child")
+        Left("Miniscope: replay does not reach the recorded child")
       else Right(planned)
     }
   }
@@ -363,7 +376,7 @@ object MiniscopeEncoding {
 
   /** Reverse the checked source moves to transform the child goal into the parent goal. */
   private def emitScript(ctx: Context, moves: Vector[PlannedMove], sig: LpSig): EncodeResult = {
-    if (moves.isEmpty) return NotEncodable("Miniscope R1: no supported moves")
+    if (moves.isEmpty) return NotEncodable("Miniscope: no supported moves")
 
     // The Lambdapi goal starts at the child. Each rewrite undoes one recorded
     // move; beta cleanup exposes the next target in the resulting goal.
