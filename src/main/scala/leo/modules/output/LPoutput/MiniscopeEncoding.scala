@@ -17,6 +17,8 @@ object MiniscopeEncoding {
     def name: String
     def theorem: LpTerm[Level.Meta] = Const[Level.Meta](SymRef.LP(QName.local(name)))
   }
+
+  // Lambdapi Theorems used to verify Leo-III operations
   private case object NotForallExistsNot extends ReplayLaw { val name = "¬∀=∃¬" }
   private case object NotExistsForallNot extends ReplayLaw { val name = "¬∃=∀¬" }
   private case object ForallAndBoth extends ReplayLaw { val name = "∀∧" }
@@ -40,7 +42,7 @@ object MiniscopeEncoding {
   private case object Disjunction extends ConnectiveKind
   private case object Implication extends ConnectiveKind
 
-  /** Each recorded connective move has one proved child-to-parent equality. */
+  /** Mapping of recorded connective moves to the corresponding child-to-parent equality. */
   private def connectiveLaw(kind: ConnectiveKind, universal: Boolean, movement: MiniscopePush): Option[ReplayLaw] =
     (kind, universal, movement) match {
       case (Conjunction, true, MiniscopePushLeft) => Some(ForallAndDistLeft)
@@ -61,12 +63,6 @@ object MiniscopeEncoding {
       case _ => None
     }
 
-  // Each pattern targets the post-move term. The script consumes moves backward,
-  // starting from the recorded child goal.
-  private final case class PlannedMove(observation: MiniscopeObservation,
-                                       law: ReplayLaw,
-                                       pattern: RewritePattern)
-
   // Inputs shared by replay and script emission after checking the step shape.
   private final case class Context(parent: Clause,
                                    child: Clause,
@@ -83,16 +79,15 @@ object MiniscopeEncoding {
 
     val parent = parents.head.cl
     val result = child.cl
+    // ensure both parent and child clauses are non-equational unit clauses
     if (Clause.empty(parent) || Clause.empty(result) || !Clause.unit(parent) || !Clause.unit(result) ||
-        parent.lits.head.equational || result.lits.head.equational ||
-        parent.lits.head.polarity != result.lits.head.polarity)
+        parent.lits.head.equational || result.lits.head.equational || parent.lits.head.polarity != result.lits.head.polarity)
       return Left(s"Miniscope step ${child.id}: expected non-equational unit clauses with the same literal polarity")
 
     child.furtherInfo.miniscopeTrace match {
       case None => Left(s"Miniscope step ${child.id}: missing source-decision trace")
       case Some(trace) =>
-        // Translate both clauses with one variable map, so later comparisons use
-        // the same Lambdapi names for shared free variables.
+        // Translate both clauses with one variable map, so later comparisons use the same Lambdapi names for shared free variables.
         val (_, encoded) = lpClauseInst.apply_to_set(Seq(parent, result))
         val ctx = Context(parent, result, parentProofNames.head, encoded.head, encoded(1), trace)
         Out.lp_debug_info(s"Miniscope step ${child.id}: parent ${parents.head.id} as ${Renderer.qname(ctx.parentProofName, RenderOptions())}, ${ctx.trace.observations.size} source observations")
@@ -106,10 +101,15 @@ object MiniscopeEncoding {
   // Orchestrator
 
   /**
-    * BLUEPRINT-MINI-2, recorded SCHEMA-01 through SCHEMA-07 replay:
-    * 0. Validate and translate the recorded parent and child together.
-    * 1. Replay recorded moves against the parent and check the resulting child.
-    * 2. Emit patterned rewrites backward and refine the parent proof.
+    * Orchestrator for the encoding of Leo-III's `miniscope` steps.
+    *
+    * Proof blueprint:
+    * 1. For each transformation recorded by the trace:
+    *   1 a) Replay recorded move by applying the corresponding Lambdapi theorem using 'rewrite'
+    *   1 b) Apply the 'simplify rule off' tactic to beta-contract the goal
+    * 2. Refine with the parent.
+    *
+    * Performed transformations are replayed in reverse, transforming the goal representing the derived child one step at a time.
     */
   def encMiniscope(child: ClauseProxy, parentProofNames: Seq[QName], sig: LpSig): EncodeResult = {
     Out.lp_debug_info(s"Encoding Miniscope step ${child.id} with ${parentProofNames.size} resolved parent name(s)")
@@ -125,25 +125,11 @@ object MiniscopeEncoding {
     }
   }
 
-  /** Reverse the checked source moves to transform the child goal into the parent goal. */
-  private def emitScript(ctx: Context, moves: Vector[PlannedMove], sig: LpSig): EncodeResult = {
-    if (moves.isEmpty) return NotEncodable("Miniscope R1: no supported moves")
-
-    // The Lambdapi goal starts at the child. Each rewrite undoes one recorded
-    // move; beta cleanup exposes the next target in the resulting goal.
-    val reverseMoves = moves.reverse
-    val rewrites = reverseMoves.zipWithIndex.flatMap { case (move, index) =>
-      val rewrite = Rewrite(Some(move.pattern), move.law.theorem)
-      Out.lp_debug_info(s"Miniscope ${move.observation.sourceVisit.pretty}: ${Renderer.proof(rewrite, RenderOptions(), sig)}")
-      // beta-reduce between rewrite tactic applications
-      if (index < reverseMoves.size - 1) Vector(rewrite, Try(Simplify(onlyBeta = true)))
-      else Vector(rewrite)
-    }
-    val refine = Refine(Const[Level.Meta](SymRef.LP(ctx.parentProofName)))
-    Encoded(rewrites :+ refine)
-  }
-
   // Replay of recorded miniscoping traces
+
+  private final case class PlannedMove(observation: MiniscopeObservation,
+                                       law: ReplayLaw,
+                                       pattern: RewritePattern)
 
   // A binder remains pending while the traversal follows its body. Its kind
   // changes when a recorded crossing moves it under a negation. The pattern
@@ -160,24 +146,26 @@ object MiniscopeEncoding {
     val moves = Vector.newBuilder[PlannedMove]
     var cursor = 0 // next observation in the producer's source traversal order
 
+    // Reconstruct a binder term
     def quant(binder: PendingBinder, body: Term): Term =
       if (binder.universal) Forall(\(binder.typ)(body))
       else Exists(\(binder.typ)(body))
 
-    // Pending binders are ordered outermost first.
+    // Wrap in pending binders. They are ordered outermost first.
     def prefix(binders: Vector[PendingBinder], body: Term): Term =
       binders.reverseIterator.foldLeft(body)((term, binder) => quant(binder, term))
+    // Wrap in pending negations
     def surround(body: Term, negations: Int): Term =
       (0 until negations).foldLeft(body)((term, _) => Not(term))
 
-    // The source decision chooses branch binders and substitutions. Every
-    // checked plan then uses the same traversal, pattern context, and rebuild.
+    // Wrapper for all crossings recorded at a given connective
     final case class ConnectiveReplay(retained: Vector[PendingBinder],
                                       leftInput: Term, leftPending: Vector[PendingBinder],
                                       rightInput: Term, rightPending: Vector[PendingBinder],
                                       moves: Vector[(MiniscopeObservation, ReplayLaw, Vector[PendingBinder])],
                                       description: String)
 
+    // Shared traversal of binary connective terms.
     // All connective decisions share the branch traversal and one-hole
     // contexts; only validation, binder routing, and the proved law vary.
     def visitConnective(left: Term, right: Term, pending: Vector[PendingBinder], at: Position,
@@ -372,4 +360,23 @@ object MiniscopeEncoding {
     val literalPattern = PatternBuilder.generatePatternLit(info, bodyPattern)
     PatternBuilder.generateClausePattern(0, 1, literalPattern)
   }
+
+  /** Reverse the checked source moves to transform the child goal into the parent goal. */
+  private def emitScript(ctx: Context, moves: Vector[PlannedMove], sig: LpSig): EncodeResult = {
+    if (moves.isEmpty) return NotEncodable("Miniscope R1: no supported moves")
+
+    // The Lambdapi goal starts at the child. Each rewrite undoes one recorded
+    // move; beta cleanup exposes the next target in the resulting goal.
+    val reverseMoves = moves.reverse
+    val rewrites = reverseMoves.zipWithIndex.flatMap { case (move, index) =>
+      val rewrite = Rewrite(Some(move.pattern), move.law.theorem)
+      Out.lp_debug_info(s"Miniscope ${move.observation.sourceVisit.pretty}: ${Renderer.proof(rewrite, RenderOptions(), sig)}")
+      // beta-reduce between rewrite tactic applications
+      if (index < reverseMoves.size - 1) Vector(rewrite, Try(Simplify(onlyBeta = true)))
+      else Vector(rewrite)
+    }
+    val refine = Refine(Const[Level.Meta](SymRef.LP(ctx.parentProofName)))
+    Encoded(rewrites :+ refine)
+  }
+
 }
