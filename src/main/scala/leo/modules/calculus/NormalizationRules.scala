@@ -330,6 +330,112 @@ object CoreCNF {
     }
     acc
   }
+
+  final case class CnfStep(after: Clause,
+                           skolem: Option[(SkolemData, ClausePosition)] = None)
+
+  final case class CnfResolution(clauses: Seq[Clause], steps: Seq[CnfStep])
+
+  final case class NextSkolem(
+                               afterFormula: Term,
+                               remainingFragment: CnfFragment,
+                               data: SkolemData,
+                               binderPath: Position // Quantifier position within extractNext's before-formula.
+                             )
+
+  final def cnfFragment2Clause(input: Clause, delayedCNF: CnfFragment): CnfResolution = {
+    var currentFragment = delayedCNF
+    var currentClause = input
+    val steps = mutable.ArrayBuffer.empty[CnfStep]
+    var (beforeFormula, next) = extractNext(currentFragment)
+
+    while (next.nonEmpty) {
+      val event = next.get
+      val eventBefore = Clause(Literal(beforeFormula, true))
+      if (currentClause != eventBefore) {
+        steps += CnfStep(eventBefore)
+        currentClause = eventBefore
+      }
+
+      val eventAfter = Clause(Literal(event.afterFormula, true))
+      val binderPath = ClausePosition(currentClause, 0, Literal.leftSide, event.binderPath)
+      steps += CnfStep(eventAfter, Some((event.data, binderPath)))
+      currentClause = eventAfter
+      currentFragment = event.remainingFragment
+
+      val extracted = extractNext(currentFragment)
+      beforeFormula = extracted._1
+      next = extracted._2
+    }
+
+    val finalLiterals = flatten(currentFragment)
+    val finalClauses = finalLiterals.map(lits => Clause(lits))
+    if (steps.isEmpty && finalClauses.size == 1 && finalClauses.head == input) {
+      return CnfResolution(finalClauses, Vector.empty)
+    }
+
+    val finalConclusion = Clause(Literal(formulaOf(finalLiterals), true))
+    if (currentClause != finalConclusion) steps += CnfStep(finalConclusion)
+    CnfResolution(finalClauses, steps.toVector)
+  }
+
+  private def extractNext(fragment: CnfFragment): (Term, Option[NextSkolem]) = {
+
+    def extractBinary(left: CnfFragment, right: CnfFragment,
+                      connective: (Term, Term) => Term,
+                      rebuild: (CnfFragment, CnfFragment) => CnfFragment): (Term, Option[NextSkolem]) = {
+      val (leftFormula, leftEvent) = extractNext(left)
+      leftEvent match {
+        case Some(event) =>
+          val rightFormula = pendingFormula(right)
+          (connective(leftFormula, rightFormula), Some(event.copy(
+            afterFormula = connective(event.afterFormula, rightFormula),
+            remainingFragment = rebuild(event.remainingFragment, right),
+            binderPath = event.binderPath.preprendArgPos(1)
+          )))
+        case None =>
+          val (rightFormula, rightEvent) = extractNext(right)
+          (connective(leftFormula, rightFormula), rightEvent.map(event => event.copy(
+            afterFormula = connective(leftFormula, event.afterFormula),
+            remainingFragment = rebuild(left, event.remainingFragment),
+            binderPath = event.binderPath.preprendArgPos(2)
+          )))
+      }
+    }
+
+    fragment match {
+      case Ready(clauses) => (formulaOf(clauses), None)
+      case Skolemized(before, after, data, body) =>
+        val binderPath = if (before.polarity) Position.root else Position.root.argPos(1)
+        (Literal.asTerm(before), Some(NextSkolem(Literal.asTerm(after), body, data, binderPath)))
+      case Append(left, right) => extractBinary(left, right, &, Append.apply)
+      case Product(left, right) => extractBinary(left, right, |||, Product.apply)
+    }
+  }
+
+  private def pendingFormula(fragment: CnfFragment): Term = {
+
+    fragment match {
+      case Ready(clauses) => formulaOf(clauses)
+      case Append(left, right) => &(pendingFormula(left), pendingFormula(right))
+      case Product(left, right) => |||(pendingFormula(left), pendingFormula(right))
+      case Skolemized(before, _, _, _) => Literal.asTerm(before)
+    }
+  }
+
+  private def formulaOf(clauses: Seq[Seq[Literal]]): Term = {
+    mkConjunction(clauses.map(lits => mkDisjunction(lits.map(Literal.asTerm))))
+  }
+
+  private def flatten(fragment: CnfFragment): Seq[Seq[Literal]] = {
+    fragment match {
+      case Ready(clauses) => clauses
+      case Append(left, right) => flatten(left) ++ flatten(right)
+      case Product(left, right) => multiply(flatten(left), flatten(right))
+      case Skolemized(_, _, _, _) =>
+        throw new IllegalStateException("Cannot flatten a CNF fragment with an unconsumed Skolemization marker.")
+    }
+  }
 }
 
 
