@@ -179,6 +179,79 @@ object CoreCNF {
                                    threshold: Int
                                  )
 
+  sealed trait CnfFragment
+  final case class Ready(clauses: Seq[Seq[Literal]]) extends CnfFragment
+  final case class Append(left: CnfFragment, right: CnfFragment) extends CnfFragment
+  final case class Product(left: CnfFragment, right: CnfFragment) extends CnfFragment
+
+
+  sealed trait SkolemData
+  final case class TermSkolemData(skolem: Term, fvs: FVs, tyFVs: TyFVS) extends SkolemData
+  final case class TypeSkolemData(skolem: Type, tyFVs: TyFVS) extends SkolemData
+  final case class Skolemized(
+    before: Literal,
+    after: Literal,
+    data: SkolemData,
+    body: CnfFragment
+  ) extends CnfFragment
+
+  private[calculus] final def `++_delayed`(left: CnfFragment, right: CnfFragment): CnfFragment =
+    (left, right) match {
+      case (Ready(xs), Ready(ys)) => Ready(xs ++ ys)
+      case _ => Append(left, right)
+    }
+
+  private[calculus] final def mulitply_delayed(left: CnfFragment, right: CnfFragment): CnfFragment =
+    (left, right) match {
+      case (Ready(xs), Ready(ys)) => Ready(multiply(xs, ys))
+      case _ => Product(left, right)
+    }
+
+  @inline
+  final private[calculus] def apply_delayed(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, renaming: Option[RenamingConfig], l: Literal)(implicit sig: Signature): CnfFragment = if (!l.equational) {
+    renaming match {
+      case Some(config) if FormulaRenaming.canApply(l, config.threshold) =>
+        val (replLit, defl1, defl2) = FormulaRenaming.apply(l, config.cashExtracts)
+        if (defl1 == null && defl2 == null) {
+          apply_delayed(fvs, tyFVs, vargen, renaming, replLit)
+        } else {
+          assert(defl1 != null && defl2 != null, "Non consistent definition returend in formula renaming.")
+          `++_delayed`(apply_delayed(fvs, tyFVs, vargen, renaming, replLit),mulitply_delayed(apply_delayed(fvs, tyFVs, vargen, renaming, defl1), apply_delayed(fvs, tyFVs, vargen, renaming, defl2)))
+        }
+      case _ =>
+        l.left match {
+          case Not(t) => apply_delayed(fvs, tyFVs, vargen, renaming, Literal(t, !l.polarity))
+          case &(lt, rt) if l.polarity => `++_delayed`(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(lt, true)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(rt, true)))
+          case &(lt, rt) if !l.polarity => mulitply_delayed(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(lt, false)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(rt, false)))
+          case |||(lt, rt) if l.polarity => mulitply_delayed(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(lt, true)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(rt, true)))
+          case |||(lt, rt) if !l.polarity => `++_delayed`(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(lt, false)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(rt, false)))
+          case Impl(lt, rt) if l.polarity => mulitply_delayed(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(lt, false)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(rt, true)))
+          case Impl(lt, rt) if !l.polarity => `++_delayed`(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(lt, true)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(rt, false)))
+          case Forall(a@(ty :::> t)) if l.polarity =>
+            if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
+              `++_delayed`(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, true)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, true)))
+            } else {
+              val v = vargen.next(ty);
+              apply_delayed(v +: fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true))
+            }
+          case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true); apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false))
+          case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false); apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true))
+          case Exists(a@(ty :::> t)) if !l.polarity =>
+            if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
+              `++_delayed`(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, false)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, false)))
+            } else {
+              val v = vargen.next(ty);
+              apply_delayed(v +: fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false))
+            }
+          case TyForall(a@TypeLambda(t)) if l.polarity => val ty = vargen.next(); apply_delayed(fvs, ty +: tyFVs, vargen, renaming, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true))
+          case TyForall(a@TypeLambda(t)) if !l.polarity => val sko = leo.modules.calculus.skType(tyFVs); apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false))
+          case _ => Ready(Seq(Seq(l)))
+        }
+    }
+  } else {
+    Ready(Seq(Seq(l)))
+  }
+
   @inline
   final private[calculus] def apply0(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, renaming: Option[RenamingConfig], l: Literal)(implicit sig: Signature): Seq[Seq[Literal]] = if (!l.equational) {
     renaming match {
