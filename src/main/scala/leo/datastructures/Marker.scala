@@ -220,8 +220,10 @@ object ClauseAnnotation {
     final val fromRule: CalculusRule = null
     final def parents = Seq.empty
   }
-  case class FromSystem[A <: ClauseProxy](hint: String, parents: Seq[A]) extends ClauseAnnotation {
-    final def pretty = s"introduced($hint)"
+  case class FromSystem[A <: ClauseProxy](hint: String, parents: Seq[A], info: Option[Output] = None) extends ClauseAnnotation {
+    val printInfo = if (info.isDefined) s",[${info.map(_.apply()).get}]" else ""
+    val printParents = if (parents.nonEmpty) s",[${parents.map(_.id).mkString(",")}]" else ""
+    final def pretty = s"introduced($hint$printInfo$printParents)"
     final val fromRule: CalculusRule = null
   }
 

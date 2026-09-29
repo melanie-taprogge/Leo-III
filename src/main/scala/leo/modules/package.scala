@@ -138,7 +138,7 @@ package object modules {
     relevantSymbols ++ visited
   }
 
-  def userSignatureToTPTP(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): String = {
+  def userSignatureToTPTP(symbolsInProof: Set[Signature.Key], definitionsInProof: Set[Signature.Key] = Set.empty)(implicit sig: Signature): String = {
     val sb: StringBuilder = new StringBuilder()
     /* start with user symbols that occur in the proof, plus type symbols */
     val relevantSymbols: Set[Signature.Key] = saturatedUserSignature(symbolsInProof)
@@ -156,7 +156,7 @@ package object modules {
     }
     // then print definitions
     otherSymbols.foreach { key =>
-      if (sig(key).hasDefn) {
+      if (sig(key).hasDefn && !definitionsInProof.contains(key)) {
         sb.append(ToTHF.definitionToTPTP(key))
         sb.append("\n")
       }

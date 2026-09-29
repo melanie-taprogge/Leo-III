@@ -76,6 +76,15 @@ object PolaritySwitch extends CalculusRule {
 /**
   * Created by mwisnie on 11.04.16.
   */
+
+object CnfSkolem extends CalculusRule{
+  final val name: String = "skolemize"
+  final val inferenceStatus = SZS_EquiSatisfiable // todo: the remaining cnf becomes theorem now, right?
+
+  // todo: move some of the implementation here?
+
+}
+
 object CnfConj extends CalculusRule{
   final val name: String = "cnfConj"
   final val inferenceStatus = SZS_Theorem
