@@ -207,6 +207,21 @@ object CoreCNF {
       case _ => Product(left, right)
     }
 
+  private[calculus] final def applyWithSteps(vargen: leo.modules.calculus.FreshVarGen,
+                                          renaming: Option[RenamingConfig], cl: Clause)
+                                         (implicit sig: Signature): CnfResolution = {
+    val it = cl.lits.iterator
+    val delayedCNF = if (it.hasNext) {
+      var acc = apply_delayed(vargen.existingVars, vargen.existingTyVars, vargen, renaming, it.next())
+      while (it.hasNext) {
+        val nextFragment = apply_delayed(vargen.existingVars, vargen.existingTyVars, vargen, renaming, it.next())
+        acc = mulitply_delayed(acc, nextFragment)
+      }
+      acc
+    } else Ready(Seq(Seq.empty))
+    cnfFragment2Clause(cl, delayedCNF)
+  }
+
   @inline
   final private[calculus] def apply_delayed(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, renaming: Option[RenamingConfig], l: Literal)(implicit sig: Signature): CnfFragment = if (!l.equational) {
     renaming match {
@@ -448,6 +463,11 @@ object RenameCNF extends CalculusRule {
 
   final def canApply(cl: Clause): Boolean = cl.lits.exists(canApply)
 
+  final def applyWithSteps(vargen: leo.modules.calculus.FreshVarGen,
+                          cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)],
+                          cl: Clause, THRESHHOLD: Int = 0)(implicit sig: Signature): CoreCNF.CnfResolution =
+    CoreCNF.applyWithSteps(vargen, Some(CoreCNF.RenamingConfig(cashExtracts, THRESHHOLD)), cl)
+
   final def apply(vargen : leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], cl : Clause, THRESHHOLD : Int = 0)(implicit sig: Signature) : Seq[Clause] = {
     val lits = cl.lits
     val normLits = apply(vargen, cashExtracts, lits, THRESHHOLD)
@@ -501,6 +521,10 @@ object FullCNF extends CalculusRule {
     }
     false
   }
+
+  final def applyWithSteps(vargen: leo.modules.calculus.FreshVarGen, cl: Clause)
+                         (implicit sig: Signature): CoreCNF.CnfResolution =
+    CoreCNF.applyWithSteps(vargen, None, cl)
 
   final def apply(vargen: leo.modules.calculus.FreshVarGen, cl: Clause)(implicit sig: Signature): Seq[Clause] = {
     val lits = cl.lits
