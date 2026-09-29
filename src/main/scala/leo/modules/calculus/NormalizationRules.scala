@@ -202,38 +202,8 @@ object RenameCNF extends CalculusRule {
     acc
   }
 
-  final def apply(vargen: leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], l : Literal,THRESHHOLD : Int)(implicit sig: Signature): Seq[Seq[Literal]] = apply0(vargen.existingVars, vargen.existingTyVars, vargen, cashExtracts, l, THRESHHOLD)
+  final def apply(vargen: leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], l : Literal,THRESHHOLD : Int)(implicit sig: Signature): Seq[Seq[Literal]] = FullCNF.apply_new(vargen.existingVars, vargen.existingTyVars, vargen, Some(FullCNF.RenamingConfig(cashExtracts, THRESHHOLD)), l)
 
-  @inline
-  final private def apply0(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], l : Literal, THRESHHOLD : Int)(implicit sig: Signature): Seq[Seq[Literal]] = if(!l.equational){
-    if(FormulaRenaming.canApply(l, THRESHHOLD)) {
-      val (replLit, defl1, defl2) = FormulaRenaming.apply(l, cashExtracts)
-      if(defl1 == null && defl2 == null){
-        apply0(fvs, tyFVs, vargen, cashExtracts, replLit, THRESHHOLD)
-      } else {
-        assert(defl1 != null && defl2 != null, "Non consistent definition returend in formula renaming.")
-        apply0(fvs, tyFVs, vargen, cashExtracts, replLit, THRESHHOLD) ++ multiply(apply0(fvs, tyFVs, vargen, cashExtracts, defl1, THRESHHOLD), apply0(fvs, tyFVs, vargen, cashExtracts, defl2, THRESHHOLD))
-      }
-    } else {
-    l.left match {
-      case Not(t) => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(t, !l.polarity), THRESHHOLD)
-      case &(lt,rt) if l.polarity => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true), THRESHHOLD) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,true), THRESHHOLD)
-      case &(lt,rt) if !l.polarity => multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false), THRESHHOLD), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, false), THRESHHOLD))
-      case |||(lt,rt) if l.polarity => multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true),THRESHHOLD), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, true),THRESHHOLD))
-      case |||(lt,rt) if !l.polarity => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false),THRESHHOLD) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,false),THRESHHOLD)
-      case Impl(lt,rt) if l.polarity => multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false),THRESHHOLD), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, true),THRESHHOLD))
-      case Impl(lt,rt) if !l.polarity => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true),THRESHHOLD) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,false),THRESHHOLD)
-      case Forall(a@(ty :::> t)) if l.polarity => val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true),THRESHHOLD)
-      case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,true); apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD)
-      case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,false); apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true),THRESHHOLD)
-      case Exists(a@(ty :::> t)) if !l.polarity => val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false),THRESHHOLD)
-      case TyForall(a@TypeLambda(t)) if l.polarity => val ty = vargen.next(); apply0(fvs, ty +: tyFVs, vargen, cashExtracts, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true),THRESHHOLD)
-      case TyForall(a@TypeLambda(t)) if !l.polarity => val sko = leo.modules.calculus.skType(tyFVs); apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD)
-      case _ => Seq(Seq(l))
-    }}
-  } else {
-    Seq(Seq(l))
-  }
 
   private[calculus] final def multiply[A](l : Seq[Seq[A]], r : Seq[Seq[A]]) : Seq[Seq[A]] = FullCNF.multiply(l,r)
 }
@@ -289,42 +259,55 @@ object FullCNF extends CalculusRule {
     acc
   }
 
-  final def apply(vargen: leo.modules.calculus.FreshVarGen, l : Literal)(implicit sig: Signature): Seq[Seq[Literal]] = apply0(vargen.existingVars, vargen.existingTyVars, vargen, l)
-
+  final def apply(vargen: leo.modules.calculus.FreshVarGen, l : Literal)(implicit sig: Signature): Seq[Seq[Literal]] = apply_new(vargen.existingVars, vargen.existingTyVars, vargen, None, l)
+  
+  final case class RenamingConfig(
+                                   cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)],
+                                   threshold: Int
+                                 )
   @inline
-  final private def apply0(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, l : Literal)(implicit sig: Signature): Seq[Seq[Literal]] = if(!l.equational){
-    l.left match {
-      case Not(t) => apply0(fvs, tyFVs, vargen, Literal(t, !l.polarity))
-      case &(lt,rt) if l.polarity => apply0(fvs, tyFVs, vargen, Literal(lt,true)) ++ apply0(fvs, tyFVs, vargen, Literal(rt,true))
-      case &(lt,rt) if !l.polarity => multiply(apply0(fvs, tyFVs, vargen, Literal(lt,false)), apply0(fvs, tyFVs, vargen, Literal(rt, false)))
-      case |||(lt,rt) if l.polarity => multiply(apply0(fvs, tyFVs, vargen, Literal(lt,true)), apply0(fvs, tyFVs, vargen, Literal(rt, true)))
-      case |||(lt,rt) if !l.polarity => apply0(fvs, tyFVs, vargen, Literal(lt,false)) ++ apply0(fvs, tyFVs, vargen, Literal(rt,false))
-      case Impl(lt,rt) if l.polarity => multiply(apply0(fvs, tyFVs, vargen, Literal(lt,false)), apply0(fvs, tyFVs, vargen, Literal(rt, true)))
-      case Impl(lt,rt) if !l.polarity => apply0(fvs, tyFVs, vargen, Literal(lt,true)) ++ apply0(fvs, tyFVs, vargen, Literal(rt,false))
-      case Forall(a@(ty :::> t)) if l.polarity =>
-        import leo.modules.HOLSignature.{o, LitTrue, LitFalse}
-        if (false /*ty == o*/) {
-          apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, true)) ++ apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, true))
+  final private[calculus] def apply_new(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, renaming: Option[RenamingConfig], l: Literal)(implicit sig: Signature): Seq[Seq[Literal]] = if (!l.equational) {
+    renaming match {
+      case Some(config) if FormulaRenaming.canApply(l, config.threshold) =>
+        val (replLit, defl1, defl2) = FormulaRenaming.apply(l, config.cashExtracts)
+        if (defl1 == null && defl2 == null) {
+          apply_new(fvs, tyFVs, vargen, renaming, replLit)
         } else {
-          val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true))
+          assert(defl1 != null && defl2 != null, "Non consistent definition returend in formula renaming.")
+          apply_new(fvs, tyFVs, vargen, renaming, replLit) ++ multiply(apply_new(fvs, tyFVs, vargen, renaming, defl1), apply_new(fvs, tyFVs, vargen, renaming, defl2))
         }
-
-      case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,true); apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false))
-      case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,false); apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true))
-      case Exists(a@(ty :::> t)) if !l.polarity =>
-        import leo.modules.HOLSignature.{o, LitTrue, LitFalse}
-        if (false /*ty == o*/) {
-          apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, false)) ++ apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, false))
-        } else {
-          val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false))
+      case _ =>
+        l.left match {
+          case Not(t) => apply_new(fvs, tyFVs, vargen, renaming, Literal(t, !l.polarity))
+          case &(lt, rt) if l.polarity => apply_new(fvs, tyFVs, vargen, renaming, Literal(lt, true)) ++ apply_new(fvs, tyFVs, vargen, renaming, Literal(rt, true))
+          case &(lt, rt) if !l.polarity => multiply(apply_new(fvs, tyFVs, vargen, renaming, Literal(lt, false)), apply_new(fvs, tyFVs, vargen, renaming, Literal(rt, false)))
+          case |||(lt, rt) if l.polarity => multiply(apply_new(fvs, tyFVs, vargen, renaming, Literal(lt, true)), apply_new(fvs, tyFVs, vargen, renaming, Literal(rt, true)))
+          case |||(lt, rt) if !l.polarity => apply_new(fvs, tyFVs, vargen, renaming, Literal(lt, false)) ++ apply_new(fvs, tyFVs, vargen, renaming, Literal(rt, false))
+          case Impl(lt, rt) if l.polarity => multiply(apply_new(fvs, tyFVs, vargen, renaming, Literal(lt, false)), apply_new(fvs, tyFVs, vargen, renaming, Literal(rt, true)))
+          case Impl(lt, rt) if !l.polarity => apply_new(fvs, tyFVs, vargen, renaming, Literal(lt, true)) ++ apply_new(fvs, tyFVs, vargen, renaming, Literal(rt, false))
+          case Forall(a@(ty :::> t)) if l.polarity =>
+            if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
+              apply_new(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, true)) ++ apply_new(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, true))
+            } else {
+              val v = vargen.next(ty);
+              apply_new(v +: fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true))
+            }
+          case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true); apply_new(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false))
+          case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false); apply_new(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true))
+          case Exists(a@(ty :::> t)) if !l.polarity =>
+            if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
+              apply_new(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, false)) ++ apply_new(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, false))
+            } else {
+              val v = vargen.next(ty);
+              apply_new(v +: fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false))
+            }
+          case TyForall(a@TypeLambda(t)) if l.polarity => val ty = vargen.next(); apply_new(fvs, ty +: tyFVs, vargen, renaming, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true))
+          case TyForall(a@TypeLambda(t)) if !l.polarity => val sko = leo.modules.calculus.skType(tyFVs); apply_new(fvs, tyFVs, vargen, renaming, Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false))
+          case _ => Seq(Seq(l))
         }
-
-      case TyForall(a@TypeLambda(t)) if l.polarity => val ty = vargen.next(); apply0(fvs, ty +: tyFVs, vargen, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true))
-      case TyForall(a@TypeLambda(t)) if !l.polarity => val sko = leo.modules.calculus.skType(tyFVs); apply0(fvs, tyFVs, vargen, Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false))
-      case _ => Vector(Vector(l))
     }
   } else {
-    Vector(Vector(l))
+    Seq(Seq(l))
   }
 
   private[calculus] final def multiply[A](l : Seq[Seq[A]], r : Seq[Seq[A]]) : Seq[Seq[A]] = {
