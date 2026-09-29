@@ -234,8 +234,21 @@ object CoreCNF {
               val v = vargen.next(ty);
               apply_delayed(v +: fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true))
             }
-          case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true); apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false))
-          case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false); apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true))
+
+          case Forall(a@(ty :::> t)) if !l.polarity =>
+            val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true)
+            val data = TermSkolemData(sko, fvs, tyFVs)
+            val litAfter = Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false)
+            val next = apply_delayed(fvs, tyFVs, vargen, renaming, litAfter)
+            Skolemized(l,litAfter,data,next)
+
+          case Exists(a@(ty :::> t)) if l.polarity =>
+            val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false)
+            val data = TermSkolemData(sko, fvs, tyFVs)
+            val litAfter = Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true)
+            val next = apply_delayed(fvs, tyFVs, vargen, renaming, litAfter)
+            Skolemized(l,litAfter,data,next)
+
           case Exists(a@(ty :::> t)) if !l.polarity =>
             if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
               `++_delayed`(apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, false)), apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, false)))
@@ -244,7 +257,14 @@ object CoreCNF {
               apply_delayed(v +: fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false))
             }
           case TyForall(a@TypeLambda(t)) if l.polarity => val ty = vargen.next(); apply_delayed(fvs, ty +: tyFVs, vargen, renaming, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true))
-          case TyForall(a@TypeLambda(t)) if !l.polarity => val sko = leo.modules.calculus.skType(tyFVs); apply_delayed(fvs, tyFVs, vargen, renaming, Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false))
+
+          case TyForall(a@TypeLambda(t)) if !l.polarity =>
+            val sko = leo.modules.calculus.skType(tyFVs)
+            val data = TypeSkolemData(sko,tyFVs)
+            val litAfter = Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false)
+            val next = apply_delayed(fvs, tyFVs, vargen, renaming, litAfter)
+            Skolemized(l, litAfter, data, next)
+
           case _ => Ready(Seq(Seq(l)))
         }
     }
