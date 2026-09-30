@@ -199,9 +199,9 @@ package inferenceControl {
                 }
                 AnnotatedClause(Clause(Literal(symbol, sig(key)._defn, true)), Role_Definition, ClauseAnnotation.FromSystem("definition", Seq(last), Some(info)), ClauseAnnotation.PropNoProp)
               }
-              InferredFrom(CnfSkolem, Seq((last, skInfo), (skDef, null)))
+              InferredFrom(CnfSkolem, Seq((last, null), (skDef, null)), Some(skInfo))
             case CoreCNF.TypeSkolemData(_, _) =>
-              InferredFrom(CnfSkolem, Seq((last, skInfo))) // do we need to render skInfo differently here?
+              InferredFrom(CnfSkolem, Seq((last, null)), Some(skInfo))
           }
           AnnotatedClause(step.after, annotaion, properties)
 

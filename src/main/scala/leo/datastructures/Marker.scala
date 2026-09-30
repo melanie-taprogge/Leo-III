@@ -160,8 +160,10 @@ abstract sealed class ClauseAnnotation extends Pretty {
 
 object ClauseAnnotation {
   import leo.modules.calculus.CalculusRule
-  case class InferredFrom[A <: ClauseProxy](rule: leo.modules.calculus.CalculusRule, cws: Seq[(A, Output)]) extends ClauseAnnotation {
-    def pretty: String = s"inference(${rule.name},[status(${rule.inferenceStatus.pretty.toLowerCase})],[${
+  case class InferredFrom[A <: ClauseProxy](rule: leo.modules.calculus.CalculusRule, cws: Seq[(A, Output)], inferenceInfo: Option[Output] = None) extends ClauseAnnotation {
+    def pretty: String = {
+      val printInfo = inferenceInfo.map(_.apply()).filter(_.nonEmpty).map("," + _).getOrElse("")
+      s"inference(${rule.name},[status(${rule.inferenceStatus.pretty.toLowerCase})$printInfo],[${
       cws.map { case (cw, add) => if (add == null) {
         cw.id
       } else {
@@ -169,6 +171,7 @@ object ClauseAnnotation {
       }
       }.mkString(",")
     }])"
+    }
 
     def fromRule: CalculusRule = rule
     def parents = cws.map(_._1)
