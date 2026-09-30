@@ -275,41 +275,66 @@ object ToTHF {
       require(binderPath.litIdx >= 0 && binderPath.litIdx < parent.lits.size, "Invalid Skolem binder literal index.")
       val literal = parent.lits(binderPath.litIdx)
       val term = if (binderPath.side == Literal.leftSide) literal.left else literal.right
+      implicit val names: BinderNames = new BinderNames(parent.implicitlyBound.size, parent.typeVars.size)
       val (_, parentVars) = clauseVarsToTPTP(parent.implicitlyBound, typeToTHF1(_)(sig))
 
       @tailrec
       def locate(t: Term, pos: Position, bVars: Map[Int, String], tyVarCount: Int, tyBinderIndex: Int): (Term, Map[Int, String], Int, Int) = {
         if (pos == Position.root) (t, bVars, tyVarCount, tyBinderIndex)
         else t match {
-          // Consecutive type quantifiers are printed as one block named TA, TB, ... .
+          case Forall(ty :::> body) if pos.seq.startsWith(Vector(2, -1)) =>
+            val bound = names.termBinders(Seq(ty))
+            locate(body, Position(pos.seq.drop(2)), fusebVarListwithMap(bound, bVars), tyVarCount)
+          case Exists(ty :::> body) if pos.seq.startsWith(Vector(2, -1)) =>
+            val bound = names.termBinders(Seq(ty))
+            locate(body, Position(pos.seq.drop(2)), fusebVarListwithMap(bound, bVars), tyVarCount)
+          case Choice(ty :::> body) if pos.seq.startsWith(Vector(2, -1)) =>
+            val bound = names.termBinders(Seq(ty))
+            locate(body, Position(pos.seq.drop(2)), fusebVarListwithMap(bound, bVars), tyVarCount)
+          case Forall(arg) if pos.posHead == 2 && !arg.isTermAbs =>
+            names.termBinders(collectForall(t)._1) // The printer eta-expands this predicate.
+            locate(arg, pos.tail, bVars, tyVarCount)
+          case Exists(arg) if pos.posHead == 2 && !arg.isTermAbs =>
+            names.termBinders(collectExists(t)._1)
+            locate(arg, pos.tail, bVars, tyVarCount)
+          case Choice(arg) if pos.posHead == 2 && !arg.isTermAbs =>
+            names.termBinders(collectChoice(t)._1)
+            locate(arg, pos.tail, bVars, tyVarCount)
           case TyForall(TypeLambda(body)) if pos.seq.startsWith(Vector(1, -1)) =>
-            locate(body, Position(pos.seq.drop(2)), bVars, tyVarCount + 1, tyBinderIndex + 1)
+            val bound = names.typeBinders(1)
+            names.withinTypes(bound) {
+              locate(body, Position(pos.seq.drop(2)), bVars, tyVarCount + 1)
+            }
           case ty :::> body if pos.posHead == -1 =>
-            val newVars = makeBVarList(Seq(ty), bVars.size)
-            locate(body, pos.tail, fusebVarListwithMap(newVars, bVars), tyVarCount, 0)
+            val bound = names.termBinders(Seq(ty))
+            locate(body, pos.tail, fusebVarListwithMap(bound, bVars), tyVarCount)
           case TypeLambda(body) if pos.posHead == -1 =>
-            locate(body, pos.tail, bVars, tyVarCount + 1, 0)
+            val bound = names.typeBinders(1)
+            names.withinTypes(bound) {
+              locate(body, pos.tail, bVars, tyVarCount + 1)
+            }
           case head ∙ _ if pos.posHead == 0 =>
-            locate(head, pos.tail, bVars, tyVarCount, 0)
-          case _ ∙ args if pos.posHead > 0 && pos.posHead <= args.size =>
+            locate(head, pos.tail, bVars, tyVarCount)
+          case head ∙ args if pos.posHead > 0 && pos.posHead <= args.size =>
+            toTPTP0(head, tyVarCount, bVars)(sig)
+            args.take(pos.posHead - 1).foreach(argToTPTP(_, tyVarCount, bVars)(sig))
             args(pos.posHead - 1) match {
-              case Left(arg) => locate(arg, pos.tail, bVars, tyVarCount, 0)
+              case Left(arg) => locate(arg, pos.tail, bVars, tyVarCount)
               case Right(_) => throw new IllegalArgumentException("Skolem binder path enters a type argument.")
             }
           case _ => throw new IllegalArgumentException("Invalid Skolem binder term position.")
         }
       }
 
-      val (binder, bVars, tyVarCount, tyBinderIndex) = locate(term, binderPath.pos, parentVars, parent.typeVars.size, 0)
-      data match {
-        case CoreCNF.TermSkolemData(replacement, _, _) =>
-          require(Forall.unapply(binder).nonEmpty || Exists.unapply(binder).nonEmpty, "Term Skolem binder path must identify a term quantifier.")
-          val binderName = intToName(bVars.size)
-          s"skolemize($binderName,$$thf(${toTPTP0(replacement, tyVarCount, bVars)(sig)}))"
-        case CoreCNF.TypeSkolemData(replacement, _) => require(TyForall.unapply(binder).nonEmpty, "Type Skolem binder path must identify a type quantifier.")
-          val binderName = s"T${intToName(tyBinderIndex)}"
-          s"skolemize($binderName,$$thf(${typeToTHF1(replacement)(sig)}))"
+      parent.lits.take(binderPath.litIdx).foreach { lit =>
+        toTPTP0(lit.left, parent.typeVars.size, parentVars)(sig)
+        if (lit.equational) toTPTP0(lit.right, parent.typeVars.size, parentVars)(sig)
       }
+      if (binderPath.side == Literal.rightSide) {
+        require(literal.equational, "Non-equational literal has no printed right side.")
+        toTPTP0(literal.left, parent.typeVars.size, parentVars)(sig)
+      }
+      locate(term, binderPath.pos, parentVars, parent.typeVars.size)
     }
   }
 
@@ -497,7 +522,8 @@ object ToTHF {
       // General structure
       case _ :::> _ =>
         val t0 = t.etaContract
-        if (t != t0) toTPTP0(t0, tyVarCount, bVars)(sig)
+        // Keep source positions intact when a Skolem annotation replays this formula.
+        if (names == null && t != t0) toTPTP0(t0, tyVarCount, bVars)(sig)
         else {
           val (bVarTys, body) = collectLambdas(t)
           val newBVars = if (names == null) makeBVarList(bVarTys, bVars.size) else names.termBinders(bVarTys)
