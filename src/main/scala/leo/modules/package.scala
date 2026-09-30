@@ -217,13 +217,21 @@ package object modules {
   final def proofToTPTP(proof: Proof)(implicit sig: Signature): String = {
     if (Configuration.isSet("DEBUG"))
       proof.map(_.pretty(sig)).mkString("\n")
-    else
-      proof.map(mkTPTP(_)(sig)).mkString("\n")
+    else {
+      def skolemParent(annotation: ClauseAnnotation): Option[Long] = annotation match {
+        case ClauseAnnotation.InferredFrom(leo.modules.calculus.CnfSkolem, parents, _) if parents.nonEmpty =>
+          Some(parents.head._1.id)
+        case ClauseAnnotation.CompressedRule(_, underlying) => skolemParent(underlying)
+        case _ => None
+      }
+      val skolemParents = proof.flatMap(cl => skolemParent(cl.annotation)).toSet
+      proof.map(cl => mkTPTP(cl, skolemParents.contains(cl.id))(sig)).mkString("\n")
+    }
   }
 
-  private def mkTPTP(cl : ClauseProxy)(sig: Signature) : String = {
+  private def mkTPTP(cl : ClauseProxy, uniqueBinderNames: Boolean)(sig: Signature) : String = {
     try{
-      ToTHF.withAnnotation(cl)(sig)
+      ToTHF.withAnnotation(cl, uniqueBinderNames)(sig)
     } catch {
       case e : Throwable => leo.Out.warn(s"Could not translate: ${cl.pretty}.\n Error: ${e.toString}"); cl.pretty
     }

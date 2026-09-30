@@ -42,14 +42,41 @@ object ToTHF {
     * "thf(id, term, role, annotation)." where
     * `id` equals `f.cl.id`, `term` is a representation of `f.cl` as term,
     * `role` equals `f.role.pretty`, `annotation` equals a representation of `f.annotation`. */
-  final def withAnnotation(cl: ClauseProxy)(implicit sig: Signature): String = {
+  final def withAnnotation(cl: ClauseProxy, uniqueBinderNames: Boolean = false)(implicit sig: Signature): String = {
       //      val normclause = leo.modules.calculus.Simp(cl.cl)
-      toTPTP(cl.id.toString, cl.cl, cl.role, cl.annotation)(sig)
+      toTPTP(cl.id.toString, cl.cl, cl.role, cl.annotation, uniqueBinderNames)(sig)
   }
   /** See withAnnotation(ClauseProxy).
     * The textual representation is returned as an `Output` object. */
   final def outputWithAnnotation(cl: ClauseProxy)(implicit sig: Signature): Output = new Output {
     def apply(): String = toTPTP(cl.id.toString, cl.cl, cl.role, cl.annotation)(sig)
+  }
+
+  /** One naming context per formula, shared by all recursive printer calls. */
+  private final class BinderNames(termVariableCount: Int, typeVariableCount: Int) {
+    private var nextTerm = termVariableCount
+    private var nextType = typeVariableCount
+    private var types = (0 until nextType).map(i => s"T${intToName(i)}").toList
+
+    def termBinders(tys: Seq[Type]): Seq[(String, Type)] = tys.map { ty =>
+      val name = intToName(nextTerm)
+      nextTerm += 1
+      (name, ty)
+    }
+
+    def typeBinders(count: Int): Seq[String] = (0 until count).map { _ =>
+      val name = s"T${intToName(nextType)}"
+      nextType += 1
+      name
+    }
+
+    def typeName(scope: Int): String = types(scope - 1)
+
+    def withinTypes[A](binders: Seq[String])(render: => A): A = {
+      val previous = types
+      types = binders.reverse.toList ::: previous
+      try render finally types = previous
+    }
   }
 
   ///////////////////////
@@ -289,7 +316,10 @@ object ToTHF {
   ///////////////////////////////
   // Translation of clause to THF formula
   ///////////////////////////////
-  final def toTPTP(name: String, cl: Clause, role: Role, clauseAnnotation: ClauseAnnotation = null)(sig: Signature): String = {
+  final def toTPTP(name: String, cl: Clause, role: Role, clauseAnnotation: ClauseAnnotation = null,
+                  uniqueBinderNames: Boolean = false)(sig: Signature): String = {
+    implicit val names: BinderNames =
+      if (uniqueBinderNames) new BinderNames(cl.implicitlyBound.size, cl.typeVars.size) else null
     val sb = new StringBuffer()
     val freeVarsExist = cl.implicitlyBound.nonEmpty || cl.typeVars.nonEmpty
     if (freeVarsExist) {
@@ -318,7 +348,8 @@ object ToTHF {
 //    s"$result % vars = $clauseFreeVars; tyVars = $clauseFreeTypeVars"
   }
 
-  final private def clauseToTPTP(cl: Clause, tyVarCount: Int, bVarMap: Map[Int, String])(sig: Signature): String = {
+  final private def clauseToTPTP(cl: Clause, tyVarCount: Int, bVarMap: Map[Int, String])(sig: Signature)
+                                 (implicit names: BinderNames = null): String = {
     val sb = new StringBuilder
     if (cl.lits.isEmpty) {
       sb.append(toTPTP0(LitFalse,tyVarCount)(sig))
@@ -374,7 +405,8 @@ object ToTHF {
     toTPTP0(t, t.tyFV.size, Map.empty.withDefault(intToName))(sig)
   }
 
-  final private def toTPTP0(t: Term, tyVarCount: Int, bVars: Map[Int,String] = Map())(sig: Signature): String = {
+  final private def toTPTP0(t: Term, tyVarCount: Int, bVars: Map[Int,String] = Map())(sig: Signature)
+                             (implicit names: BinderNames = null): String = {
     t match {
       // Constant symbols that are (unapplied) connectives, they need to be ()'d
       case Symbol(id) if sig(id).isFixedSymbol =>
@@ -392,22 +424,25 @@ object ToTHF {
       // Unary connectives
       case Not(t2) => s"${sig(Not.key).name} (${toTPTP0(t2,tyVarCount, bVars)(sig)})"
       case Forall(_) => val (bVarTys, body) = collectForall(t)
-                        val newBVars = makeBVarList(bVarTys, bVars.size)
+                        val newBVars = if (names == null) makeBVarList(bVarTys, bVars.size) else names.termBinders(bVarTys)
         body match {
           case Forall(_) | Exists(_) | Not(_) => s"${sig(Forall.key).name} [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: ${toTPTP0(body,tyVarCount, fusebVarListwithMap(newBVars, bVars))(sig)}"
           case _ => s"${sig(Forall.key).name} [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: (${toTPTP0(body,tyVarCount, fusebVarListwithMap(newBVars, bVars))(sig)})"
         }
 
       case Exists(_) => val (bVarTys, body) = collectExists(t)
-                        val newBVars = makeBVarList(bVarTys, bVars.size)
+                        val newBVars = if (names == null) makeBVarList(bVarTys, bVars.size) else names.termBinders(bVarTys)
         body match {
           case Forall(_) | Exists(_) | Not(_) => s"${sig(Exists.key).name} [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: ${toTPTP0(body, tyVarCount, fusebVarListwithMap(newBVars,bVars))(sig)}"
           case _ => s"${sig(Exists.key).name} [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: (${toTPTP0(body, tyVarCount, fusebVarListwithMap(newBVars,bVars))(sig)})"
         }
       case TyForall(_) => val (tyAbsCount, body) = collectTyForall(t)
-        s"! [${(1 to tyAbsCount).map(i => "T" + intToName(i - 1) + ": $tType").mkString(",")}]: (${toTPTP0(body, tyVarCount+tyAbsCount, bVars)(sig)})"
+        val typeBinders = if (names == null) (0 until tyAbsCount).map(i => s"T${intToName(i)}") else names.typeBinders(tyAbsCount)
+        val renderedBody = if (names == null) toTPTP0(body, tyVarCount+tyAbsCount, bVars)(sig)
+                           else names.withinTypes(typeBinders)(toTPTP0(body, tyVarCount+tyAbsCount, bVars)(sig))
+        s"! [${typeBinders.map(_ + s": $$tType").mkString(",")}]: ($renderedBody)"
       case Choice(_) => val (bVarTys, body) = collectChoice(t)
-                        val newBVars = makeBVarList(bVarTys, bVars.size)
+                        val newBVars = if (names == null) makeBVarList(bVarTys, bVars.size) else names.termBinders(bVarTys)
         body match {
           case Forall(_) | Exists(_) | Not(_) => s"${sig(Choice.key).name} [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: ${toTPTP0(body, tyVarCount, fusebVarListwithMap(newBVars,bVars))(sig)}"
           case _ => s"${sig(Choice.key).name} [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: (${toTPTP0(body, tyVarCount, fusebVarListwithMap(newBVars,bVars))(sig)})"
@@ -465,14 +500,17 @@ object ToTHF {
         if (t != t0) toTPTP0(t0, tyVarCount, bVars)(sig)
         else {
           val (bVarTys, body) = collectLambdas(t)
-          val newBVars = makeBVarList(bVarTys, bVars.size)
+          val newBVars = if (names == null) makeBVarList(bVarTys, bVars.size) else names.termBinders(bVarTys)
           body match {
             case Forall(_) | Exists(_) | Not(_) => s"^ [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: ${toTPTP0(body, tyVarCount,fusebVarListwithMap(newBVars, bVars))(sig)}"
             case _ => s"^ [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: (${toTPTP0(body, tyVarCount,fusebVarListwithMap(newBVars, bVars))(sig)})"
           }
         }
       case TypeLambda(_) => val (tyAbsCount, body) = collectTyLambdas(0, t)
-        s"^ [${(1 to tyAbsCount).map(i => "T" + intToName(i - 1) + ": $tType").mkString(",")}]: (${toTPTP0(body, tyVarCount+tyAbsCount,bVars)(sig)})"
+        val typeBinders = if (names == null) (0 until tyAbsCount).map(i => s"T${intToName(i)}") else names.typeBinders(tyAbsCount)
+        val renderedBody = if (names == null) toTPTP0(body, tyVarCount+tyAbsCount,bVars)(sig)
+                           else names.withinTypes(typeBinders)(toTPTP0(body, tyVarCount+tyAbsCount,bVars)(sig))
+        s"^ [${typeBinders.map(_ + s": $$tType").mkString(",")}]: ($renderedBody)"
       case _@Symbol(id) ∙ args if leo.modules.input.InputProcessing.adHocPolymorphicArithmeticConstants.contains(id) =>
         val translatedF = sig(id).name
         val translatedArgs: Seq[String] = args.tail.map(argToTPTP(_, tyVarCount, bVars)(sig)) // drop type argument as it's implicit in the TPTP representation
@@ -486,7 +524,8 @@ object ToTHF {
     }
   }
 
-  private[this] final def argToTPTP(arg: Either[Term, Type], tyVarCount: Int, bVars: Map[Int, String])(sig: Signature): String = {
+  private[this] final def argToTPTP(arg: Either[Term, Type], tyVarCount: Int, bVars: Map[Int, String])(sig: Signature)
+                                    (implicit names: BinderNames = null): String = {
     arg match {
       case Left(termArg) => termArg match {
         case Bound(_, _) | Symbol(_) => toTPTP0(termArg,tyVarCount, bVars)(sig)
@@ -515,10 +554,10 @@ object ToTHF {
       s"!> [${(1 to tyAbsCount).map(i => s"T${intToName(i - 1)}: $$tType").mkString(",")}]: ${typeToTHF1(bodyTy)(sig)}"
     case _ => typeToTHF1(ty)(sig)
   }
-  final private def typeToTHF1(ty: Type)(sig: Signature): String = ty match {
+  final private def typeToTHF1(ty: Type)(sig: Signature)(implicit names: BinderNames = null): String = ty match {
     case BaseType(id) => sig(id).name
     case ComposedType(id, args) => s"(${sig(id).name} @ ${args.map(typeToTHF1(_)(sig)).mkString(" @ ")})"
-    case BoundType(scope) => "T" + intToName(scope-1)
+    case BoundType(scope) => if (names == null) "T" + intToName(scope-1) else names.typeName(scope)
     case t1 -> t2 => s"(${typeToTHF1(t1)(sig)} > ${typeToTHF1(t2)(sig)})"
     case ProductType(tys) => tys.map(typeToTHF1(_)(sig)).mkString("[", ",", "]")
     case ∀(_) => throw new IllegalArgumentException("Polytype should have been caught before")
