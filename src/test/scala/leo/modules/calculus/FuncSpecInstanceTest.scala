@@ -21,7 +21,7 @@ class FuncSpecInstanceTest extends LeoTestSuite {
     val f = Input("! [F:$i>$i]: ~((F @ a) = b)")
     assert(Term.wellTyped(f))
     println(f.pretty(sig))
-    val p = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
+    val p = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
     assert(p.forall(Clause.wellTyped))
     println(p.map(_.pretty(sig)).mkString("\n"))
     val p0 = p.map{cl =>

@@ -144,11 +144,11 @@ package inferenceControl {
     final def cnf(cl : AnnotatedClause)(implicit state: LocalState): Set[AnnotatedClause] = {
       val (cnfMode, cnfresult0) = if (state.runStrategy.renaming) {
         val mode = RenameCNF
-        val cnfresult0 = RenameCNF.applyWithSteps(leo.modules.calculus.freshVarGen(cl.cl), state.renamingCash, cl.cl)(state.signature)
+        val cnfresult0 = RenameCNF.apply(leo.modules.calculus.freshVarGen(cl.cl), state.renamingCash, cl.cl)(state.signature)
         (mode, cnfresult0)
       } else {
         val mode = FullCNF
-        val cnfresult0 = FullCNF.applyWithSteps(leo.modules.calculus.freshVarGen(cl.cl), cl.cl)(state.signature)
+        val cnfresult0 = FullCNF.apply(leo.modules.calculus.freshVarGen(cl.cl), cl.cl)(state.signature)
         (mode, cnfresult0)
       }
 

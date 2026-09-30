@@ -36,7 +36,7 @@ class MonotonicityTest extends LeoTestSuite {
     assert(Term.wellTyped(f3))
 
     // calculate CNF
-    val cnf = CNF(vargen, termToClause(f1)).toSet union CNF(vargen, termToClause(f2)).toSet union CNF(vargen, termToClause(f3)).toSet
+    val cnf = CNF(vargen, termToClause(f1)).clauses.toSet union CNF(vargen, termToClause(f2)).clauses.toSet union CNF(vargen, termToClause(f3)).clauses.toSet
 
     // infinite types
     val noInfTypes: Set[Type] = Set.empty // none known
@@ -76,7 +76,7 @@ class MonotonicityTest extends LeoTestSuite {
     assert(Term.wellTyped(f3))
 
     // calculate CNF
-    val cnf = CNF(vargen, termToClause(f1)).toSet union CNF(vargen, termToClause(f2)).toSet union CNF(vargen, termToClause(f3)).toSet
+    val cnf = CNF(vargen, termToClause(f1)).clauses.toSet union CNF(vargen, termToClause(f2)).clauses.toSet union CNF(vargen, termToClause(f3)).clauses.toSet
 
     println(cnf.map(_.pretty(sig)).mkString("\n"))
     // infinite types

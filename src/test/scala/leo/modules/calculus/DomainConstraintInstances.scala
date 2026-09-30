@@ -23,8 +23,8 @@ class DomainConstraintInstancesTest extends LeoTestSuite {
     val res = Input("p(a)")
     assert(Term.wellTyped(f))
 
-    val c = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
-    val cres = FullCNF.apply(freshVarGenFromBlank, termToClause(res, true))
+    val c = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
+    val cres = FullCNF.apply(freshVarGenFromBlank, termToClause(res, true)).clauses
     assert(c.size == 1)
     assert(cres.size == 1)
 
@@ -50,7 +50,7 @@ class DomainConstraintInstancesTest extends LeoTestSuite {
     val f = Input("! [X : $i]: (p(X))")
     assert(Term.wellTyped(f))
 
-    val c = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
+    val c = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
     assert(c.size == 1)
 
 
@@ -75,7 +75,7 @@ class DomainConstraintInstancesTest extends LeoTestSuite {
     val f = Input("! [X : $i, Y : $i]: (p(X) | q(Y))")
     assert(Term.wellTyped(f))
 
-    val c = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
+    val c = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
     assert(c.size == 1)
 
 
@@ -100,7 +100,7 @@ class DomainConstraintInstancesTest extends LeoTestSuite {
     val f = Input("! [X : $i, Y : $i]: (p(X) | q(Y))")
     assert(Term.wellTyped(f))
 
-    val c = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
+    val c = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
     assert(c.size == 1)
 
 
@@ -129,7 +129,7 @@ class DomainConstraintInstancesTest extends LeoTestSuite {
     val f = Input("! [X : $i, Y : $i, Z : $i]: (p(X) | q(Y) | r(Z))")
     assert(Term.wellTyped(f))
 
-    val cl = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
+    val cl = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
     assert(cl.size == 1)
 
 
@@ -159,7 +159,7 @@ class DomainConstraintInstancesTest extends LeoTestSuite {
     val f = Input("! [X : $i, Y : $i, Z : $i]: (p(X) | q(Y) | r(Z))")
     assert(Term.wellTyped(f))
 
-    val cl = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
+    val cl = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
     assert(cl.size == 1)
 
 
@@ -191,7 +191,7 @@ class DomainConstraintInstancesTest extends LeoTestSuite {
     val f = Input("! [X : $i, Y : pt]: (p(X) | q(Y))")
     assert(Term.wellTyped(f))
 
-    val cl = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
+    val cl = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
     assert(cl.size == 1)
 
 
@@ -228,7 +228,7 @@ class DomainConstraintInstancesTest extends LeoTestSuite {
     val f = Input("! [X : $i, Y : pt]: (p(X) | q(Y))")
     assert(Term.wellTyped(f))
 
-    val cl = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true))
+    val cl = FullCNF.apply(freshVarGenFromBlank, termToClause(f, true)).clauses
     assert(cl.size == 1)
 
 

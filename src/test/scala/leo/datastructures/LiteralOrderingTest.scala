@@ -28,7 +28,7 @@ class LiteralOrderingTest extends LeoTestSuite {
 //    Out.finest(f.pretty(sig))
     Term.wellTyped(f)
 
-    val problem = FullCNF(freshVarGenFromBlank, termToClause(f)).toSet
+    val problem = FullCNF(freshVarGenFromBlank, termToClause(f)).clauses.toSet
     assert(problem.size == 1)
     val clause = problem.head
     val (liftCa, posLiftLits, negLiftLits, nonLiftLits) = LiftEq.canApply(clause)
@@ -37,7 +37,7 @@ class LiteralOrderingTest extends LeoTestSuite {
     val (ca, boolextLits,otherLits) = BoolExt.canApply(lifted)
     assert(ca)
     val resultBoolExt = BoolExt(lifted, boolextLits, otherLits)
-    val ready = resultBoolExt.flatMap(cl => FullCNF(freshVarGen(cl),cl))
+    val ready = resultBoolExt.flatMap(cl => FullCNF(freshVarGen(cl),cl).clauses)
     Out.output(ready.map(_.pretty(sig)).mkString("\n"))
     assert(ready.size == 2)
     val cl1 = ready.head

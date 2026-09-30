@@ -98,7 +98,7 @@ object Normalization {
         val cnf = if (doCNF) {boolExtCls.flatMap{c =>
           if (RenameCNF.canApply(c)) {
             changed = true
-            RenameCNF(freshVarGen(c), s.renamingCash, c, renamingThreshold)
+            RenameCNF.apply(freshVarGen(c), s.renamingCash, c, renamingThreshold).clauses
           } else Set(c)
         }} else boolExtCls
 
@@ -125,7 +125,7 @@ object Normalization {
     if (doCNF) {
       val cl = termToClause(newC)
       val vargen = freshVarGen(cl)
-      val res0 = RenameCNF.apply(vargen, s.renamingCash, termToClause(newC), renamingThreshold)
+      val res0 = RenameCNF.apply(vargen, s.renamingCash, termToClause(newC), renamingThreshold).clauses
       res0.toSet union x
     } else {
       val cl = termToClause(newC)

@@ -84,7 +84,7 @@ class MonoTFFTest extends LeoTestSuite {
     Out.finest(f2.pretty(sig))
     assert(Term.wellTyped(f2))
 
-    val cnf = (leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f1)) union leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f2))).toSet
+    val cnf = (leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f1)).clauses union leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f2)).clauses).toSet
 
     Out.finest(cnf.map(_.pretty(sig)).mkString("\n"))
 
@@ -147,7 +147,7 @@ class MonoTFFTest extends LeoTestSuite {
     Out.finest(f1.pretty(sig))
     assert(Term.wellTyped(f1))
 
-    val cnf = (leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f1))).toSet
+    val cnf = (leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f1))).clauses.toSet
 
     Out.finest(cnf.map(_.pretty(sig)).mkString("\n"))
 
@@ -210,7 +210,7 @@ class MonoTFFTest extends LeoTestSuite {
     Out.finest(f1.pretty(sig))
     assert(Term.wellTyped(f1))
 
-    val cnf = (leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f1))(sig)).toSet
+    val cnf = (leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f1))(sig)).clauses.toSet
 
     Out.finest(cnf.map(_.pretty(sig)).mkString("\n"))
 
