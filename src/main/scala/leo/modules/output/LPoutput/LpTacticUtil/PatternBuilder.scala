@@ -6,7 +6,7 @@ import leo.modules.HOLSignature.{&, Choice, Exists, Forall, Impl, Not, TyForall,
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Wildcard}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
-import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpTerm, OlMonoType, QName, SymRef, nAry}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpTerm, LpType, Name, OlMonoType, QName, SymRef, nAry}
 
 object PatternBuilder {
 
@@ -27,7 +27,7 @@ object PatternBuilder {
   private final case class PositionPatternContext(plugTerm: LpTerm[Level.Obj] => LpTerm[Level.Obj],
                                                   subterm: Term)
 
-  private val RewriteUnderBinderReason = "Rewriting under binders not possible"
+  private val RewriteUnderTypeBinderReason = "Rewriting under type binders not possible"
   private val DefaultPatternHole = Const[Level.Obj](SymRef.LP(QName.local("x")))
 
   /**
@@ -39,9 +39,8 @@ object PatternBuilder {
     * positions in Leo's application spine and must remain well-typed in the
     * generated Lambdapi pattern.
     *
-    * Positions below object- or type-level binders are currently rejected:
-    * Lambdapi patterns for those occurrences require binder-aware pattern
-    * variables, which the output encoding cannot yet express safely.
+    * Object-level binders are retained in the pattern. Positions below type
+    * binders remain unsupported by the output encoding.
     */
   def leoPosition2LpPattern(term: Term,
                             position: Position,
@@ -51,7 +50,8 @@ object PatternBuilder {
     }
 
   private def leoPosition2LpPatternContext(term: Term,
-                                           position: Position): Either[String, PositionPatternContext] = {
+                                           position: Position,
+                                           binderDepth: Int = 0): Either[String, PositionPatternContext] = {
     if (position == Position.root) {
       Right(PositionPatternContext(identity, term))
     } else {
@@ -59,13 +59,29 @@ object PatternBuilder {
 
       // if position.tail can be encoded as a a pattern, take the result and wrap it.
       def descend(selected: Term,
-                  wrap: LpTerm[Level.Obj] => LpTerm[Level.Obj]): Either[String, PositionPatternContext] =
-        leoPosition2LpPatternContext(selected, position.tail).map { result =>
+                  wrap: LpTerm[Level.Obj] => LpTerm[Level.Obj],
+                  nextBinderDepth: Int = binderDepth): Either[String, PositionPatternContext] =
+        leoPosition2LpPatternContext(selected, position.tail, nextBinderDepth).map { result =>
           PositionPatternContext(target => wrap(result.plugTerm(target)), result.subterm)
         }
 
       def invalidPosition(expected: String): Left[String, PositionPatternContext] =
         Left(s"Invalid Leo position ${position.pretty} in ${term.pretty}: expected $expected")
+
+      def descendQuantifier(argument: Term,
+                            construct: ((Name, LpType), LpTerm[Level.Obj]) => LpTerm[Level.Obj]): Either[String, PositionPatternContext] =
+        argument match {
+          case ty :::> _ if currentPosition == 2 =>
+            val binder = (Name(s"rwBinder$binderDepth"), LpType.El(type2LP(ty)))
+            // The encoded quantifier has one explicit lambda argument; Leo's
+            // position also counts the quantifier's type argument.
+            construct(binder, Wildcard[Level.Obj]()) match {
+              case LpTerm.App(head, _) =>
+                descend(argument, pattern => LpTerm.App(head, Seq(Arg.Explicit(pattern))))
+              case _ => invalidPosition("an encoded quantifier application")
+            }
+          case _ => invalidPosition("an explicit quantifier lambda at argument 2")
+        }
 
       term match {
         case left ||| right =>
@@ -111,8 +127,18 @@ object PatternBuilder {
           if (currentPosition == 1) descend(body, LogicConst.Not.apply)
           else invalidPosition("negation argument 1")
 
-        case _ :::> _ | Forall(_) | Exists(_) | Choice(_) | TyForall(_) | TypeLambda(_) =>
-          Left(RewriteUnderBinderReason)
+        case Forall(argument) => descendQuantifier(argument, LogicConst.Forall.apply)
+        case Exists(argument) => descendQuantifier(argument, LogicConst.Exists.apply)
+        case Choice(argument) => descendQuantifier(argument, LogicConst.Choice.apply)
+
+        case ty :::> body =>
+          if (currentPosition == -1) {
+            val binder = (Name(s"rwBinder$binderDepth"), Some(LpType.El(type2LP(ty))))
+            descend(body, pattern => LpTerm.Lam[Level.Obj](binder, pattern), binderDepth + 1)
+          } else invalidPosition("abstraction body -1")
+
+        case TyForall(_) | TypeLambda(_) =>
+          Left(RewriteUnderTypeBinderReason)
 
         case head ∙ args =>
           val wildcardArguments: Seq[Arg[Level.Obj]] = args.map {
