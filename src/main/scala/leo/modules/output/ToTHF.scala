@@ -278,9 +278,24 @@ object ToTHF {
       implicit val names: BinderNames = new BinderNames(parent.implicitlyBound.size, parent.typeVars.size)
       val (_, parentVars) = clauseVarsToTPTP(parent.implicitlyBound, typeToTHF1(_)(sig))
 
-      @tailrec
-      def locate(t: Term, pos: Position, bVars: Map[Int, String], tyVarCount: Int, tyBinderIndex: Int): (Term, Map[Int, String], Int, Int) = {
-        if (pos == Position.root) (t, bVars, tyVarCount, tyBinderIndex)
+      def selectedBinder(t: Term, bVars: Map[Int, String], tyVarCount: Int): String = data match {
+        case CoreCNF.TermSkolemData(replacement, _, _) =>
+          val ty = t match {
+            case Forall(ty :::> _) => ty
+            case Exists(ty :::> _) => ty
+            case _ => throw new IllegalArgumentException("Term Skolem binder path must identify a term quantifier.")
+          }
+          val binderName = names.termBinders(Seq(ty)).head._1
+          s"skolemize($binderName,$$thf(${toTPTP0(replacement, tyVarCount, bVars)(sig)}))"
+        case CoreCNF.TypeSkolemData(replacement, _) =>
+          require(TyForall.unapply(t).nonEmpty, "Type Skolem binder path must identify a type quantifier.")
+          val binderName = names.typeBinders(1).head
+          s"skolemize($binderName,$$thf(${typeToTHF1(replacement)(sig)}))"
+      }
+
+      // Render branches before the recorded path to advance the same counters as the parent printer.
+      def locate(t: Term, pos: Position, bVars: Map[Int, String], tyVarCount: Int): String = {
+        if (pos == Position.root) selectedBinder(t, bVars, tyVarCount)
         else t match {
           case Forall(ty :::> body) if pos.seq.startsWith(Vector(2, -1)) =>
             val bound = names.termBinders(Seq(ty))
