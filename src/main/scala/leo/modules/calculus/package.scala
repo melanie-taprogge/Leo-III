@@ -209,7 +209,7 @@ package object calculus {
   final def skTermDefined(a: Term, fvs: Seq[(Int, Type)], tyFvs: Seq[Int], negatePredicate: Boolean = false)(implicit sig: Signature): Term = {
     import leo.datastructures.Term.:::>
     import leo.datastructures.Term._
-    import leo.modules.HOLSignature.{Choice}
+    import leo.modules.HOLSignature.Epsilon
 
     val (goalTy, body0) = a match {
       case ty0 :::> body => (ty0, body)
@@ -221,7 +221,7 @@ package object calculus {
     val skTy = mkPolyTyAbstractionType(tyFvs.size, funTy)
 
     // Construct the definition of the fresh Skolem function
-    val maybeNegated = if (negatePredicate) Choice(mkTermAbs(goalTy, Not(body0))) else Choice(a)
+    val maybeNegated = if (negatePredicate) Epsilon(mkTermAbs(goalTy, Not(body0))) else Epsilon(a)
 
     // Close potential gaps in the free variables
     val maybeSubst = normalizeFVs(fvs.map(_._1))

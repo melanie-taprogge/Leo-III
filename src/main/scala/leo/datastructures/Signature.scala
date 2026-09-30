@@ -215,6 +215,8 @@ object Signature {
     for ((name, fed, ty, flag) <- HOLSignature.definedConsts) {
       sig.addFixed(name, ty, Some(fed), flag)
     }
+    val (epsilonName, epsilonType, epsilonFlag) = HOLSignature.epsilonConst
+    sig.addFixed(epsilonName, epsilonType, None, epsilonFlag)
     sig
   }
 

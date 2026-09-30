@@ -187,7 +187,7 @@ object TypedFOLEncoding {
     import Term.{:::>, TypeLambda, Bound, Symbol, ∙}
     import leo.modules.HOLSignature.{Forall => HOLForall, Exists => HOLExists, TyForall => HOLTyForall,
     & => HOLAnd, ||| => HOLOr, === => HOLEq, !=== => HOLNeq, <=> => HOLEquiv, Impl => HOLImpl, <= => HOLIf,
-    Not => HOLNot, LitFalse => HOLFalse, LitTrue => HOLTrue, Choice => HOLChoice}
+    Not => HOLNot, LitFalse => HOLFalse, LitTrue => HOLTrue, Choice => HOLChoice, Epsilon => HOLEpsilon}
     import TypedFOLEncodingSignature._
     t match {
       // cases from here should not really happen if invoked from func-ext treated CNF problem.
@@ -207,6 +207,7 @@ object TypedFOLEncoding {
         val translatedBody = translateTerm(body,les)(holSignature, encodingSignature)
         val result = encodingSignature.mkproxyChoice(translatedBody)
         encodingSignature.mkhBool(result)
+      case HOLEpsilon(_) => throw new IllegalArgumentException("Unexpected Skolem epsilon term in first-order encoding")
       case HOLEq(l,r) =>
         assert(l.ty == r.ty)
         if (l.ty == o) {
@@ -296,7 +297,7 @@ object TypedFOLEncoding {
     import Term.{Bound, :::>, ∙, Symbol, TypeLambda, Integer, Rational, Real}
     import leo.modules.HOLSignature.{Forall => HOLForall, Exists => HOLExists,
     & => HOLAnd, ||| => HOLOr, === => HOLEq, !=== => HOLNeq, <=> => HOLEquiv, Impl => HOLImpl, <= => HOLIf,
-    Not => HOLNot, LitFalse => HOLFalse, LitTrue => HOLTrue, Choice => HOLChoice}
+    Not => HOLNot, LitFalse => HOLFalse, LitTrue => HOLTrue, Choice => HOLChoice, Epsilon => HOLEpsilon}
     import encodingSignature._
     leo.Out.finest(s"TranslateTerm: ${t.pretty(holSignature)}")
     t match {
@@ -317,6 +318,7 @@ object TypedFOLEncoding {
             case HOLIf.key => proxyIf
             case HOLEquiv.key => proxyEquiv
             case HOLChoice.key => proxyChoice
+            case HOLEpsilon.key => throw new IllegalArgumentException("Unexpected Skolem epsilon term in first-order encoding")
             case _ =>
               val fName = escape(holSignature(id).name)
               mkAtom(encodingSignature(fName).key)(encodingSignature)

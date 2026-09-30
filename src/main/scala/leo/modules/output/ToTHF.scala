@@ -3,7 +3,7 @@ package leo.modules.output
 import leo.datastructures._
 import Term._
 import leo.datastructures.Type._
-import leo.modules.HOLSignature.{!===, &, <=, <=>, <~>, ===, Choice, Exists, Forall, Impl, LitFalse, Not, TyForall, |||, ~&, ~|||}
+import leo.modules.HOLSignature.{!===, &, <=, <=>, <~>, ===, Choice, Epsilon, Exists, Forall, HOLUnaryConnective, Impl, LitFalse, Not, TyForall, |||, ~&, ~|||}
 import leo.modules.SZSException
 import leo.modules.calculus.CoreCNF
 
@@ -481,11 +481,14 @@ object ToTHF {
         val renderedBody = if (names == null) toTPTP0(body, tyVarCount+tyAbsCount, bVars)(sig)
                            else names.withinTypes(typeBinders)(toTPTP0(body, tyVarCount+tyAbsCount, bVars)(sig))
         s"! [${typeBinders.map(_ + s": $$tType").mkString(",")}]: ($renderedBody)"
-      case Choice(_) => val (bVarTys, body) = collectChoice(t)
-                        val newBVars = if (names == null) makeBVarList(bVarTys, bVars.size) else names.termBinders(bVarTys)
+      case Choice(_) | Epsilon(_) =>
+        val selector: HOLUnaryConnective = if (Epsilon.unapply(t).isDefined) Epsilon else Choice
+        val (bVarTys, body) = collectChoice(t, selector)
+        val newBVars = if (names == null) makeBVarList(bVarTys, bVars.size) else names.termBinders(bVarTys)
+        val binder = sig(selector.key).name
         body match {
-          case Forall(_) | Exists(_) | Not(_) => s"${sig(Choice.key).name} [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: ${toTPTP0(body, tyVarCount, fusebVarListwithMap(newBVars,bVars))(sig)}"
-          case _ => s"${sig(Choice.key).name} [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: (${toTPTP0(body, tyVarCount, fusebVarListwithMap(newBVars,bVars))(sig)})"
+          case Forall(_) | Exists(_) | Not(_) => s"$binder [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: ${toTPTP0(body, tyVarCount, fusebVarListwithMap(newBVars,bVars))(sig)}"
+          case _ => s"$binder [${newBVars.map({case (s,ty) => s"$s:${typeToTHF1(ty)(sig)}"}).mkString(",")}]: (${toTPTP0(body, tyVarCount, fusebVarListwithMap(newBVars,bVars))(sig)})"
         }
       // Binary connectives
       case t1 ||| t2 => t1 match {
@@ -648,15 +651,15 @@ object ToTHF {
     }
   }
 
-  /** Gather consecutive all-quantifications (nameless). */
-  final private def collectChoice(t: Term): (Seq[Type], Term) = {
-    collectChoice0(Seq.empty, t)
+  /** Gather the binders of a choice or epsilon term. */
+  final private def collectChoice(t: Term, selector: HOLUnaryConnective = Choice): (Seq[Type], Term) = {
+    collectChoice0(Seq.empty, t, selector)
   }
   @tailrec
-  @inline final private def collectChoice0(vars: Seq[Type], t: Term): (Seq[Type], Term) = {
-    t match {
-      case Choice(ty :::> b) => collectChoice0(vars :+ ty, b)
-      case Choice(body) => collectChoice0(vars, Choice(body.etaExpand))
+  @inline final private def collectChoice0(vars: Seq[Type], t: Term, selector: HOLUnaryConnective): (Seq[Type], Term) = {
+    selector.unapply(t) match {
+      case Some(ty :::> b) => collectChoice0(vars :+ ty, b, selector)
+      case Some(body) => collectChoice0(vars, selector(body.etaExpand), selector)
       case _ => (vars, t)
     }
   }
