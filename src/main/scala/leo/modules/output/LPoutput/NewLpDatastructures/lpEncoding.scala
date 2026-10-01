@@ -115,6 +115,72 @@ object TypeEncoding {
 object TermEncoding {
   import TypeEncoding.type2LP
 
+  /** Check the eta side condition for one encoded binder. */
+  private def occursFree(term: LpTerm[Level.Obj], name: Name): Boolean = term match {
+    case LpTerm.Var(variable, _) => variable == name
+    case LpTerm.Lam((binder, _), body) => binder != name && occursFree(body, name)
+    case LpTerm.App(head, args) =>
+      occursFree(head, name) || args.exists {
+        case Arg.Explicit(argument) => occursFree(argument, name)
+        case Arg.Implicit(argument) => occursFree(argument, name)
+        case _ => false
+      }
+    case LpTerm.LpList(elements) => elements.exists(occursFree(_, name))
+    case _ => false
+  }
+
+  /** Contract the lambda being constructed. */
+  private def contractEta(abstraction: LpTerm.Lam[Level.Obj]): LpTerm[Level.Obj] = {
+    val LpTerm.Lam((name, _), body) = abstraction
+    body match {
+      case LpTerm.App(head, args) if args.nonEmpty =>
+        args.last match {
+          case Arg.Explicit(LpTerm.Var(`name`, _))
+            if !occursFree(head, name) && !args.dropRight(1).exists {
+              case Arg.Explicit(argument) => occursFree(argument, name)
+              case Arg.Implicit(argument) => occursFree(argument, name)
+              case _ => false
+            } =>
+            if (args.length == 1) head else LpTerm.App(head, args.dropRight(1))
+          case _ => abstraction
+        }
+      case _ => abstraction
+    }
+  }
+
+  /** After fresh beta reduction, normalize the resulting term.*/
+  private def normalizeAfterBeta(term: LpTerm[Level.Obj], preserveLambda: Boolean = false): LpTerm[Level.Obj] = term match {
+    case LpTerm.Lam(binder, body) =>
+      val abstraction = LpTerm.Lam[Level.Obj](binder, normalizeAfterBeta(body))
+      if (preserveLambda) abstraction else contractEta(abstraction)
+
+    // The encoder retains a lambda supplied explicitly to a quantifier.
+    case LpTerm.App(head, Seq(Arg.Explicit(argument)))
+      if head == LogicConst.cAll || head == LogicConst.cEx || head == LogicConst.cCh =>
+      LpTerm.App(head, Seq(Arg.Explicit(normalizeAfterBeta(argument, preserveLambda = true))))
+
+    case LpTerm.App(head, args) =>
+      val reducedHead = normalizeAfterBeta(head)
+      val reducedArgs = args.map {
+        case Arg.Explicit(argument) => Arg.Explicit(normalizeAfterBeta(argument))
+        case Arg.Implicit(argument) => Arg.Implicit(normalizeAfterBeta(argument))
+        case typeArgument => typeArgument
+      }
+      betaApplyIfPossible(reducedHead, reducedArgs)
+
+    case LpTerm.LpList(elements) => LpTerm.LpList(elements.map(normalizeAfterBeta(_)))
+    case _ => term
+  }
+
+  /** Reduce one application after translating its function and arguments. */
+  private def betaApplyIfPossible(function: LpTerm[Level.Obj], args: Seq[Arg[Level.Obj]]): LpTerm[Level.Obj] = {
+    (function, args.headOption) match {
+      case (LpTerm.Lam(_, _), Some(Arg.Explicit(_) | Arg.Implicit(_))) =>
+        normalizeAfterBeta(lpTermBuilder.betaApply(function, args))
+      case _ => LpTerm.App(function, args)
+    }
+  }
+
   // ** Encoding of terms
 
   /** Translate a sequence of variables to Lambdapi (assigns names and translated types) */
@@ -183,7 +249,7 @@ object TermEncoding {
       case Bound(_, scope) =>
         var2Lp(scope, t.ty, bVars)
 
-      // Handle binders explicitly as they may requrire eta-expansion
+      // Preserve explicit quantifier abstractions; apply bare predicates directly.
       case Forall(_) =>
         t match {
           case Forall(bVarTy :::> body) =>
@@ -194,8 +260,8 @@ object TermEncoding {
               (Name(newBVar._1), El(encType))
             }
             LogicConst.Forall(quantifiedVar, encBody)
-          case Forall(_) =>
-            term2LP(t.etaExpand, bVars, suppressReduction, replaceUnknownVars)
+          case Forall(argument) =>
+            App(LogicConst.cAll, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
         }
       case Exists(_) =>
         t match {
@@ -207,8 +273,8 @@ object TermEncoding {
               (Name(newBVar._1), El(encType))
             }
             LogicConst.Exists(quantifiedVar, encBody)
-          case Exists(_) =>
-            term2LP(t.etaExpand, bVars, suppressReduction, replaceUnknownVars)
+          case Exists(argument) =>
+            App(LogicConst.cEx, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
         }
       case Choice(_) =>
         t match {
@@ -220,8 +286,8 @@ object TermEncoding {
               (Name(newBVar._1), El(encType))
             }
             LogicConst.Choice(quantifiedVar, encBody)
-          case Choice(_) =>
-            term2LP(t.etaExpand, bVars, suppressReduction, replaceUnknownVars)
+          case Choice(argument) =>
+            App(LogicConst.cCh, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
         }
       /*
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet ${t.pretty}")
@@ -245,21 +311,12 @@ object TermEncoding {
       case t1 <~> t2 => throw new Error(s"encountered un-encoded connective <~> ${t.pretty}")
 
       // term abstraction in terms
-      case _ :::> _ =>
-        val t0 = if (suppressReduction) t else t.etaContract
-        if (t != t0) term2LP(t0, bVars, suppressReduction, replaceUnknownVars)
-        else
-          t0 match {
-            case ty :::> body =>
-              val newBVar = bVarGen(bVars,ty,replaceUnknownVars)
-              val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction, replaceUnknownVars)
-              val abstraction: (Name, Option[LpType]) = {
-                val encType = type2LP(newBVar._2)
-                (Name(newBVar._1), Some(El(encType)))
-              }
-              Lam(abstraction, encBody)
-            case _ => term2LP(t0, bVars, suppressReduction, replaceUnknownVars)
-          }
+      case ty :::> body =>
+        val newBVar = bVarGen(bVars, ty, replaceUnknownVars)
+        val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction, replaceUnknownVars)
+        val encType = type2LP(newBVar._2)
+        val abstraction = Lam((Name(newBVar._1), Some(El(encType))), encBody)
+        if (suppressReduction) abstraction else contractEta(abstraction)
 
       case TypeLambda(_) =>
         val (tyAbsCount, body) = collectTyLambdas(0, t)
@@ -270,7 +327,8 @@ object TermEncoding {
       case f ∙ args =>
         val translatedF = term2LP(f, bVars, suppressReduction, replaceUnknownVars)
         val arguments = args2LP(args, bVars, suppressReduction, replaceUnknownVars)
-        App(translatedF, arguments)
+        if (suppressReduction) App(translatedF, arguments)
+        else betaApplyIfPossible(translatedF, arguments)
 
       // Others should be invalid
       case _ => throw new IllegalArgumentException("Unexpected term format during conversion to LP")
@@ -447,6 +505,3 @@ object RawClauseEncoding {
     }
 
   }
-
-
-

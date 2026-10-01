@@ -260,6 +260,11 @@ object RewriteSimpEncoding {
       return NotEncodable(MissingRewriteMetadataReason)
     }
     val rewriteUses = initRewriteRuleUses(cl.furtherInfo.addInfoRw)
+    // Keep these occurrences out of proof production until the printed parent
+    // and positional patterns are constructed from the same representation.
+    if (rewriteUses.exists(_.occurrence.exists(_.position.seq.contains(-1)))) {
+      return NotEncodable("RW: Rewriting under object binders temporarily disabled")
+    }
 
     val groupedRewriteUses = rewriteUses.foldLeft(Vector.empty[Vector[RewriteRuleUse]]) {
       case (groups, rewriteUse) if groups.lastOption.exists(_.head.rewriteRuleParentId == rewriteUse.rewriteRuleParentId) =>
