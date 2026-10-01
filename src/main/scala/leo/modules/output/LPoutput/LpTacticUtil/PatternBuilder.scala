@@ -41,6 +41,9 @@ object PatternBuilder {
     *
     * Object-level binders are retained in the pattern. Positions below type
     * binders remain unsupported by the output encoding.
+    * The parent matched by this pattern must preserve the Leo term structure
+    * used to record `position`: its abstractions must not be eta-contracted,
+    * and quantifier arguments must not be eta-expanded during encoding.
     */
   def leoPosition2LpPattern(term: Term,
                             position: Position,
@@ -69,19 +72,12 @@ object PatternBuilder {
         Left(s"Invalid Leo position ${position.pretty} in ${term.pretty}: expected $expected")
 
       def descendQuantifier(argument: Term,
-                            construct: ((Name, LpType), LpTerm[Level.Obj]) => LpTerm[Level.Obj]): Either[String, PositionPatternContext] =
-        argument match {
-          case ty :::> _ if currentPosition == 2 =>
-            val binder = (Name(s"rwBinder$binderDepth"), LpType.El(type2LP(ty)))
-            // The encoded quantifier has one explicit lambda argument; Leo's
-            // position also counts the quantifier's type argument.
-            construct(binder, Wildcard[Level.Obj]()) match {
-              case LpTerm.App(head, _) =>
-                descend(argument, pattern => LpTerm.App(head, Seq(Arg.Explicit(pattern))))
-              case _ => invalidPosition("an encoded quantifier application")
-            }
-          case _ => invalidPosition("an explicit quantifier lambda at argument 2")
-        }
+                            head: LpTerm[Level.Obj]): Either[String, PositionPatternContext] =
+        if (currentPosition == 2) {
+          // Leo's position 1 is the type argument, which Lambdapi infers. The
+          // term argument may be either an explicit lambda or a bare function.
+          descend(argument, pattern => LpTerm.App(head, Seq(Arg.Explicit(pattern))))
+        } else invalidPosition("quantifier argument 2")
 
       term match {
         case left ||| right =>
@@ -127,9 +123,9 @@ object PatternBuilder {
           if (currentPosition == 1) descend(body, LogicConst.Not.apply)
           else invalidPosition("negation argument 1")
 
-        case Forall(argument) => descendQuantifier(argument, LogicConst.Forall.apply)
-        case Exists(argument) => descendQuantifier(argument, LogicConst.Exists.apply)
-        case Choice(argument) => descendQuantifier(argument, LogicConst.Choice.apply)
+        case Forall(argument) => descendQuantifier(argument, LogicConst.cAll)
+        case Exists(argument) => descendQuantifier(argument, LogicConst.cEx)
+        case Choice(argument) => descendQuantifier(argument, LogicConst.cCh)
 
         case ty :::> body =>
           if (currentPosition == -1) {
@@ -173,6 +169,8 @@ object PatternBuilder {
   /**
     * Validate and prepare the context surrounding one recorded RewriteSimp
     * occurrence without yet deciding the concrete pattern used at that site.
+    * The clause matched by the resulting pattern must be encoded without eta
+    * contraction or expansion of its term structure.
     */
   def prepareClausePositionPattern(clause: Clause,
                                    occurrence: RewriteOccurrence): Either[String, ClausePositionPatternContext] = {
