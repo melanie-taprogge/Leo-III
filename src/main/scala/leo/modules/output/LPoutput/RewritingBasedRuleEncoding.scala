@@ -47,6 +47,7 @@ object RewritingBasedRuleEncoding {
                                             instantiatedRule: Clause,
                                             termSubst: Seq[UniTermSubst],
                                             residualRuleVars: Seq[(Int, Type)],
+                                            binderDependentVars: Seq[(Int, Type)],
                                             occurrence: RewriteOccurrence)
 
     /**
@@ -104,10 +105,11 @@ object RewritingBasedRuleEncoding {
     }
 
     /**
-      * Reconstruct one rewrite-rule instance in the same variable space used by
-      * Leo's matcher. Non-ground rewrite rules are shifted past the variables of
-      * the rewritten clause before matching; the recorded substitution is
-      * indexed over that shifted rule.
+      * Reconstruct the part of a rewrite-rule instance available outside the
+      * recorded occurrence's binders. Leo shifts a non-ground rule past the
+      * parent variables and then lifts it again by the binder depth for matching.
+      * Substitutions mentioning local binder variables remain quantified so
+      * Lambdapi can infer them at the focused rewrite site.
       */
     def prepareRewriteRuleUse(use: RewriteRuleUse, rewrittenParent: Clause): Either[String, PreparedRewriteRuleUse] = {
       use.occurrence match {
@@ -116,14 +118,37 @@ object RewritingBasedRuleEncoding {
           Left("RW: Polymorphic rewrite-rule instantiation not encoded")
         case Some(occurrence) =>
           val shiftedRule = shiftRewriteRulesPast(Seq(use.rewriteRule), Seq(rewrittenParent)).head
-          val instantiatedRule = shiftedRule.substitute(use.origTermSubst, use.origTypeSubst)
+          // Leo lifts the matching template once more for every enclosing
+          // object binder. Its recorded substitution therefore has indices in
+          // that local space, whereas the rule proof is quantified outside it.
+          val binderDepth = occurrence.position.seq.count(_ == -1)
+          val termMap = Map.newBuilder[Int, Term]
+          val boundMap = Map.newBuilder[Int, Int]
+          val binderDependent = Vector.newBuilder[(Int, Type)]
+          shiftedRule.implicitlyBound.foreach { case variable @ (index, _) =>
+            use.origTermSubst.substBndIdx(index + binderDepth) match {
+              case BoundFront(target) if target <= binderDepth =>
+                binderDependent += variable
+              case BoundFront(target) if target - binderDepth != index =>
+                boundMap += index -> (target - binderDepth)
+              case TermFront(term) if term.fv.exists(_._1 <= binderDepth) =>
+                binderDependent += variable
+              case TermFront(term) =>
+                termMap += index -> term.lift(-binderDepth)
+              case TypeFront(_) =>
+                return Left(s"RW: Type entry in term substitution for variable $index")
+              case _ => ()
+            }
+          }
+          val outerSubst = Subst.fromMaps(termMap.result(), boundMap.result())
+          val instantiatedRule = shiftedRule.substitute(outerSubst, use.origTypeSubst)
           val currentVarIndices = rewrittenParent.implicitlyBound.map(_._1).toSet
           val residualRuleVars = instantiatedRule.implicitlyBound.filterNot { case (index, _) =>
             currentVarIndices.contains(index)
           }
 
           SubstitutionEncoding.trackTermSubstitution(
-            use.origTermSubst,
+            outerSubst,
             use.origTypeSubst,
             shiftedRule.implicitlyBound
           ).map(termSubst => PreparedRewriteRuleUse(
@@ -132,6 +157,7 @@ object RewritingBasedRuleEncoding {
             instantiatedRule,
             termSubst,
             residualRuleVars,
+            binderDependent.result(),
             occurrence
           ))
       }
@@ -195,8 +221,9 @@ object RewriteSimpEncoding {
     *      its forward Boolean equality form, either `P = ⊤` or `P = ⊥`, using
     *      the corresponding simplification theorem.
     *
-    *    - Instantiate each rewrite-rule parent with the exact substitution
-    *      recorded by Leo before constructing the equality used by Lambdapi.
+    *    - Instantiate variables whose substitutions are available outside the
+    *      selected binders. Leave binder-dependent variables quantified for
+    *      Lambdapi's rewrite tactic to infer at the selected occurrence.
     *
     *    - If variables remain after instantiation and the recorded occurrence
     *      requires it, derive the corresponding function equality. The
@@ -428,9 +455,6 @@ object RewriteSimpEncoding {
       case Left(reason) => return Left(reason)
       case Right(context) => context
     }
-    // TODO: Once Lambdapi supports rewriting under binders, collect the bound-variable context while
-    // constructing this pattern so it can be used to encode the recorded redex and contractum below.
-
     val rewriteEq = rewriteEqClause.lits.head
     val residualBinders = rewriteUse.residualRuleVars.map { case (index, ty) =>
       var2Lp(index, ty, sharedVarMap)
@@ -458,7 +482,20 @@ object RewriteSimpEncoding {
       makeLiftedRewriteShape(residualBinders, lhs, rhs, resultType)
     )
 
-    selectRewriteForm(rewriteUse.occurrence, pointwise, liftedShape, sharedVarMap).flatMap {
+    val selectedForm = if (rewriteUse.binderDependentVars.nonEmpty) {
+      // Those variables cannot be instantiated outside the enclosing lambda.
+      // Keep them quantified and let Lambdapi match them at the focused site.
+      if (rewriteEq.left.ty != rewriteUse.occurrence.redex.ty) {
+        Left("RW: Quantified rewrite site has a different type from the rule")
+      } else {
+        val hole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
+        Right(SelectedRewriteForm(useLifted = false, targetPattern = RewritePattern(hole, hole)))
+      }
+    } else {
+      selectRewriteForm(rewriteUse.occurrence, pointwise, liftedShape, sharedVarMap)
+    }
+
+    selectedForm.flatMap {
       case SelectedRewriteForm(useLifted, targetPattern) =>
         val (state3, selectedProof) = if (useLifted) {
           val (nextState, liftedProof) = recordLiftedRewriteEquality(
