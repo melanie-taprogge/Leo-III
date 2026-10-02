@@ -404,8 +404,9 @@ object ClauseEncoding {
   } // todo: potentially pattern match to also make literals negative that leo thinks are positive but have a leading negation?
 
   /** Encode a sequence of Leo-III literals to Lambdapi */
-  @inline def lits2Lp(lits: Seq[Literal], bVarMap: Map[Int, String], replaceUnknownVars: Boolean = false): Seq[lpLiteralInst] = {
-    lits.map(lit => lit2Lp(lit, bVarMap, replaceUnknownVars = replaceUnknownVars))
+  @inline def lits2Lp(lits: Seq[Literal], bVarMap: Map[Int, String], replaceUnknownVars: Boolean = false,
+                      suppressReduction: Boolean = false): Seq[lpLiteralInst] = {
+    lits.map(lit => lit2Lp(lit, bVarMap, surpressReduction = suppressReduction, replaceUnknownVars = replaceUnknownVars))
   }
 
   /**
@@ -440,16 +441,16 @@ object RawClauseEncoding {
   import TypeEncoding.type2LP
   import TermEncoding.{term2LP, vars2Lp}
 
-  def lit2Lp(lit: RawLiteral, bVarMap: Map[Int, String]): lpLiteralInst = lit match {
+  def lit2Lp(lit: RawLiteral, bVarMap: Map[Int, String], suppressReduction: Boolean = false): lpLiteralInst = lit match {
     case RawEqLiteral(left, right, polarity) =>
       lpLiteralInst.equality(
         type2LP(left.ty),
-        term2LP(left, bVarMap),
-        term2LP(right, bVarMap),
+        term2LP(left, bVarMap, suppressReduction),
+        term2LP(right, bVarMap, suppressReduction),
         polarity
       )
     case RawNonEqLiteral(term, polarity) =>
-      val encodedTerm = term2LP(term, bVarMap)
+      val encodedTerm = term2LP(term, bVarMap, suppressReduction)
       lpLiteralInst(
         if (polarity) encodedTerm else LogicConst.Not(encodedTerm),
         polarity,
@@ -457,8 +458,8 @@ object RawClauseEncoding {
       )
   }
 
-  def clause2Lp(clause: RawClause, bVarMap: Map[Int, String]): lpClauseInst = {
-    val encodedLits = clause.lits.map(lit2Lp(_, bVarMap))
+  def clause2Lp(clause: RawClause, bVarMap: Map[Int, String], suppressReduction: Boolean = false): lpClauseInst = {
+    val encodedLits = clause.lits.map(lit2Lp(_, bVarMap, suppressReduction))
     val encodedVars = vars2Lp(clause.implicitlyBound, bVarMap).map(Left(_))
     lpClauseInst(encodedLits, encodedVars)
   }

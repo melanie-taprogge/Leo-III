@@ -248,8 +248,8 @@ object lpClauseInst {
     lpClauseInst(disjunction,lits,vars,mlTerm)
   }
 
-  private def apply_to_single(cl: Clause, fullBvarsMap: Map[Int, String]) = {
-    val encCls = ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap)
+  private def apply_to_single(cl: Clause, fullBvarsMap: Map[Int, String], suppressReduction: Boolean = false) = {
+    val encCls = ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap, suppressReduction = suppressReduction)
     val encVars = TermEncoding.vars2Lp(cl.implicitlyBound, fullBvarsMap).map(Left(_))
     lpClauseInst(encCls,encVars)
   }
@@ -265,12 +265,16 @@ object lpClauseInst {
   /**
     * Encode clauses with additional variables that must use the same Lambdapi
     * names, for example variables occurring in raw proof-trace clauses.
+    * `suppressReductionAt` selects clauses whose term structure is retained.
     */
   def apply_to_set(cls: Seq[Clause],
-                   additionalImplicitlyBound: Seq[(Int, Type)]): (Map[Int, String], Seq[lpClauseInst]) = {
+                   additionalImplicitlyBound: Seq[(Int, Type)],
+                   suppressReductionAt: Set[Int] = Set.empty): (Map[Int, String], Seq[lpClauseInst]) = {
     val allImpBoundVars = (cls.flatMap(_.implicitlyBound) ++ additionalImplicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
-    val encCls = cls.map(cl => apply_to_single(cl, fullBvarsMap))
+    val encCls = cls.zipWithIndex.map { case (cl, index) =>
+      apply_to_single(cl, fullBvarsMap, suppressReductionAt.contains(index))
+    }
     (fullBvarsMap, encCls)
   }
 
