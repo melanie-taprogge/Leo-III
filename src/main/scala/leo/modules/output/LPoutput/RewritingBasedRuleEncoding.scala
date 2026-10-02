@@ -233,16 +233,15 @@ object RewriteSimpEncoding {
     *      requires it, derive the corresponding function equality. The
     *      occurrence determines whether the pointwise or lifted proof is used.
     *
-    * 4. Prove one local implication for each block, from its recorded input
-    *    clause to its recorded raw result clause. Replay every recorded
-    *    occurrence with a focused rewrite in the implication antecedent and
-    *    compose the implications in Leo's order.
+    * 4. Prove one local implication from the parent to the final recorded raw
+    *    result clause. Replay every recorded occurrence with a focused rewrite
+    *    in Leo's order, across all recorded blocks.
     *
     * 5. If literal simplifications from `addInfoSimp` were applied, defer to the
     *    migrated encoding of `Simp`. This is not implemented in this module yet,
     *    so such cases are currently reported as unsupported.
     *
-    * 6. Apply the composed local implications to the instantiated parent proof.
+    * 6. Apply the local implication to the instantiated parent proof.
     */
   def encRewrite(cl: ClauseProxy,
                  parents: Seq[ClauseProxy],
@@ -364,37 +363,33 @@ object RewriteSimpEncoding {
 
     // TODO: Compare the final uncontracted block result with the reconstructed
     // child before literal normalization modulo beta/eta conversion.
-    val blockStarts = encParent +: encBlockResults.dropRight(1)
-    val rewriteApplications = blockStarts.zip(encBlockResults).zip(state.forwardRewriteRules).zipWithIndex.map {
-      case (((beforeBlock, afterBlock), rules), blockIndex) =>
-        val rewriteApplicationSteps = rules.map { rule =>
-          Rewrite(Some(rule.pattern), proofTermAsTacticArg(rule.proof))
-        } ++ Vector(
-          Try(Simplify(onlyBeta = true)),
-          Assume(Seq(Name("etaEq"))),
-          Refine(LpTerm.Var[Level.Meta](Name("etaEq"), None))
-        )
-        Have(
-          Name(s"rwApp_$blockIndex"),
-          Prf(LogicConst.Imp(beforeBlock.term, afterBlock.term)),
-          rewriteApplicationSteps.map(Left(_))
-        )
-    }
+    // For this experiment, retain the recorded blocks but emit one implication
+    // with all rewrite applications in their original order.
+    val rewriteApplicationSteps = state.forwardRewriteRules.flatten.map { rule =>
+      Rewrite(Some(rule.pattern), proofTermAsTacticArg(rule.proof))
+    } ++ Vector(
+      Try(Simplify(onlyBeta = true)),
+      Assume(Seq(Name("etaEq"))),
+      Refine(LpTerm.Var[Level.Meta](Name("etaEq"), None))
+    )
+    val rewriteApplication = Have(
+      Name("rwApp_0"),
+      Prf(LogicConst.Imp(encParent.term, encBlockResults.last.term)),
+      rewriteApplicationSteps.map(Left(_))
+    )
     val instantiatedParent = instantiateProof(
       parentNameLpEnc0,
       parent.cl.implicitlyBound,
       parent.cl.implicitlyBound,
       sharedVarMap
     )
-    val rewrittenParentProof = rewriteApplications.indices.foldLeft(instantiatedParent) { case (proof, blockIndex) =>
-      LpTerm.App(
-        proofName(Name(s"rwApp_$blockIndex")),
-        Seq(Arg.Explicit(proof))
-      )
-    }
+    val rewrittenParentProof = LpTerm.App(
+      proofName(Name("rwApp_0")),
+      Seq(Arg.Explicit(instantiatedParent))
+    )
     val applyRewrite = Refine(Obj(rewrittenParentProof))
     val completedRewriteBody = state.literalTransformationSteps ++
-      state.rewriteRuleSetupSteps ++ rewriteApplications ++ Vector(applyRewrite)
+      state.rewriteRuleSetupSteps ++ Vector(rewriteApplication, applyRewrite)
 
     val finalSteps = if (disappearingParentVars.isEmpty) {
       initialAssumeSteps ++ completedRewriteBody
