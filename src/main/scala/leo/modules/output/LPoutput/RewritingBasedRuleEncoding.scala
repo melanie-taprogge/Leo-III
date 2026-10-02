@@ -50,8 +50,8 @@ object RewritingBasedRuleEncoding {
                                             occurrence: RewriteOccurrence)
 
     /**
-      * Encode the child, main parent, block results, and concrete rewrite-rule
-      * instances in one pass.
+      * Encode the child, main parent, block results, and rewrite-rule clauses
+      * in one pass.
       *
       * The returned context contains both the encoded clauses and the proof
       * names that will later be used to refine with the parent proofs.
@@ -67,8 +67,8 @@ object RewritingBasedRuleEncoding {
 
       val allClauses = Seq(childCl, parentCl) ++ rewriteRuleCls
       val rawClauseVars = blockResultCls.flatMap(_.implicitlyBound)
-      // Keep the child in its usual form; the parent and instantiated rewrite
-      // rules must retain the structure used by the recorded rewrite positions.
+      // Keep the child in its usual form; the parent and rewrite rules must
+      // retain the structure used by the recorded rewrite positions.
       val (sharedVarMap, encClauses) = lpClauseInst.apply_to_set(
         allClauses, rawClauseVars, suppressReductionAt = (1 until allClauses.length).toSet
       )
@@ -168,6 +168,28 @@ object RewritingBasedRuleEncoding {
       }
     }
 
+    /** Keep the rule quantified and leave its variables for Lambdapi's rewrite tactic. */
+    def prepareRawRewriteRuleUse(use: RewriteRuleUse, rewrittenParent: Clause): Either[String, PreparedRewriteRuleUse] = {
+      use.occurrence match {
+        case None => Left("RW: Rewrite occurrence position not recorded")
+        case Some(_) if use.rewriteRule.typeVars.nonEmpty || use.origTypeSubst != Subst.id =>
+          Left("RW: Polymorphic rewrite-rule instantiation not encoded")
+        case Some(occurrence) =>
+          // Shifting only separates the rule's quantified variables from the
+          // rewritten parent's variables; it does not apply Leo's match.
+          val shiftedRule = shiftRewriteRulesPast(Seq(use.rewriteRule), Seq(rewrittenParent)).head
+          Right(PreparedRewriteRuleUse(
+            use.rewriteRuleParentId,
+            shiftedRule,
+            shiftedRule,
+            Seq.empty,
+            shiftedRule.implicitlyBound,
+            Seq.empty,
+            occurrence
+          ))
+      }
+    }
+
   }
 }
 
@@ -178,6 +200,9 @@ object RewritingBasedRuleEncoding {
 object RewriteSimpEncoding {
 
   import RewritingBasedRuleEncoding.Util._
+
+  // Experimental switch: retain the instantiation path for comparison.
+  private val useRawRewriteRules = true
 
   // Define reasons for proofs being non-encodable
   private val MissingRewriteMetadataReason = "RW: Rewrite application metadata not recorded"
@@ -225,13 +250,13 @@ object RewriteSimpEncoding {
     *      its forward Boolean equality form, either `P = ⊤` or `P = ⊥`, using
     *      the corresponding simplification theorem.
     *
-    *    - Instantiate variables whose substitutions are available outside the
-    *      selected binders. Leave binder-dependent variables quantified for
+    *    - In the raw-rule experiment, leave rule variables quantified for
     *      Lambdapi's rewrite tactic to infer at the selected occurrence.
+    *      The previous explicit instantiation path remains available.
     *
-    *    - If variables remain after instantiation and the recorded occurrence
-    *      requires it, derive the corresponding function equality. The
-    *      occurrence determines whether the pointwise or lifted proof is used.
+    *    - If the recorded occurrence requires it, derive the corresponding
+    *      function equality. The occurrence determines whether the pointwise
+    *      or lifted proof is used.
     *
     * 4. Prove one local implication from the parent to the final recorded raw
     *    result clause. Replay every recorded occurrence with a focused rewrite
@@ -276,7 +301,9 @@ object RewriteSimpEncoding {
 
     val groupedPreparedRewriteUses = groupedRewriteUses.map { rewriteUses =>
       rewriteUses.map { use =>
-        prepareRewriteRuleUse(use, parent.cl) match {
+        val prepared = if (useRawRewriteRules) prepareRawRewriteRuleUse(use, parent.cl)
+        else prepareRewriteRuleUse(use, parent.cl)
+        prepared match {
           case Left(reason) => return NotEncodable(reason)
           case Right(prepared) => prepared
         }
@@ -294,8 +321,8 @@ object RewriteSimpEncoding {
       }
     }
 
-    // Encode every recorded instance, rather than one bare quantified rule per
-    // block. A block may use the same parent with several different matches.
+    // Encode every recorded rule use. The experimental path keeps each rule
+    // quantified; the original path encodes its recorded instance.
     val ctxt = initRewriteRuleCtxt(
       cl.cl,
       parent.cl,
@@ -443,7 +470,8 @@ object RewriteSimpEncoding {
     val residualBinders = rewriteUse.residualRuleVars.map { case (index, ty) =>
       var2Lp(index, ty, sharedVarMap)
     }
-    val (state1, instantiatedSource) = provideInstantiatedRewriteRuleProof(
+    val (state1, rewriteSource) = if (useRawRewriteRules) (state0, sourceBeforeEq)
+    else provideInstantiatedRewriteRuleProof(
       rewriteUse,
       encRewriteRule,
       sourceBeforeEq,
@@ -452,11 +480,11 @@ object RewriteSimpEncoding {
       state0
     )
 
-    Out.lp_debug_info(s"Rewriting with ${instantiatedSource}")
+    Out.lp_debug_info(s"Rewriting with ${rewriteSource}")
     val (state2, pointwiseEquality, lhs, rhs, resultType) = provideForwardRewriteEqualityProof(
       rewriteEq,
       encRewriteRule,
-      instantiatedSource,
+      rewriteSource,
       residualBinders,
       state1
     )
@@ -466,7 +494,17 @@ object RewriteSimpEncoding {
       makeLiftedRewriteShape(residualBinders, lhs, rhs, resultType)
     )
 
-    val selectedForm = if (rewriteUse.binderDependentVars.nonEmpty) {
+    val selectedForm = if (useRawRewriteRules && residualBinders.nonEmpty) {
+      // The quantified rule cannot be compared syntactically with Leo's
+      // concrete redex. The occurrence pattern fixes the site; Lambdapi
+      // infers the rule variables there.
+      if (rewriteEq.left.ty != rewriteUse.occurrence.redex.ty) {
+        Left("RW: Quantified rewrite site has a different type from the rule")
+      } else {
+        val hole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
+        Right(SelectedRewriteForm(useLifted = false, targetPattern = RewritePattern(hole, hole)))
+      }
+    } else if (rewriteUse.binderDependentVars.nonEmpty) {
       // Those variables cannot be instantiated outside the enclosing lambda.
       // Keep them quantified and let Lambdapi match them at the focused site.
       if (rewriteEq.left.ty != rewriteUse.occurrence.redex.ty) {
