@@ -235,7 +235,7 @@ object RewriteSimpEncoding {
                                 forwardRewriteRules: Vector[Vector[FocusedRewrite]],
                                 notEncodedReasons: mutable.LinkedHashSet[String],
                                 transformationsRwCounter: Int,
-                                rewriteInstantiationCounter: Int) {
+                                rewriteRuleProofCounter: Int) {
     def markNotEncoded(reason: String): RewriteState = {
       notEncodedReasons += reason
       this
@@ -663,14 +663,25 @@ object RewriteSimpEncoding {
     )
   }
 
-  /** Give every recorded rewrite use a proof with the unreduced rule encoding. */
+  /** Reuse an unchanged rule proof, or prove the concrete form needed for rewriting. */
   private def provideInstantiatedRewriteRuleProof(rewriteUse: PreparedRewriteRuleUse,
                                                   encRewriteRule: lpClauseInst,
                                                   sourceBeforeEq: LpTerm[Level.Obj],
                                                   currentVars: Seq[(Int, Type)],
                                                   sharedVarMap: Map[Int, String],
                                                   state0: RewriteState): (RewriteState, LpTerm[Level.Obj]) = {
-    val stepName = Name(s"RewriteInstantiation_${state0.rewriteInstantiationCounter}")
+    // Both forms use the same variable names for this comparison. When no
+    // substitution was applied and the normally printed source rule already
+    // has the required form, its proof can be used directly.
+    val unchangedRule = rewriteUse.termSubst.isEmpty &&
+      rewriteUse.shiftedRule.implicitlyBound.forall { case (index, _) => sharedVarMap.contains(index) } &&
+      RawClauseEncoding.clause2Lp(RawClause(rewriteUse.shiftedRule), sharedVarMap).asMl == encRewriteRule.asMl
+    if (unchangedRule) {
+      return (state0, sourceBeforeEq)
+    }
+
+    val stepPrefix = if (rewriteUse.termSubst.nonEmpty) "RewriteInstantiation" else "RewriteRuleForm"
+    val stepName = Name(s"${stepPrefix}_${state0.rewriteRuleProofCounter}")
     val availableVars = (currentVars ++ rewriteUse.residualRuleVars).distinct
     val instantiatedSource = SubstitutionEncoding.instantiateProofTerm(
       rewriteUse.shiftedRule.implicitlyBound,
@@ -694,7 +705,7 @@ object RewriteSimpEncoding {
     (
       state0.copy(
         rewriteRuleSetupSteps = state0.rewriteRuleSetupSteps :+ haveInstance,
-        rewriteInstantiationCounter = state0.rewriteInstantiationCounter + 1
+        rewriteRuleProofCounter = state0.rewriteRuleProofCounter + 1
       ),
       proofName(stepName)
     )
