@@ -2,6 +2,7 @@ package leo.modules.output.LPoutput
 
 import leo.Out
 import leo.datastructures._
+import leo.datastructures.Term.:::>
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.ImplicitTransformationUtil.verifySubstitutionLiteralNormalisazion
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
@@ -139,6 +140,15 @@ object RewritingBasedRuleEncoding {
               case BoundFront(target) if target - binderDepth != index =>
                 boundMap += index -> (target - binderDepth)
               case TermFront(term) if term.fv.exists(_._1 <= binderDepth) =>
+                // This instance cannot be supplied outside the enclosing
+                // binder. Eta-expanded functions may still be matched by
+                // Lambdapi, but a lambda surviving eta contraction would
+                // require its rewrite matcher to synthesize an abstraction.
+                term.etaContract match {
+                  case _ :::> _ =>
+                    return Left(s"RW: Binder-dependent substitution for rewrite-rule variable $index requires an explicit lambda instance")
+                  case _ => ()
+                }
                 binderDependent += variable
               case TermFront(term) =>
                 termMap += index -> term.lift(-binderDepth)
