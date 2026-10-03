@@ -167,8 +167,25 @@ object RewritingBasedRuleEncoding {
               RawEqLiteral(left, lit.right.substitute(outerSubst, use.origTypeSubst), lit.polarity)
             } else RawNonEqLiteral(left, lit.polarity)
           })
+          // Matching may eta-expand a rule variable even though the rewritten
+          // parent retains its contracted form. Give this local rule instance
+          // the exact redex that Lambdapi's rewrite tactic must find. Its
+          // proof is still refined from the original rule by eta conversion.
+          // Under an enclosing binder, the redex may mention a local variable
+          // unavailable where that rule-instance proof is constructed.
+          val alignedRule = if (binderDepth == 0) {
+            RawClause(instantiatedRule.lits.map {
+              case RawEqLiteral(left, right, polarity)
+                if left != occurrence.redex && left.etaContract == occurrence.redex.etaContract =>
+                RawEqLiteral(occurrence.redex, right, polarity)
+              case RawNonEqLiteral(term, polarity)
+                if term != occurrence.redex && term.etaContract == occurrence.redex.etaContract =>
+                RawNonEqLiteral(occurrence.redex, polarity)
+              case lit => lit
+            })
+          } else instantiatedRule
           val currentVarIndices = rewrittenParent.implicitlyBound.map(_._1).toSet
-          val residualRuleVars = instantiatedRule.implicitlyBound.filterNot { case (index, _) =>
+          val residualRuleVars = alignedRule.implicitlyBound.filterNot { case (index, _) =>
             currentVarIndices.contains(index)
           }
 
@@ -179,7 +196,7 @@ object RewritingBasedRuleEncoding {
           ).map(termSubst => PreparedRewriteRuleUse(
             use.rewriteRuleParentId,
             shiftedRule,
-            instantiatedRule,
+            alignedRule,
             termSubst,
             residualRuleVars,
             binderDependent.result(),
