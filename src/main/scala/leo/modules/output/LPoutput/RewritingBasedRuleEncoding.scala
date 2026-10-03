@@ -30,7 +30,7 @@ object RewritingBasedRuleEncoding {
       */
     final case class EncRewriteCtx(encChild: lpClauseInst,
                                    encParent: lpClauseInst,
-                                   encBlockResults: Seq[lpClauseInst],
+                                   encFinalResult: lpClauseInst,
                                    encRewriteRules: Seq[lpClauseInst],
                                    sharedVarMap: Map[Int, String],
                                    parentNameLpEnc: LpTerm[Level.Obj],
@@ -51,7 +51,7 @@ object RewritingBasedRuleEncoding {
                                             occurrence: RewriteOccurrence)
 
     /**
-      * Encode the child, main parent, block results, and concrete rewrite-rule
+      * Encode the child, main parent, final raw result, and concrete rewrite-rule
       * instances in one pass.
       *
       * The returned context contains both the encoded clauses and the proof
@@ -59,7 +59,7 @@ object RewritingBasedRuleEncoding {
       */
     def initRewriteRuleCtxt(childCl: Clause,
                             parentCl: Clause,
-                            blockResultCls: Seq[RawClause],
+                            finalResultCl: RawClause,
                             rewriteRuleCls: Seq[RawClause],
                             parentNameLpEnc0: Name,
                             rewriteRuleNameLpEnc0: Seq[Name]): EncRewriteCtx = {
@@ -67,7 +67,7 @@ object RewritingBasedRuleEncoding {
         "Each rewrite-rule clause must have a corresponding Lambdapi proof name")
 
       val allClauses = Seq(childCl, parentCl)
-      val rawClauseVars = (blockResultCls ++ rewriteRuleCls).flatMap(_.implicitlyBound)
+      val rawClauseVars = (Seq(finalResultCl) ++ rewriteRuleCls).flatMap(_.implicitlyBound)
       // Keep the child in its usual form; the parent and instantiated rewrite
       // rules must retain the structure used by the recorded rewrite positions.
       val (sharedVarMap, encClauses) = lpClauseInst.apply_to_set(
@@ -76,9 +76,7 @@ object RewritingBasedRuleEncoding {
 
       val encChild = encClauses.head
       val encParent = encClauses(1)
-      val encBlockResults = blockResultCls.map { blockResult =>
-        RawClauseEncoding.clause2Lp(blockResult, sharedVarMap, suppressReduction = true)
-      }
+      val encFinalResult = RawClauseEncoding.clause2Lp(finalResultCl, sharedVarMap, suppressReduction = true)
       val encRewriteRules = rewriteRuleCls.map { rewriteRule =>
         RawClauseEncoding.clause2Lp(rewriteRule, sharedVarMap, suppressReduction = true)
       }
@@ -86,7 +84,7 @@ object RewritingBasedRuleEncoding {
       EncRewriteCtx(
         encChild,
         encParent,
-        encBlockResults,
+        encFinalResult,
         encRewriteRules,
         sharedVarMap,
         proofName(parentNameLpEnc0),
@@ -232,7 +230,7 @@ object RewriteSimpEncoding {
     */
   final case class RewriteState(literalTransformationSteps: Vector[LpProofScript],
                                 rewriteRuleSetupSteps: Vector[LpProofScript],
-                                forwardRewriteRules: Vector[Vector[FocusedRewrite]],
+                                forwardRewriteRules: Vector[FocusedRewrite],
                                 notEncodedReasons: mutable.LinkedHashSet[String],
                                 transformationsRwCounter: Int,
                                 rewriteRuleProofCounter: Int) {
@@ -255,7 +253,7 @@ object RewriteSimpEncoding {
     *    exposes the clause immediately after term rewriting and before literal
     *    normalization.
     *
-    * 3. For each uninterrupted block of one rewrite-rule parent, prepare the
+    * 3. For each recorded rewrite-rule application, prepare the
     *    equality proofs that Lambdapi should use for rewriting:
     *
     *    - If the rewrite-rule parent is a non-equational single literal, prove
@@ -272,7 +270,7 @@ object RewriteSimpEncoding {
     *
     * 4. Prove one local implication from the parent to the final recorded raw
     *    result clause. Replay every recorded occurrence with a focused rewrite
-    *    in Leo's order, across all recorded blocks.
+    *    in Leo's order.
     *
     * 5. If literal simplifications from `addInfoSimp` were applied, defer to the
     *    migrated encoding of `Simp`. This is not implemented in this module yet,
@@ -300,26 +298,17 @@ object RewriteSimpEncoding {
       return NotEncodable(MissingRewriteMetadataReason)
     }
     val rewriteUses = initRewriteRuleUses(cl.furtherInfo.addInfoRw)
-    val groupedRewriteUses = rewriteUses.foldLeft(Vector.empty[Vector[RewriteRuleUse]]) {
-      case (groups, rewriteUse) if groups.lastOption.exists(_.head.rewriteRuleParentId == rewriteUse.rewriteRuleParentId) =>
-        groups.updated(groups.length - 1, groups.last :+ rewriteUse)
-      case (groups, rewriteUse) =>
-        groups :+ Vector(rewriteUse)
-    }
-    val blockResults = cl.furtherInfo.addInfoRwBlockResults
-    if (blockResults.length != groupedRewriteUses.length) {
-      return NotEncodable(s"RW: Recorded ${groupedRewriteUses.length} rewrite-rule block(s), but found ${blockResults.length} intermediate result clause(s)")
+    val finalRawResult = cl.furtherInfo.addInfoRwFinalResult match {
+      case Some(result) => result
+      case None => return NotEncodable("RW: Final raw result clause not recorded")
     }
 
-    val groupedPreparedRewriteUses = groupedRewriteUses.map { rewriteUses =>
-      rewriteUses.map { use =>
-        prepareRewriteRuleUse(use, parent.cl) match {
-          case Left(reason) => return NotEncodable(reason)
-          case Right(prepared) => prepared
-        }
+    val preparedRewriteUses = rewriteUses.map { use =>
+      prepareRewriteRuleUse(use, parent.cl) match {
+        case Left(reason) => return NotEncodable(reason)
+        case Right(prepared) => prepared
       }
     }
-    val preparedRewriteUses = groupedPreparedRewriteUses.flatten
 
     val rewriteRuleSourcesByParentId = rewriteRules.zip(sourcesBeforeEq).map {
       case (ruleParent, sourceName) => ruleParent.id -> sourceName
@@ -331,12 +320,12 @@ object RewriteSimpEncoding {
       }
     }
 
-    // Encode every recorded instance, rather than one bare quantified rule per
-    // block. A block may use the same parent with several different matches.
+    // Encode every recorded instance. The same parent may be used with several
+    // different matches.
     val ctxt = initRewriteRuleCtxt(
       cl.cl,
       parent.cl,
-      blockResults,
+      finalRawResult,
       preparedRewriteUses.map(_.instantiatedRule),
       sourceBeforeParent,
       rewriteRuleSourceNames
@@ -344,7 +333,7 @@ object RewriteSimpEncoding {
     val EncRewriteCtx(
       encChild,
       encParent,
-      encBlockResults,
+      encFinalResult,
       encRewriteRules,
       sharedVarMap,
       parentNameLpEnc0,
@@ -352,7 +341,7 @@ object RewriteSimpEncoding {
     ) = ctxt
 
     Out.lp_debug_info(s"Encoding application or RW-rule on ${sourceBeforeParent.value}")
-    Out.lp_debug_info(s"Found ${rewriteUses.length} recorded rewrite rule use(s) in ${groupedRewriteUses.length} block(s)")
+    Out.lp_debug_info(s"Found ${rewriteUses.length} recorded rewrite rule use(s)")
 
     val initialReasons = mutable.LinkedHashSet.empty[String]
     val childVarNames = extractVarNames(encChild)
@@ -372,37 +361,29 @@ object RewriteSimpEncoding {
       ).toVector
     )
 
-    // Preserve Leo's uninterrupted rule blocks, but prepare concrete rewrite
-    // evidence for each recorded application inside the block.
+    // Prepare concrete rewrite evidence for each recorded application.
     val encodedRewriteRules = encRewriteRules.iterator
     val rewriteRuleProofs = rewriteRuleNamesLpEnc.iterator
-    groupedPreparedRewriteUses.foreach { rewriteUses =>
-      var blockFocusedRewrites = Vector.empty[FocusedRewrite]
-      rewriteUses.foreach { rewriteUse =>
-        val encodedApplication = encodeOneRewriteRuleApplication(
-          rewriteUse,
-          encodedRewriteRules.next(),
-          rewriteRuleProofs.next(),
-          parent.cl,
-          parent.cl.implicitlyBound,
-          sharedVarMap,
-          state
-        )
-        encodedApplication match {
-          case Left(reason) => return NotEncodable(reason)
-          case Right((nextState, focusedRewrite)) =>
-            state = nextState
-            blockFocusedRewrites = blockFocusedRewrites :+ focusedRewrite
-        }
+    preparedRewriteUses.foreach { rewriteUse =>
+      val encodedApplication = encodeOneRewriteRuleApplication(
+        rewriteUse,
+        encodedRewriteRules.next(),
+        rewriteRuleProofs.next(),
+        parent.cl,
+        parent.cl.implicitlyBound,
+        sharedVarMap,
+        state
+      )
+      encodedApplication match {
+        case Left(reason) => return NotEncodable(reason)
+        case Right((nextState, focusedRewrite)) =>
+          state = nextState.copy(forwardRewriteRules = nextState.forwardRewriteRules :+ focusedRewrite)
       }
-      state = state.copy(forwardRewriteRules = state.forwardRewriteRules :+ blockFocusedRewrites)
     }
 
-    // TODO: Compare the final uncontracted block result with the reconstructed
+    // TODO: Compare the final uncontracted raw result with the reconstructed
     // child before literal normalization modulo beta/eta conversion.
-    // For this experiment, retain the recorded blocks but emit one implication
-    // with all rewrite applications in their original order.
-    val rewriteApplicationSteps = state.forwardRewriteRules.flatten.map { rule =>
+    val rewriteApplicationSteps = state.forwardRewriteRules.map { rule =>
       Rewrite(Some(rule.pattern), proofTermAsTacticArg(rule.proof))
     } ++ Vector(
       Try(Simplify(onlyBeta = true)),
@@ -411,7 +392,7 @@ object RewriteSimpEncoding {
     )
     val rewriteApplication = Have(
       Name("rwApp_0"),
-      Prf(LogicConst.Imp(encParent.term, encBlockResults.last.term)),
+      Prf(LogicConst.Imp(encParent.term, encFinalResult.term)),
       rewriteApplicationSteps.map(Left(_))
     )
     val instantiatedParent = instantiateProof(
