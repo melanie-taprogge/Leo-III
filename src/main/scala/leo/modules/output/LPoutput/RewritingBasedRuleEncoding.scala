@@ -264,9 +264,8 @@ object RewriteSimpEncoding {
     *      selected binders. Leave binder-dependent variables quantified for
     *      Lambdapi's rewrite tactic to infer at the selected occurrence.
     *
-    *    - If variables remain after instantiation and the recorded occurrence
-    *      requires it, derive the corresponding function equality. The
-    *      occurrence determines whether the pointwise or lifted proof is used.
+    *    - Use the pointwise equality at the recorded occurrence. Lambdapi's
+    *      rewrite tactic handles patterns under binders directly.
     *
     * 4. Prove one local implication from the parent to the final recorded raw
     *    result clause. Replay every recorded occurrence with a focused rewrite
@@ -471,7 +470,7 @@ object RewriteSimpEncoding {
     )
 
     Out.lp_debug_info(s"Rewriting with ${instantiatedSource}")
-    val (state2, pointwiseEquality, lhs, rhs, resultType) = provideForwardRewriteEqualityProof(
+    val (state2, pointwiseEquality, lhs, rhs) = provideForwardRewriteEqualityProof(
       rewriteEq,
       encRewriteRule,
       instantiatedSource,
@@ -480,44 +479,27 @@ object RewriteSimpEncoding {
     )
 
     val pointwise = RewriteEquality(pointwiseEquality, lhs, rhs)
-    val liftedShape = if (residualBinders.isEmpty) None else Some(
-      makeLiftedRewriteShape(residualBinders, lhs, rhs, resultType)
-    )
-
-    val selectedForm = if (rewriteUse.binderDependentVars.nonEmpty) {
+    val targetPattern = if (rewriteUse.binderDependentVars.nonEmpty) {
       // Those variables cannot be instantiated outside the enclosing lambda.
       // Keep them quantified and let Lambdapi match them at the focused site.
       if (rewriteEq.terms.head.ty != rewriteUse.occurrence.redex.ty) {
         Left("RW: Quantified rewrite site has a different type from the rule")
       } else {
         val hole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
-        Right(SelectedRewriteForm(useLifted = false, targetPattern = RewritePattern(hole, hole)))
+        Right(RewritePattern(hole, hole))
       }
     } else {
-      selectRewriteForm(rewriteUse.occurrence, pointwise, liftedShape, sharedVarMap)
+      selectPointwiseRewritePattern(rewriteUse.occurrence, pointwise, sharedVarMap)
     }
 
-    selectedForm.flatMap {
-      case SelectedRewriteForm(useLifted, targetPattern) =>
-        val (state3, selectedProof) = if (useLifted) {
-          val (nextState, liftedProof) = recordLiftedRewriteEquality(
-            residualBinders,
-            lhs,
-            rhs,
-            pointwiseEquality,
-            liftedShape.get,
-            state2
-          )
-          (nextState, liftedProof)
-        } else (state2, pointwise.proof)
-
-        val clausePattern = patternContext.plug(targetPattern)
-        val implicationPattern = PatternBuilder.embedPatternInBinaryConnective(
-          clausePattern,
-          Side.Left,
-          LogicConst.Imp.apply
-        )
-        Right((state3, FocusedRewrite(implicationPattern, selectedProof)))
+    targetPattern.map { pattern =>
+      val clausePattern = patternContext.plug(pattern)
+      val implicationPattern = PatternBuilder.embedPatternInBinaryConnective(
+        clausePattern,
+        Side.Left,
+        LogicConst.Imp.apply
+      )
+      (state2, FocusedRewrite(implicationPattern, pointwise.proof))
     }
   }
 
@@ -525,123 +507,19 @@ object RewriteSimpEncoding {
                                            lhs: LpTerm[Level.Obj],
                                            rhs: LpTerm[Level.Obj])
 
-  private final case class LiftedRewriteShape(lhs: LpTerm[Level.Obj],
-                                              rhs: LpTerm[Level.Obj],
-                                              equalityType: OlMonoType,
-                                              pointwiseResultType: OlMonoType)
-
-  private final case class SelectedRewriteForm(useLifted: Boolean,
-                                               targetPattern: RewritePattern)
-
-  /** Decide which equality proves the recorded rewrite and where it must focus. */
-  private def selectRewriteForm(occurrence: RewriteOccurrence,
-                                pointwise: RewriteEquality,
-                                lifted: Option[LiftedRewriteShape],
-                                sharedVarMap: Map[Int, String]): Either[String, SelectedRewriteForm] = {
+  /** The pointwise equality must match the exact recorded rewrite occurrence. */
+  private def selectPointwiseRewritePattern(occurrence: RewriteOccurrence,
+                                            pointwise: RewriteEquality,
+                                            sharedVarMap: Map[Int, String]): Either[String, RewritePattern] = {
     val encodedRedex = term2LP(occurrence.redex, sharedVarMap, suppressReduction = true)
     val encodedContractum = term2LP(occurrence.contractum, sharedVarMap, suppressReduction = true)
     val patternHole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
-    val rootPattern = RewritePattern(patternHole, patternHole)
 
     if (pointwise.lhs == encodedRedex && pointwise.rhs == encodedContractum) {
-      Right(SelectedRewriteForm(useLifted = false, rootPattern))
-    } else lifted match {
-      case Some(liftedShape)
-        if liftedShape.lhs == encodedRedex && liftedShape.rhs == encodedContractum =>
-        Right(SelectedRewriteForm(useLifted = true, rootPattern))
-      case Some(liftedShape) =>
-        encodedRedex match {
-          case LpTerm.App(head, args)
-            if head == liftedShape.lhs && lpTermBuilder.betaApply(liftedShape.rhs, args) == encodedContractum =>
-            PatternBuilder.leoPosition2LpPattern(
-              occurrence.redex,
-              Position.root.headPos,
-              patternHole
-            ).map { applicationPattern =>
-              SelectedRewriteForm(
-                useLifted = true,
-                RewritePattern(applicationPattern.pattern, patternHole)
-              )
-            }
-          case _ =>
-            Left("RW: Neither the pointwise nor lifted equality matches the recorded rewrite occurrence")
-        }
-      case None =>
-        Left("RW: Pointwise equality does not match the recorded rewrite occurrence")
+      Right(RewritePattern(patternHole, patternHole))
+    } else {
+      Left("RW: Pointwise equality does not match the recorded rewrite occurrence; explicit functional-extensionality lifting is not encoded")
     }
-  }
-
-  /** Construct the equality terms produced by lifting a pointwise equality. */
-  private def makeLiftedRewriteShape(binders: Seq[LpTerm.Var[Level.Obj]],
-                                     lhs: LpTerm[Level.Obj],
-                                     rhs: LpTerm[Level.Obj],
-                                     resultType: OlMonoType): LiftedRewriteShape = {
-    val lambdaLhs = lpTermBuilder.lam(binders, lhs)
-    val lambdaRhs = lpTermBuilder.lam(binders, rhs)
-    val liftedLhs = lhs match {
-      case LpTerm.App(head, args)
-        if args == binders.map(binder => Arg.Explicit[Level.Obj](binder)) => head
-      case _ => lambdaLhs
-    }
-    LiftedRewriteShape(
-      liftedLhs,
-      lambdaRhs,
-      lpTermBuilder.funTy(binders, resultType),
-      resultType
-    )
-  }
-
-  /**
-    * Lift a pointwise rewrite equality to an equality between lambda terms.
-    * This is what allows Lambdapi's ordinary rewrite tactic to replace both
-    * applications below binders and eta-contracted occurrences of a function.
-    */
-  private def recordLiftedRewriteEquality(binders: Seq[LpTerm.Var[Level.Obj]],
-                                          lhs: LpTerm[Level.Obj],
-                                          rhs: LpTerm[Level.Obj],
-                                          pointwiseEquality: LpTerm[Level.Obj],
-                                          liftedShape: LiftedRewriteShape,
-                                          state0: RewriteState): (RewriteState, LpTerm[Level.Obj]) = {
-    val binderNames = binders.map(_.name)
-    val appliedPointwiseProof = applyProofToVars(pointwiseEquality, binderNames)
-    val funExt = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("funExt")))
-
-    def liftEquality(remaining: Seq[LpTerm.Var[Level.Obj]]): LpTerm[Level.Obj] = remaining match {
-      case Seq() => appliedPointwiseProof
-      case binder +: tail =>
-        val lhsFunction = lpTermBuilder.lam(remaining, lhs)
-        val rhsFunction = lpTermBuilder.lam(remaining, rhs)
-        val pointwiseProof = LpTerm.Lam[Level.Obj](binder.name -> binder.ty, liftEquality(tail))
-        LpTerm.App(
-          funExt,
-          Seq(
-            Arg.ImplicitTypeArg(lpTermBuilder.olTy(binder)),
-            Arg.ImplicitTypeArg(lpTermBuilder.funTy(tail, liftedShape.pointwiseResultType)),
-            Arg.Explicit(lhsFunction),
-            Arg.Explicit(rhsFunction),
-            Arg.Explicit(pointwiseProof)
-          )
-        )
-    }
-
-    val liftedName = Name(s"LiftedRewrite_${state0.transformationsRwCounter}")
-    val liftedEquality = LogicConst.Eq(
-      liftedShape.equalityType,
-      liftedShape.lhs,
-      liftedShape.rhs
-    )
-    val liftedStep = Have(
-      liftedName,
-      Prf(liftedEquality),
-      Seq(Left(Refine(Obj(liftEquality(binders)))))
-    )
-    (
-      state0.copy(
-        rewriteRuleSetupSteps = state0.rewriteRuleSetupSteps :+ liftedStep,
-        transformationsRwCounter = state0.transformationsRwCounter + 1
-      ),
-      proofName(liftedName)
-    )
   }
 
   /** Reuse an unchanged rule proof, or prove the concrete form needed for rewriting. */
@@ -697,7 +575,7 @@ object RewriteSimpEncoding {
                                                   encRewriteRule: lpClauseInst,
                                                   sourceBeforeEq: LpTerm[Level.Obj],
                                                   residualBinders: Seq[LpTerm.Var[Level.Obj]],
-                                                  state0: RewriteState): (RewriteState, LpTerm[Level.Obj], LpTerm[Level.Obj], LpTerm[Level.Obj], OlMonoType) = {
+                                                  state0: RewriteState): (RewriteState, LpTerm[Level.Obj], LpTerm[Level.Obj], LpTerm[Level.Obj]) = {
     rewriteEq match {
       case RawNonEqLiteral(_, polarity) =>
         val encodedLiteral = encRewriteRule.lits.head
@@ -716,12 +594,11 @@ object RewriteSimpEncoding {
           state1,
           pointwiseEquality,
           rwLhs,
-          if (polarity) LogicConst.Top else LogicConst.Bot,
-          HolBaseTypes.O
+          if (polarity) LogicConst.Top else LogicConst.Bot
         )
       case RawEqLiteral(_, _, true) =>
         encRewriteRule.lits.head.term match {
-          case LogicConst.Eq(eqType, lhs, rhs) => (state0, sourceBeforeEq, lhs, rhs, eqType)
+          case LogicConst.Eq(_, lhs, rhs) => (state0, sourceBeforeEq, lhs, rhs)
           case _ => throw new Exception("Error while attempting to encode an instantiated equational rewrite rule")
         }
       case RawEqLiteral(_, _, false) =>
