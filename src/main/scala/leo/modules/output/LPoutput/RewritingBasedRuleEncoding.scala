@@ -43,7 +43,7 @@ object RewritingBasedRuleEncoding {
 
     final case class PreparedRewriteRuleUse(rewriteRuleParentId: Long,
                                             shiftedRule: Clause,
-                                            instantiatedRule: Clause,
+                                            instantiatedRule: RawClause,
                                             termSubst: Seq[UniTermSubst],
                                             residualRuleVars: Seq[(Int, Type)],
                                             binderDependentVars: Seq[(Int, Type)],
@@ -59,18 +59,18 @@ object RewritingBasedRuleEncoding {
     def initRewriteRuleCtxt(childCl: Clause,
                             parentCl: Clause,
                             blockResultCls: Seq[RawClause],
-                            rewriteRuleCls: Seq[Clause],
+                            rewriteRuleCls: Seq[RawClause],
                             parentNameLpEnc0: Name,
                             rewriteRuleNameLpEnc0: Seq[Name]): EncRewriteCtx = {
       require(rewriteRuleCls.length == rewriteRuleNameLpEnc0.length,
         "Each rewrite-rule clause must have a corresponding Lambdapi proof name")
 
-      val allClauses = Seq(childCl, parentCl) ++ rewriteRuleCls
-      val rawClauseVars = blockResultCls.flatMap(_.implicitlyBound)
+      val allClauses = Seq(childCl, parentCl)
+      val rawClauseVars = (blockResultCls ++ rewriteRuleCls).flatMap(_.implicitlyBound)
       // Keep the child in its usual form; the parent and instantiated rewrite
       // rules must retain the structure used by the recorded rewrite positions.
       val (sharedVarMap, encClauses) = lpClauseInst.apply_to_set(
-        allClauses, rawClauseVars, suppressReductionAt = (1 until allClauses.length).toSet
+        allClauses, rawClauseVars, suppressReductionAt = Set(1)
       )
 
       val encChild = encClauses.head
@@ -78,7 +78,9 @@ object RewritingBasedRuleEncoding {
       val encBlockResults = blockResultCls.map { blockResult =>
         RawClauseEncoding.clause2Lp(blockResult, sharedVarMap, suppressReduction = true)
       }
-      val encRewriteRules = encClauses.drop(2)
+      val encRewriteRules = rewriteRuleCls.map { rewriteRule =>
+        RawClauseEncoding.clause2Lp(rewriteRule, sharedVarMap, suppressReduction = true)
+      }
 
       EncRewriteCtx(
         encChild,
@@ -146,7 +148,15 @@ object RewritingBasedRuleEncoding {
             }
           }
           val outerSubst = Subst.fromMaps(termMap.result(), boundMap.result())
-          val instantiatedRule = shiftedRule.substitute(outerSubst, use.origTypeSubst)
+          // Leo substitutes the replacement term, not the rule literal. Keep
+          // the rule's original sides: Literal.substitute would turn an
+          // instantiated equation such as ⊥ = F into the literal ¬F.
+          val instantiatedRule = RawClause(shiftedRule.lits.map { lit =>
+            val left = lit.left.substitute(outerSubst, use.origTypeSubst)
+            if (lit.equational) {
+              RawEqLiteral(left, lit.right.substitute(outerSubst, use.origTypeSubst), lit.polarity)
+            } else RawNonEqLiteral(left, lit.polarity)
+          })
           val currentVarIndices = rewrittenParent.implicitlyBound.map(_._1).toSet
           val residualRuleVars = instantiatedRule.implicitlyBound.filterNot { case (index, _) =>
             currentVarIndices.contains(index)
@@ -469,7 +479,7 @@ object RewriteSimpEncoding {
     val selectedForm = if (rewriteUse.binderDependentVars.nonEmpty) {
       // Those variables cannot be instantiated outside the enclosing lambda.
       // Keep them quantified and let Lambdapi match them at the focused site.
-      if (rewriteEq.left.ty != rewriteUse.occurrence.redex.ty) {
+      if (rewriteEq.terms.head.ty != rewriteUse.occurrence.redex.ty) {
         Left("RW: Quantified rewrite site has a different type from the rule")
       } else {
         val hole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
@@ -664,38 +674,39 @@ object RewriteSimpEncoding {
   }
 
   /** Return the equality proof used by the forward rewrite tactic. */
-  private def provideForwardRewriteEqualityProof(rewriteEq: Literal,
+  private def provideForwardRewriteEqualityProof(rewriteEq: RawLiteral,
                                                   encRewriteRule: lpClauseInst,
                                                   sourceBeforeEq: LpTerm[Level.Obj],
                                                   residualBinders: Seq[LpTerm.Var[Level.Obj]],
                                                   state0: RewriteState): (RewriteState, LpTerm[Level.Obj], LpTerm[Level.Obj], LpTerm[Level.Obj], OlMonoType) = {
-    if (!rewriteEq.equational) {
-      val encodedLiteral = encRewriteRule.lits.head
-      val rwLhs = if (rewriteEq.polarity) encodedLiteral.term else encodedLiteral.term match {
-        case LogicConst.Not(body) => body
-        case _ => throw new Exception("Error while attempting to encode a negative propositional rewrite rule")
-      }
-      val (state1, pointwiseEquality) = recordPropLiteralRewriteEquality(
-        rwLhs,
-        rewriteEq.polarity,
-        sourceBeforeEq,
-        residualBinders,
-        state0
-      )
-      (
-        state1,
-        pointwiseEquality,
-        rwLhs,
-        if (rewriteEq.polarity) LogicConst.Top else LogicConst.Bot,
-        HolBaseTypes.O
-      )
-    } else if (rewriteEq.polarity) {
-      encRewriteRule.lits.head.term match {
-        case LogicConst.Eq(eqType, lhs, rhs) => (state0, sourceBeforeEq, lhs, rhs, eqType)
-        case _ => throw new Exception("Error while attempting to encode an instantiated equational rewrite rule")
-      }
-    } else {
-      throw new Exception("Error while attempting to encode rewrite step in LP: Rewrite rule is equational but not positive")
+    rewriteEq match {
+      case RawNonEqLiteral(_, polarity) =>
+        val encodedLiteral = encRewriteRule.lits.head
+        val rwLhs = if (polarity) encodedLiteral.term else encodedLiteral.term match {
+          case LogicConst.Not(body) => body
+          case _ => throw new Exception("Error while attempting to encode a negative propositional rewrite rule")
+        }
+        val (state1, pointwiseEquality) = recordPropLiteralRewriteEquality(
+          rwLhs,
+          polarity,
+          sourceBeforeEq,
+          residualBinders,
+          state0
+        )
+        (
+          state1,
+          pointwiseEquality,
+          rwLhs,
+          if (polarity) LogicConst.Top else LogicConst.Bot,
+          HolBaseTypes.O
+        )
+      case RawEqLiteral(_, _, true) =>
+        encRewriteRule.lits.head.term match {
+          case LogicConst.Eq(eqType, lhs, rhs) => (state0, sourceBeforeEq, lhs, rhs, eqType)
+          case _ => throw new Exception("Error while attempting to encode an instantiated equational rewrite rule")
+        }
+      case RawEqLiteral(_, _, false) =>
+        throw new Exception("Error while attempting to encode rewrite step in LP: Rewrite rule is equational but not positive")
     }
   }
 
