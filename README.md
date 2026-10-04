@@ -12,8 +12,8 @@ In this version, LEO-III has been enhanced to generate verifiable proof output f
 
 
 **Dependencies:**  
-Some of the encodings rely on features added after the latest stable releases of Lambdapi and the Lambdapi Standard Library. You must install the latest development versions of both. Please follow the instructions in the respective repositories for:
-- [Lambdapi](https://github.com/Deducteam/lambdapi)
+The generated proofs use experiemntal features of a version currently only available in the branch of Lambdapi linked below, and some of the encodings rely on features added after the latest stable releases of the Lambdapi Standard Library. You must install the latest development versions. Please follow the instructions in the respective repositories for:
+- [Lambdapi](https://github.com/melanie-taprogge/lambdapi)
 - [Lambdapi Standard Library](https://github.com/Deducteam/lambdapi-stdlib)
 
 Furthermore, the [library for Leo-III encodings in Lambdapi](https://anonymous.4open.science/r/Leo-III-lambdapi-lib-8044) is required and can be installed by following the instructions provided in its GitHub repository.
