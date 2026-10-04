@@ -36,11 +36,13 @@ object RewritingBasedRuleEncoding {
                                    parentNameLpEnc: LpTerm[Level.Obj],
                                    rewriteRuleNamesLpEnc: Seq[LpTerm[Level.Obj]])
 
-    final case class RewriteRuleUse(rewriteRuleParentId: Long,
-                                    rewriteRule: Clause,
-                                    origTermSubst: Subst,
-                                    origTypeSubst: Subst,
-                                    occurrence: Option[RewriteOccurrence])
+    final case class InstantiatedRewriteRuleUse(rewriteRuleParentId: Long,
+                                                shiftedRule: Clause,
+                                                instantiatedRule: RawClause,
+                                                termSubst: Seq[UniTermSubst],
+                                                binderDependentVars: Seq[(Int, Type)],
+                                                occurrence: RewriteOccurrence,
+                                                binderDepth: Int)
 
     final case class PreparedRewriteRuleUse(rewriteRuleParentId: Long,
                                             shiftedRule: Clause,
@@ -70,9 +72,7 @@ object RewritingBasedRuleEncoding {
       val rawClauseVars = (Seq(finalResultCl) ++ rewriteRuleCls).flatMap(_.implicitlyBound)
       // Keep the child in its usual form; the parent and instantiated rewrite
       // rules must retain the structure used by the recorded rewrite positions.
-      val (sharedVarMap, encClauses) = lpClauseInst.apply_to_set(
-        allClauses, rawClauseVars, suppressReductionAt = Set(1)
-      )
+      val (sharedVarMap, encClauses) = lpClauseInst.apply_to_set(allClauses, rawClauseVars, suppressReductionAt = Set(1))
 
       val encChild = encClauses.head
       val encParent = encClauses(1)
@@ -81,33 +81,8 @@ object RewritingBasedRuleEncoding {
         RawClauseEncoding.clause2Lp(rewriteRule, sharedVarMap, suppressReduction = true)
       }
 
-      EncRewriteCtx(
-        encChild,
-        encParent,
-        encFinalResult,
-        encRewriteRules,
-        sharedVarMap,
-        proofName(parentNameLpEnc0),
-        rewriteRuleNameLpEnc0.map(proofName)
+      EncRewriteCtx(encChild, encParent, encFinalResult, encRewriteRules, sharedVarMap, proofName(parentNameLpEnc0), rewriteRuleNameLpEnc0.map(proofName)
       )
-    }
-
-    /**
-      * Normalize rewrite-use information from `FurtherInfo`.
-      */
-    def initRewriteRuleUses(addInfoRw: Seq[AddInfoRewrite]): Seq[RewriteRuleUse] =
-      addInfoRw.map(info => RewriteRuleUse(info.rewriteRuleParentId, info.rewriteRule, info.origTermSubst, info.origTypeSubst, info.occurrence))
-
-    /**
-      * Move quantified rewrite-rule variables beyond every variable index used
-      * by the enclosing RewriteSimp proof.
-      */
-    def shiftRewriteRulesPast(rewriteRules: Seq[Clause],
-                              enclosingClauses: Seq[Clause]): Seq[Clause] = {
-      val termOffset = enclosingClauses.foldLeft(0) { case (currentMax, clause) =>
-        math.max(currentMax, Clause.maxImplicitlyBound(clause))
-      }
-      rewriteRules.map(_.substitute(Subst.shift(termOffset)))
     }
 
     /**
@@ -117,20 +92,19 @@ object RewritingBasedRuleEncoding {
       * Substitutions mentioning local binder variables remain quantified so
       * Lambdapi can infer them at the focused rewrite site.
       */
-    def prepareRewriteRuleUse(use: RewriteRuleUse, rewrittenParent: Clause): Either[String, PreparedRewriteRuleUse] = {
+    def instantiateRewriteRuleUse(use: AddInfoRewrite, rewrittenParent: Clause): Either[String, InstantiatedRewriteRuleUse] = {
       use.occurrence match {
         case None => Left("RW: Rewrite occurrence position not recorded")
-        case Some(_) if use.rewriteRule.typeVars.nonEmpty || use.origTypeSubst != Subst.id =>
-          Left("RW: Polymorphic rewrite-rule instantiation not encoded")
+        case Some(_) if use.rewriteRule.typeVars.nonEmpty || use.origTypeSubst != Subst.id => Left("RW: Polymorphic rewrite-rule instantiation not encoded")
         case Some(occurrence) =>
-          val shiftedRule = shiftRewriteRulesPast(Seq(use.rewriteRule), Seq(rewrittenParent)).head
-          // Leo lifts the matching template once more for every enclosing
-          // object binder. Its recorded substitution therefore has indices in
-          // that local space, whereas the rule proof is quantified outside it.
+          val shiftedRule = shiftPast(Seq(use.rewriteRule), Seq(rewrittenParent)).head
+          // Leo lifts the matching template once more for every enclosing object binder. We need to likewise lift our indices
+          // to match the recorded substitutions
           val binderDepth = occurrence.position.seq.count(_ == -1)
-          val termMap = Map.newBuilder[Int, Term]
-          val boundMap = Map.newBuilder[Int, Int]
+          val termMap = Map.newBuilder[Int, Term] // var to substituted term
+          val boundMap = Map.newBuilder[Int, Int] // var to substituted var
           val binderDependent = Vector.newBuilder[(Int, Type)]
+          // Test if each of the substitutions recorded by Leo-III depends on variables that are only available under local binders
           shiftedRule.implicitlyBound.foreach { case variable @ (index, _) =>
             use.origTermSubst.substBndIdx(index + binderDepth) match {
               case BoundFront(target) if target <= binderDepth =>
@@ -138,13 +112,10 @@ object RewritingBasedRuleEncoding {
               case BoundFront(target) if target - binderDepth != index =>
                 boundMap += index -> (target - binderDepth)
               case TermFront(term) if term.fv.exists(_._1 <= binderDepth) =>
-                // This instance cannot be supplied outside the enclosing
-                // binder. Eta-expanded functions may still be matched by
-                // Lambdapi, but a lambda surviving eta contraction would
-                // require its rewrite matcher to synthesize an abstraction.
+                // Lambdapi rewrite tactic is currently unable to match terms requiring instantiation with lambda terms
                 term.etaContract match {
                   case _ :::> _ =>
-                    return Left(s"RW: Binder-dependent substitution for rewrite-rule variable $index requires an explicit lambda instance")
+                    return Left(s"RW: Binder-dependent substitution for rewrite-rule requires an explicit lambda instance")
                   case _ => ()
                 }
                 binderDependent += variable
@@ -155,52 +126,37 @@ object RewritingBasedRuleEncoding {
               case _ => ()
             }
           }
+          // extract the term substitution to apply
           val outerSubst = Subst.fromMaps(termMap.result(), boundMap.result())
-          // Leo substitutes the replacement term, not the rule literal. Keep
-          // the rule's original sides: Literal.substitute would turn an
-          // instantiated equation such as ⊥ = F into the literal ¬F.
+          // apply the substitution to the individual sides of the rewrite clause (to prevent literal normalisation)
           val instantiatedRule = RawClause(shiftedRule.lits.map { lit =>
             val left = lit.left.substitute(outerSubst, use.origTypeSubst)
             if (lit.equational) {
               RawEqLiteral(left, lit.right.substitute(outerSubst, use.origTypeSubst), lit.polarity)
             } else RawNonEqLiteral(left, lit.polarity)
           })
-          // Matching may eta-expand a rule variable even though the rewritten
-          // parent retains its contracted form. Give this local rule instance
-          // the exact redex that Lambdapi's rewrite tactic must find. Its
-          // proof is still refined from the original rule by eta conversion.
-          // Under an enclosing binder, the redex may mention a local variable
-          // unavailable where that rule-instance proof is constructed.
-          val alignedRule = if (binderDepth == 0) {
-            RawClause(instantiatedRule.lits.map {
-              case RawEqLiteral(left, right, polarity)
-                if left != occurrence.redex && left.etaContract == occurrence.redex.etaContract =>
-                RawEqLiteral(occurrence.redex, right, polarity)
-              case RawNonEqLiteral(term, polarity)
-                if term != occurrence.redex && term.etaContract == occurrence.redex.etaContract =>
-                RawNonEqLiteral(occurrence.redex, polarity)
-              case lit => lit
-            })
-          } else instantiatedRule
-          val currentVarIndices = rewrittenParent.implicitlyBound.map(_._1).toSet
-          val residualRuleVars = alignedRule.implicitlyBound.filterNot { case (index, _) =>
-            currentVarIndices.contains(index)
-          }
-
-          SubstitutionEncoding.trackTermSubstitution(
-            outerSubst,
-            use.origTypeSubst,
-            shiftedRule.implicitlyBound
-          ).map(termSubst => PreparedRewriteRuleUse(
-            use.rewriteRuleParentId,
-            shiftedRule,
-            alignedRule,
-            termSubst,
-            residualRuleVars,
-            binderDependent.result(),
-            occurrence
-          ))
+          SubstitutionEncoding.trackTermSubstitution(outerSubst, use.origTypeSubst, shiftedRule.implicitlyBound
+          ).map(termSubst => InstantiatedRewriteRuleUse(use.rewriteRuleParentId, shiftedRule, instantiatedRule, termSubst, binderDependent.result(), occurrence, binderDepth))
       }
+    }
+
+    /** Align the instantiated rule with the exact recorded redex when eta conversion permits it. */
+    def alignRewriteRuleUseToRedex(use: InstantiatedRewriteRuleUse, rewrittenParent: Clause): PreparedRewriteRuleUse = {
+      val alignedRule = if (use.binderDepth == 0) {RawClause(use.instantiatedRule.lits.map {
+          case RawEqLiteral(left, right, polarity) if left != use.occurrence.redex && left.etaContract == use.occurrence.redex.etaContract =>
+            RawEqLiteral(use.occurrence.redex, right, polarity)
+          case RawNonEqLiteral(term, polarity) if term != use.occurrence.redex && term.etaContract == use.occurrence.redex.etaContract =>
+            RawNonEqLiteral(use.occurrence.redex, polarity)
+          case lit => lit
+        })
+      } else use.instantiatedRule
+      // Alignment can change the variables in the rule, so collect residual variables only after choosing its final form.
+      val currentVarIndices = rewrittenParent.implicitlyBound.map(_._1).toSet
+      val residualRuleVars = alignedRule.implicitlyBound.filterNot { case (index, _) =>
+        currentVarIndices.contains(index)
+      }
+      PreparedRewriteRuleUse(use.rewriteRuleParentId, use.shiftedRule, alignedRule, use.termSubst, residualRuleVars, use.binderDependentVars, use.occurrence
+      )
     }
 
   }
@@ -224,9 +180,10 @@ object RewriteSimpEncoding {
   /**
     * Mutable proof-construction state for one RewriteSimp step.
     *
-    * Literal-normalization steps and rewrite-rule setup haves are kept
-    * separately because normalization changes the outer goal, while the rule
-    * haves are used inside the forward rewrite implication.
+    * The recorded literal-normalization steps are the
+    * necessary transformation applied to the child to be proved.
+    * Rewrite-rule setup are the transformations that are applied
+    * to prepare the parents used as rewrite-clauses.
     */
   final case class RewriteState(literalTransformationSteps: Vector[LpProofScript],
                                 rewriteRuleSetupSteps: Vector[LpProofScript],
@@ -242,7 +199,13 @@ object RewriteSimpEncoding {
   }
 
   /**
-    * Orchestrator for the migrated encoding of Leo-III's `RewriteSimp` rule.
+    * Orchestrator for the encoding of Leo-III's `RewriteSimp` rule.
+    *
+    * The local rewrite implication uses the main parent and the recorded raw
+    * result without beta/eta reduction, preserving the term structure to which
+    * Leo's rewrite positions refer. Each rule instance is encoded in the same
+    * form. The child goal keeps its usual encoding; Lambdapi closes the gap
+    * between it and the raw result by conversion after literal normalization.
     *
     * The produced modular proof script has the following shape:
     *
@@ -253,35 +216,29 @@ object RewriteSimpEncoding {
     *    exposes the clause immediately after term rewriting and before literal
     *    normalization.
     *
-    * 3. For each recorded rewrite-rule application, prepare the
-    *    equality proofs that Lambdapi should use for rewriting:
-    *
-    *    - If the rewrite-rule parent is a non-equational single literal, prove
-    *      its forward Boolean equality form, either `P = ⊤` or `P = ⊥`, using
-    *      the corresponding simplification theorem.
+    * 3. For each recorded rewrite-rule application, prepare the equality proof
+    *    that Lambdapi should use for rewriting:
     *
     *    - Instantiate variables whose substitutions are available outside the
     *      selected binders. Leave binder-dependent variables quantified for
     *      Lambdapi's rewrite tactic to infer at the selected occurrence.
     *
-    *    - Use the pointwise equality at the recorded occurrence. Lambdapi's
-    *      rewrite tactic handles patterns under binders directly.
+    *    - When the rule as used by Leo-III in matching (not normalized)
+    *      differs from its parent proof, introduce an explicit proof
+    *      of the required unreduced rule form, retaining any eta expansions present
+    *      in Leo's terms. Reuse the parent proof when the forms coincide.
     *
-    * 4. Prove one local implication from the parent to the final recorded raw
-    *    result clause. Replay every recorded occurrence with a focused rewrite
-    *    in Leo's order.
+    *    - If the rewrite-rule parent is a non-equational single literal, prove
+    *      its forward Boolean equality form, either `P = ⊤` or `P = ⊥`, using
+    *      the corresponding simplification theorem.
     *
-    * 5. If literal simplifications from `addInfoSimp` were applied, defer to the
-    *    migrated encoding of `Simp`. This is not implemented in this module yet,
-    *    so such cases are currently reported as unsupported.
+    * 4. Prove one local implication from the unreduced parent to the unreduced
+    *    final raw result. Replay every recorded occurrence with a focused
+    *    rewrite in Leo's order, then close modulo beta/eta conversion.
     *
-    * 6. Apply the local implication to the instantiated parent proof.
+    * 5. Apply the local implication to the instantiated parent proof.
     */
-  def encRewrite(cl: ClauseProxy,
-                 parents: Seq[ClauseProxy],
-                 addInfoSimp: Seq[(Seq[Int], Int)],
-                 parentNameLpEnc: Seq[Name],
-                 _sig: LpSig): EncodeResult = {
+  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], Int)], parentNameLpEnc: Seq[Name], _sig: LpSig): EncodeResult = {
     Out.lp_debug_info("Encoding instance of rewrite simplification")
     assert(parents.length == parentNameLpEnc.length)
 
@@ -296,19 +253,21 @@ object RewriteSimpEncoding {
     if (cl.furtherInfo.addInfoRw.isEmpty) {
       return NotEncodable(MissingRewriteMetadataReason)
     }
-    val rewriteUses = initRewriteRuleUses(cl.furtherInfo.addInfoRw)
+    val rewriteUses = cl.furtherInfo.addInfoRw
     val finalRawResult = cl.furtherInfo.addInfoRwFinalResult match {
       case Some(result) => result
       case None => return NotEncodable("RW: Final raw result clause not recorded")
     }
 
     val preparedRewriteUses = rewriteUses.map { use =>
-      prepareRewriteRuleUse(use, parent.cl) match {
+      val instantiated = instantiateRewriteRuleUse(use, parent.cl) match {
         case Left(reason) => return NotEncodable(reason)
-        case Right(prepared) => prepared
+        case Right(rule) => rule
       }
+      alignRewriteRuleUseToRedex(instantiated, parent.cl)
     }
 
+    // associate the prepared rewrite rules with the names of their proofs in the script‚
     val rewriteRuleSourcesByParentId = rewriteRules.zip(sourcesBeforeEq).map {
       case (ruleParent, sourceName) => ruleParent.id -> sourceName
     }.toMap
@@ -319,25 +278,9 @@ object RewriteSimpEncoding {
       }
     }
 
-    // Encode every recorded instance. The same parent may be used with several
-    // different matches.
-    val ctxt = initRewriteRuleCtxt(
-      cl.cl,
-      parent.cl,
-      finalRawResult,
-      preparedRewriteUses.map(_.instantiatedRule),
-      sourceBeforeParent,
-      rewriteRuleSourceNames
-    )
-    val EncRewriteCtx(
-      encChild,
-      encParent,
-      encFinalResult,
-      encRewriteRules,
-      sharedVarMap,
-      parentNameLpEnc0,
-      rewriteRuleNamesLpEnc
-    ) = ctxt
+    // Encode every recorded instance of rewriting. The same parent may be used with several different matches.
+    val ctxt = initRewriteRuleCtxt(cl.cl, parent.cl, finalRawResult, preparedRewriteUses.map(_.instantiatedRule), sourceBeforeParent, rewriteRuleSourceNames)
+    val EncRewriteCtx(encChild, encParent, encFinalResult, encRewriteRules, sharedVarMap, parentNameLpEnc0, rewriteRuleNamesLpEnc) = ctxt
 
     Out.lp_debug_info(s"Encoding application or RW-rule on ${sourceBeforeParent.value}")
     Out.lp_debug_info(s"Found ${rewriteUses.length} recorded rewrite rule use(s)")
@@ -348,31 +291,15 @@ object RewriteSimpEncoding {
     val disappearingParentVars = parent.cl.implicitlyBound.filterNot(cl.cl.implicitlyBound.contains)
     var state = RewriteState(Vector.empty, Vector.empty, Vector.empty, initialReasons, 0, 0)
 
-    // Literal simplifications tracked via AddInfoSimp are not migrated yet.
-    state = encodeSimplificationTransformations(addInfoSimp, state)
-
     val literalTransformations = cl.furtherInfo.addInfoRwLiteralTransformation
-    state = state.copy(
-      literalTransformationSteps = verifySubstitutionLiteralNormalisazion(
-        literalTransformations,
-        encChild.lits.map(_.polarity),
-        encChild.lits.length
-      ).toVector
-    )
+    state = state.copy(literalTransformationSteps = verifySubstitutionLiteralNormalisazion(literalTransformations, encChild.lits.map(_.polarity), encChild.lits.length).toVector)
 
     // Prepare concrete rewrite evidence for each recorded application.
     val encodedRewriteRules = encRewriteRules.iterator
     val rewriteRuleProofs = rewriteRuleNamesLpEnc.iterator
     preparedRewriteUses.foreach { rewriteUse =>
-      val encodedApplication = encodeOneRewriteRuleApplication(
-        rewriteUse,
-        encodedRewriteRules.next(),
-        rewriteRuleProofs.next(),
-        parent.cl,
-        parent.cl.implicitlyBound,
-        sharedVarMap,
-        state
-      )
+      // Apply any necessary transformations in dedicated substeps
+      val encodedApplication = encodeOneRewriteRuleApplication(rewriteUse, encodedRewriteRules.next(), rewriteRuleProofs.next(), parent.cl, parent.cl.implicitlyBound, sharedVarMap, state)
       encodedApplication match {
         case Left(reason) => return NotEncodable(reason)
         case Right((nextState, focusedRewrite)) =>
@@ -380,33 +307,26 @@ object RewriteSimpEncoding {
       }
     }
 
-    // TODO: Compare the final uncontracted raw result with the reconstructed
-    // child before literal normalization modulo beta/eta conversion.
+    // construct the implication proving the rewrite applications
+    // Build a List of all necessary steps of the proof:
     val rewriteApplicationSteps = state.forwardRewriteRules.map { rule =>
+      // apply each of the targeted rewrites
       Rewrite(Some(rule.pattern), proofTermAsTacticArg(rule.proof))
+      // close the proof by beta-reducing and proving the implication via assume and refine
     } ++ Vector(
-      Try(Simplify(onlyBeta = true)),
-      Assume(Seq(Name("etaEq"))),
-      Refine(LpTerm.Var[Level.Meta](Name("etaEq"), None))
+      Try(Simplify(onlyBeta = true)), Assume(Seq(Name("etaEq"))), Refine(LpTerm.Var[Level.Meta](Name("etaEq"), None))
     )
-    val rewriteApplication = Have(
-      Name("rwApp_0"),
-      Prf(LogicConst.Imp(encParent.term, encFinalResult.term)),
-      rewriteApplicationSteps.map(Left(_))
-    )
-    val instantiatedParent = instantiateProof(
-      parentNameLpEnc0,
-      parent.cl.implicitlyBound,
-      parent.cl.implicitlyBound,
-      sharedVarMap
-    )
-    val rewrittenParentProof = LpTerm.App(
-      proofName(Name("rwApp_0")),
-      Seq(Arg.Explicit(instantiatedParent))
-    )
+    // Construct the actual implication proof
+    val rewrittenParentProofName = Name("rwApp_0")
+    val rewriteApplication = Have(rewrittenParentProofName, Prf(LogicConst.Imp(encParent.term, encFinalResult.term)), rewriteApplicationSteps.map(Left(_)))
+
+    // Instantiate the parent and apply the final refinement step
+    val instantiatedParent = instantiateProof(parentNameLpEnc0, parent.cl.implicitlyBound, parent.cl.implicitlyBound, sharedVarMap)
+    val rewrittenParentProof = LpTerm.App(proofName(rewrittenParentProofName), Seq(Arg.Explicit(instantiatedParent)))
     val applyRewrite = Refine(Obj(rewrittenParentProof))
-    val completedRewriteBody = state.literalTransformationSteps ++
-      state.rewriteRuleSetupSteps ++ Vector(rewriteApplication, applyRewrite)
+
+    // construct the overall proof
+    val completedRewriteBody = state.literalTransformationSteps ++ state.rewriteRuleSetupSteps ++ Vector(rewriteApplication, applyRewrite)
 
     val finalSteps = if (disappearingParentVars.isEmpty) {
       initialAssumeSteps ++ completedRewriteBody
@@ -420,12 +340,7 @@ object RewriteSimpEncoding {
       }
       val localProofSteps = encAssumeStep(disappearingBinders.map(_.name)) ++ completedRewriteBody
       val localProof = Have(localProofName, Pi(disappearingBinders, Prf(encChild.term)), localProofSteps.map(Left(_)))
-      val instantiatedLocalProof = Refine(Obj(instantiateProof(
-        proofName(localProofName),
-        disappearingParentVars,
-        Seq.empty,
-        sharedVarMap
-      )))
+      val instantiatedLocalProof = Refine(Obj(instantiateProof(proofName(localProofName), disappearingParentVars, Seq.empty, sharedVarMap)))
       initialAssumeSteps ++ Vector(localProof, instantiatedLocalProof)
     }
 
@@ -452,36 +367,23 @@ object RewriteSimpEncoding {
     val rewriteEqClause = rewriteUse.instantiatedRule
     assert(rewriteEqClause.lits.length == 1, s"trying to encode RW rule application with RW clause of length ${rewriteEqClause.lits.length}")
 
-    val patternContext = PatternBuilder.prepareClausePositionPattern(rewrittenParent, rewriteUse.occurrence) match {
-      case Left(reason) => return Left(reason)
-      case Right(context) => context
-    }
     val rewriteEq = rewriteEqClause.lits.head
     val residualBinders = rewriteUse.residualRuleVars.map { case (index, ty) =>
       var2Lp(index, ty, sharedVarMap)
     }
-    val (state1, instantiatedSource) = provideInstantiatedRewriteRuleProof(
-      rewriteUse,
-      encRewriteRule,
-      sourceBeforeEq,
-      currentVars,
-      sharedVarMap,
-      state0
-    )
+    // If necessary, provide a substp that applies existing substitutions and proves the non-normalized shape of the used rewrite-clause
+    val (state1, instantiatedSource) = provideInstantiatedRewriteRuleProof(rewriteUse, encRewriteRule, sourceBeforeEq, currentVars, sharedVarMap, state0)
 
     Out.lp_debug_info(s"Rewriting with ${instantiatedSource}")
-    val (state2, pointwiseEquality, lhs, rhs) = provideForwardRewriteEqualityProof(
-      rewriteEq,
-      encRewriteRule,
-      instantiatedSource,
-      residualBinders,
-      state1
-    )
-
+    // If necessary, prove transformation from non-equational to equational form and construct the precise shape of the used rule
+    val (state2, pointwiseEquality, lhs, rhs) = provideForwardRewriteEqualityProof(rewriteEq, encRewriteRule, instantiatedSource, residualBinders, state1)
     val pointwise = RewriteEquality(pointwiseEquality, lhs, rhs)
+
+    // construct the pattern of the application of the rewrite-clause
+    // Check if the rewrite Equality has the expected shape
+    // If this holds, construct a pattern only contianing the variable to be matched as the target
     val targetPattern = if (rewriteUse.binderDependentVars.nonEmpty) {
-      // Those variables cannot be instantiated outside the enclosing lambda.
-      // Keep them quantified and let Lambdapi match them at the focused site.
+      // binderDependentVars cannot be instantiated outside the enclosing lambda. Keep them quantified and let Lambdapi match them at the focused site.
       if (rewriteEq.terms.head.ty != rewriteUse.occurrence.redex.ty) {
         Left("RW: Quantified rewrite site has a different type from the rule")
       } else {
@@ -492,13 +394,15 @@ object RewriteSimpEncoding {
       selectPointwiseRewritePattern(rewriteUse.occurrence, pointwise, sharedVarMap)
     }
 
+    // prepare the pattern context at applied position
+    val patternContext = PatternBuilder.prepareClausePositionPattern(rewrittenParent, rewriteUse.occurrence) match {
+      case Left(reason) => return Left(reason)
+      case Right(context) => context
+    }
+    // insert target pattern and embed in clause pattern
     targetPattern.map { pattern =>
       val clausePattern = patternContext.plug(pattern)
-      val implicationPattern = PatternBuilder.embedPatternInBinaryConnective(
-        clausePattern,
-        Side.Left,
-        LogicConst.Imp.apply
-      )
+      val implicationPattern = PatternBuilder.embedPatternInBinaryConnective(clausePattern, Side.Left, LogicConst.Imp.apply)
       (state2, FocusedRewrite(implicationPattern, pointwise.proof))
     }
   }
@@ -507,7 +411,7 @@ object RewriteSimpEncoding {
                                            lhs: LpTerm[Level.Obj],
                                            rhs: LpTerm[Level.Obj])
 
-  /** The pointwise equality must match the exact recorded rewrite occurrence. */
+  /** Ensure that the pointwise equality matches the exact recorded rewrite occurrence. */
   private def selectPointwiseRewritePattern(occurrence: RewriteOccurrence,
                                             pointwise: RewriteEquality,
                                             sharedVarMap: Map[Int, String]): Either[String, RewritePattern] = {
@@ -518,59 +422,49 @@ object RewriteSimpEncoding {
     if (pointwise.lhs == encodedRedex && pointwise.rhs == encodedContractum) {
       Right(RewritePattern(patternHole, patternHole))
     } else {
-      Left("RW: Pointwise equality does not match the recorded rewrite occurrence; explicit functional-extensionality lifting is not encoded")
+      Left("RW: Pointwise equality does not match the recorded rewrite occurrence")
     }
   }
 
-  /** Reuse an unchanged rule proof, or prove the concrete form needed for rewriting. */
+  /** If necessary, prove the concrete form needed for rewriting by applying any existing substitutions and
+    * making the non-normalized shape of the used rewrite-clause explicit.
+    * Returns one shared substep.
+    * */
   private def provideInstantiatedRewriteRuleProof(rewriteUse: PreparedRewriteRuleUse,
                                                   encRewriteRule: lpClauseInst,
                                                   sourceBeforeEq: LpTerm[Level.Obj],
                                                   currentVars: Seq[(Int, Type)],
                                                   sharedVarMap: Map[Int, String],
                                                   state0: RewriteState): (RewriteState, LpTerm[Level.Obj]) = {
-    // Both forms use the same variable names for this comparison. When no
-    // substitution was applied and the normally printed source rule already
-    // has the required form, its proof can be used directly.
-    val unchangedRule = rewriteUse.termSubst.isEmpty &&
-      rewriteUse.shiftedRule.implicitlyBound.forall { case (index, _) => sharedVarMap.contains(index) } &&
-      RawClauseEncoding.clause2Lp(RawClause(rewriteUse.shiftedRule), sharedVarMap).asMl == encRewriteRule.asMl
-    if (unchangedRule) {
-      return (state0, sourceBeforeEq)
-    }
+    // If no substitution was applied and the normally printed source rule already -> use its proof directly.
+    val unchangedRule = rewriteUse.termSubst.isEmpty && // no substitution needs to be applied
+      rewriteUse.shiftedRule.implicitlyBound.forall { case (index, _) => sharedVarMap.contains(index) } && // Condition under which we may encode the step with the sharedVarMap
+      RawClauseEncoding.clause2Lp(RawClause(rewriteUse.shiftedRule), sharedVarMap).asMl == encRewriteRule.asMl // The encoded rules are the same (this is not the case if we need eta expansion)
+    if (unchangedRule) return (state0, sourceBeforeEq)
 
+    // Otherwise, prove the required form
     val stepPrefix = if (rewriteUse.termSubst.nonEmpty) "RewriteInstantiation" else "RewriteRuleForm"
     val stepName = Name(s"${stepPrefix}_${state0.rewriteRuleProofCounter}")
     val availableVars = (currentVars ++ rewriteUse.residualRuleVars).distinct
-    val instantiatedSource = SubstitutionEncoding.instantiateProofTerm(
-      rewriteUse.shiftedRule.implicitlyBound,
-      availableVars,
-      rewriteUse.termSubst,
-      sharedVarMap,
-      sourceBeforeEq
-    )
+    // Apply substitution if it exists
+    val instantiatedSource = SubstitutionEncoding.instantiateProofTerm(rewriteUse.shiftedRule.implicitlyBound, availableVars, rewriteUse.termSubst, sharedVarMap, sourceBeforeEq)
     val residualBinders = rewriteUse.residualRuleVars.map { case (index, ty) =>
       var2Lp(index, ty, sharedVarMap)
     }
     val residualMetaBinders = residualBinders.map(Lifting.OlVarM(_))
-    val haveInstance = LpProofScript.Have(
-      stepName,
+    // construct substep for proving the needed form of the child.
+    // Note that encRewriteRule is the exact rule used by Leo prior to normalising, this step therefore also proves eta equivalence to the original proof step.
+    val haveInstance = LpProofScript.Have(stepName,
       if (residualMetaBinders.isEmpty) Prf(encRewriteRule.term)
       else Pi(residualMetaBinders, Prf(encRewriteRule.term)),
-      encAssumeStep(residualBinders.map(_.name)).map(Left(_)) ++
-        Seq(Left(Refine(Obj(instantiatedSource))))
-    )
+      encAssumeStep(residualBinders.map(_.name)).map(Left(_)) ++ Seq(Left(Refine(Obj(instantiatedSource)))))
 
-    (
-      state0.copy(
-        rewriteRuleSetupSteps = state0.rewriteRuleSetupSteps :+ haveInstance,
-        rewriteRuleProofCounter = state0.rewriteRuleProofCounter + 1
-      ),
-      proofName(stepName)
-    )
+    (state0.copy(rewriteRuleSetupSteps = state0.rewriteRuleSetupSteps :+ haveInstance, rewriteRuleProofCounter = state0.rewriteRuleProofCounter + 1), proofName(stepName))
   }
 
-  /** Return the equality proof used by the forward rewrite tactic. */
+  /** If the rewrite-clause is not already equational, transform to equational shape.
+    * Returns the final shape of the used rule, and adds the transformation substep to the current state if necessary.
+    * */
   private def provideForwardRewriteEqualityProof(rewriteEq: RawLiteral,
                                                   encRewriteRule: lpClauseInst,
                                                   sourceBeforeEq: LpTerm[Level.Obj],
@@ -578,25 +472,19 @@ object RewriteSimpEncoding {
                                                   state0: RewriteState): (RewriteState, LpTerm[Level.Obj], LpTerm[Level.Obj], LpTerm[Level.Obj]) = {
     rewriteEq match {
       case RawNonEqLiteral(_, polarity) =>
+        // If the used rewrite-clause is not equational but a negative non-equational literal, extract the body
         val encodedLiteral = encRewriteRule.lits.head
         val rwLhs = if (polarity) encodedLiteral.term else encodedLiteral.term match {
           case LogicConst.Not(body) => body
           case _ => throw new Exception("Error while attempting to encode a negative propositional rewrite rule")
         }
-        val (state1, pointwiseEquality) = recordPropLiteralRewriteEquality(
-          rwLhs,
-          polarity,
-          sourceBeforeEq,
-          residualBinders,
-          state0
-        )
-        (
-          state1,
-          pointwiseEquality,
-          rwLhs,
+        // construct the equality used by the actual rewrite tactic
+        val (state1, pointwiseEquality) = recordPropLiteralRewriteEquality(rwLhs, polarity, sourceBeforeEq, residualBinders, state0)
+        (state1, pointwiseEquality, rwLhs,
           if (polarity) LogicConst.Top else LogicConst.Bot
         )
       case RawEqLiteral(_, _, true) =>
+        // Clause is already a unit clause with an equational literal, no transformation needed
         encRewriteRule.lits.head.term match {
           case LogicConst.Eq(_, lhs, rhs) => (state0, sourceBeforeEq, lhs, rhs)
           case _ => throw new Exception("Error while attempting to encode an instantiated equational rewrite rule")
@@ -618,18 +506,10 @@ object RewriteSimpEncoding {
     val transformationStepName = Name(s"TransformToEqLits_${state0.transformationsRwCounter}")
     val binderNames = residualBinders.map(_.name)
     val appliedSource = applyProofToVars(sourceBeforeEq, binderNames)
-    val equalityProof = EqualityProofSteps.provePropLiteralAsForwardBooleanEquality(
-      transformationStepName,
-      rwLhs,
-      rwPol,
-      appliedSource,
-      residualBinders.map(Lifting.OlVarM(_)),
-      binderNames
-    )
+    val equalityProof = EqualityProofSteps.provePropLiteralAsForwardBooleanEquality(transformationStepName, rwLhs, rwPol, appliedSource, residualBinders.map(Lifting.OlVarM(_)), binderNames)
 
     Out.lp_debug_info("Transforming rewrite rule to equality...")
-    (
-      state0.copy(
+    (state0.copy(
         rewriteRuleSetupSteps = state0.rewriteRuleSetupSteps :+ equalityProof.step,
         transformationsRwCounter = state0.transformationsRwCounter + 1
       ),
@@ -638,29 +518,15 @@ object RewriteSimpEncoding {
   }
 
   ////////////////////////////////////////////////////////////////
-  ////////// Unsupported simplification tracking and final refinement
+  ////////// Final refinement
   ////////////////////////////////////////////////////////////////
-
-  /** Keep the old behavior for AddInfoSimp until Simp is migrated to the new structures. */
-  private def encodeSimplificationTransformations(addInfoSimp: Seq[(Seq[Int], Int)],
-                                                  state0: RewriteState): RewriteState = {
-    if (addInfoSimp.nonEmpty) {
-      Out.lp_debug_info("Simplification steps not yet encoded")
-      state0.markNotEncoded(LiteralTransformationReason)
-    } else state0
-  }
 
   /** Instantiate a proof in the variables available at the current proof point. */
   private def instantiateProof(sourceProof: LpTerm[Level.Obj],
                                quantifiedVars: Seq[(Int, Type)],
                                availableVars: Seq[(Int, Type)],
                                sharedVarMap: Map[Int, String]): LpTerm[Level.Obj] = {
-    SubstitutionEncoding.instantiateProofTerm(
-      quantifiedVars,
-      availableVars,
-      Seq.empty,
-      sharedVarMap,
-      sourceProof
+    SubstitutionEncoding.instantiateProofTerm(quantifiedVars, availableVars, Seq.empty, sharedVarMap, sourceProof
     )
   }
 }

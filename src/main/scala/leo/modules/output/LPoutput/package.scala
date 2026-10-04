@@ -806,6 +806,17 @@ package object LPoutput {
     resultBindingMap
   }
 
+  /** Shift clause variable indices past those used by the enclosing clauses.
+    * The returned clauses can share a proof context with the enclosing clauses
+    * without their implicitly bound variables referring to the same indices.
+    */
+  def shiftPast(clauses: Seq[Clause], enclosingClauses: Seq[Clause]): Seq[Clause] = {
+    val offset = enclosingClauses.foldLeft(0) { case (currentMax, clause) =>
+      math.max(currentMax, Clause.maxImplicitlyBound(clause))
+    }
+    clauses.map(_.substitute(Subst.shift(offset)))
+  }
+
   def shiftClause (cls: Seq[Clause]) = {
     // check if ther are gaps in the variable identifiers and if so, close them
     // check for "holes" in the variable-numbers
