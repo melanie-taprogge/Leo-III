@@ -25,6 +25,20 @@ import scala.collection.mutable
 
 object ModularProofEncoding {
 
+  private val arithmeticSimpRuleHeads: Set[Signature.Key] = Set(
+    HOLDifference.key,
+    HOLLessEq.key,
+    HOLGreater.key,
+    HOLGreaterEq.key
+  )
+
+  private def literalContainsArithmeticSimpHead(lit: Literal): Boolean =
+    lit.left.symbols.distinct.exists(arithmeticSimpRuleHeads) ||
+      lit.right.symbols.distinct.exists(arithmeticSimpRuleHeads)
+
+  private def simplificationNeedsArithmeticTactic(before: Seq[Literal], after: Seq[Literal]): Boolean =
+    (before.iterator ++ after.iterator).exists(literalContainsArithmeticSimpHead)
+
   ////////////////////////////////////////////////////////////////
   ////////// Additional Leo-III Inferences
   ////////////////////////////////////////////////////////////////
@@ -147,7 +161,7 @@ object ModularProofEncoding {
     val allDefs = keysWithDefn.map(key => s"${lpEscapeName(sig.apply(key).name, sig, false)}_def") //todo: have a unified name generation method for def file generation and this
 
 
-    if(!additionalInfoSimp){
+    if(keysWithDefn.length <= 20){
 
       val (encParent,encChild, _, _) =  initialEncUnclausified(parent.cl, child.cl, sig)
       Out.lp_debug_info(s"Encoding defExSimp of ${encParent.pretty} to ${encChild.pretty}")
@@ -177,7 +191,8 @@ object ModularProofEncoding {
       val (maybeSimpStep, refineName) : (Seq[lpHave],lpTerm) = if (encExpTerm != encChild){
         // Use the encoding of formula simplification to generate the proofs
         // We only need the exhaustive simplification step, as the implicit transformations will only occur when operating on literals
-        val (simpStep, simpStepName) = encSimpProofSubstep(Seq.empty, encExpTerm, encChild)
+        val needsArithmeticTactic = simplificationNeedsArithmeticTactic(Seq(reducedTerm), child.cl.lits)
+        val (simpStep, simpStepName) = encSimpProofSubstep(Seq.empty, encExpTerm, encChild, useArithmeticTactic = needsArithmeticTactic)
         (Seq(simpStep), lpFunctionApp(lpConstantTerm(simpStepName),Seq(appliedParent)))
       }else (Seq(), appliedParent)
 
@@ -186,8 +201,8 @@ object ModularProofEncoding {
       ((defExpStep ++ maybeSimpStep) :+ refineStep, None)
 
     }else{
-      Out.lp_debug_info("Rweriting under binder required in order to encode Simplification step")
-      (Seq(), Some("Rweriting under binder required in order to encode Simplification step"))
+      Out.lp_debug_info(s"Skipping DefExp with more than 20 definitions (${keysWithDefn.length})")
+      (Seq(), Some("Skipping DefExp with more than 50 definitions"))
     }
   }
 
@@ -923,7 +938,7 @@ object ModularProofEncoding {
 
       // Prepare the intoLit in the child (if necessary, carry out transform and flip steps)
       val transformIntoLitSteps = transformIntoLit(newCtxt)
-      val maybeFlipIntoLitStep = flipIntoLit(newCtxt, info)
+      val maybeFlipIntoLitStep = flipIntoLit(newCtxt, info, useFallback = true)
 
       // Combine the proof snippets that do not depend on the length of the with Literal:
       val proofBricks = EncParaProofSteps(transformIntoLitSteps, maybeFlipIntoLitStep, rewriteWithUniLit, childIntoTermPattern, vIntro1_intoClause_uniLit, assumeUniConsT)
@@ -1059,14 +1074,18 @@ object ModularProofEncoding {
       }
     }
 
-    private def flipIntoLit(ctxt: EncParaCtx, info: AddInfoPara): Seq[lpProofScriptStep] = {
+    private def flipIntoLit(ctxt: EncParaCtx, info: AddInfoPara, useFallback: Boolean = false): Seq[lpProofScriptStep] = {
 
       val writeIntoLhs = if (info.intoSide) true else false
       val intoLitInChildNeedsflip = if (writeIntoLhs) !alphaEquivalent(ctxt.intoC.encIntoLit.right, ctxt.childC.encIntoLit.right) else !alphaEquivalent(ctxt.intoC.encIntoLit.left, ctxt.childC.encIntoLit.left)
       if (intoLitInChildNeedsflip) {
         Out.lp_debug_info(s"intoLit in child needs to be flipped")
         val flipPattern = generateClausePattern(Seq(ctxt.childC.intoLitIdx), ctxt.childC.len, ctxt.childC.intoLit.polarity)
-        val flipStep = lpRewrite(Some(lpRewritePattern(flipPattern)), flipLiteral.instanciate(ctxt.intoC.encIntoLit.tyLhs))
+        val ordinaryFlipStep = lpRewrite(Some(lpRewritePattern(flipPattern)), flipLiteral.instanciate(ctxt.intoC.encIntoLit.tyLhs))
+        val flipStep =
+          if (useFallback && ctxt.intoC.encIntoLit.tyLhs.isInstanceOf[lpOlFunctionType]) {
+            lpRewriteWithDepArrowFallback(ordinaryFlipStep.rewritePattern0, ordinaryFlipStep.rewriteTerm, ordinaryFlipStep.rwRhs)
+          } else ordinaryFlipStep
         Seq(lpProofScriptCommentLine("Target literal needs to be flipped"), flipStep)
       } else Seq.empty
     }
@@ -1256,7 +1275,7 @@ object ModularProofEncoding {
     val otherLitBeforeEqFact : (lpOlTerm, lpOlTerm, lpOlTerm) = {
       if (!otherLit.equational){
         val transformOtherLit0 = equationalForm(otherLitEnc,polarityOfRule)
-        val (newSteps, newCanEncode) = transformLiteral(transformOtherLit0._1,otherLitEnc,permutaion(posOtherLit),lenParent)
+        val (newSteps, newCanEncode) = transformLiteral(transformOtherLit0._1,otherLitEnc,permutaion(posOtherLit),lenParent, useFallback = true)
         allTransformSteps =  allTransformSteps ++ newSteps
         if (!newCanEncode) {
           canEncode = false
@@ -1284,7 +1303,7 @@ object ModularProofEncoding {
     val maxLitBeforeEqFact = {
       if (!maxLit.equational) {
         val transformMaxLit0 = equationalForm(maxLitEnc, polarityOfRule)
-        val (newSteps, newCanEncode) = transformLiteral(transformMaxLit0._1,maxLitEnc, permutaion(posMaxLit), lenParent)
+        val (newSteps, newCanEncode) = transformLiteral(transformMaxLit0._1,maxLitEnc, permutaion(posMaxLit), lenParent, useFallback = true)
         allTransformSteps = allTransformSteps ++ newSteps
         if (!newCanEncode) {
           canEncode = false
@@ -1323,7 +1342,7 @@ object ModularProofEncoding {
     var allBackTransformSteps : Seq[lpProofScriptStep] = Seq.empty
     Out.lp_debug_info(s"derived other lit = ${otherLitBeforeEqFact._1.pretty}, found other lit = ${childOtherLitEnc.pretty}")
     if (otherLitBeforeEqFact._1 != childOtherLitEnc){
-      val (newSteps, newCanEncode) = transformLiteral(childOtherLitEnc,otherLitBeforeEqFact._1,0,currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childOtherLitEnc,otherLitBeforeEqFact._1,0,currentLits.length, useFallback = true)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(0,childOtherLitEnc)
       if (!newCanEncode) {
@@ -1333,7 +1352,7 @@ object ModularProofEncoding {
       Out.lp_debug_info(s"transformed other literal to ${childOtherLitEnc.pretty}")
     }
     if (currentLits(1) != childUc1Enc){
-      val (newSteps, newCanEncode) = transformLiteral(childUc1Enc, currentLits(1), 1, currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childUc1Enc, currentLits(1), 1, currentLits.length, useFallback = true)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(1,childUc1Enc)
       if (!newCanEncode) {
@@ -1343,7 +1362,7 @@ object ModularProofEncoding {
       Out.lp_debug_info(s"transformed UC1 to ${childUc1Enc.pretty}")
     }
     if (currentLits(2) != childUc2Enc) {
-      val (newSteps, newCanEncode) = transformLiteral(childUc2Enc, currentLits(2), 2, currentLits.length)
+      val (newSteps, newCanEncode) = transformLiteral(childUc2Enc, currentLits(2), 2, currentLits.length, useFallback = true)
       allBackTransformSteps = allBackTransformSteps ++ newSteps
       currentLits = currentLits.updated(2,childUc2Enc)
       if (!newCanEncode) {
@@ -1568,10 +1587,11 @@ object ModularProofEncoding {
     haveSimpAppStep
   }
 
-  def encSimpProofSubstep(disappearingVars: Seq[lpTypedVar], termBefore: lpOlTerm, termAfter: lpOlTerm, addSteps: Seq[lpProofScriptStep] = Seq())={
+  def encSimpProofSubstep(disappearingVars: Seq[lpTypedVar], termBefore: lpOlTerm, termAfter: lpOlTerm, addSteps: Seq[lpProofScriptStep] = Seq(), useArithmeticTactic: Boolean = false)={
     // Step applying all of the RW-rules encoding the simplifications
     val simpAppStepName = "SimpApp"
-    val haveSimpAppStep = lpImpHaveStepConstructor(simpAppStepName, disappearingVars, termBefore, termAfter, addSteps ++ Seq(allSimpRuleApplicationStep))
+    val simpRuleApplicationStep = if (useArithmeticTactic) allSimpRuleWithArithmaticTactic else allSimpRuleTactic
+    val haveSimpAppStep = lpImpHaveStepConstructor(simpAppStepName, disappearingVars, termBefore, termAfter, addSteps ++ Seq(simpRuleApplicationStep))
     Out.lp_debug_info("Substep applying the boolean identities generated")
 
     (haveSimpAppStep, simpAppStepName)
@@ -1602,7 +1622,8 @@ object ModularProofEncoding {
     val disappearingVars = encParent.metaVars.diff(encRemainingVars)
     Out.lp_debug_info(s"Vars in parent: ${encParent.metaVars.map(_.pretty)}, Vars after Simp: ${encRemainingVars.map(_.pretty)} => Disappearing implicitly quantified variables: ${disappearingVars.map(_.pretty)}")
 
-    val (haveSimpAppStep, simpAppStepName) = encSimpProofSubstep(disappearingVars, encParent.term, clauseToProve, implicitRwTransf)
+    val needsArithmeticTactic = simplificationNeedsArithmeticTactic(pLits, cLits)
+    val (haveSimpAppStep, simpAppStepName) = encSimpProofSubstep(disappearingVars, encParent.term, clauseToProve, implicitRwTransf, needsArithmeticTactic)
 
 
 
@@ -1747,7 +1768,7 @@ object ModularProofEncoding {
           if (finalLit != encCorrespondingLit){
             // transformation to or from bottom or order has changed
             Out.lp_debug_info(s"corresponding lit in child: ${encCorrespondingLit.pretty}, transformation necessary")
-            val (transformationSteps, canEncode0) = transformLiteral(encCorrespondingLit,finalLit,permutation.indexOf(indx), indices.length)
+            val (transformationSteps, canEncode0) = transformLiteral(encCorrespondingLit, finalLit, permutation.indexOf(indx), indices.length, useFallback = true)
             if (canEncode0){
               allSteps = allSteps ++ transformationSteps
               Out.lp_debug_info(s"transformation successful")
@@ -1798,7 +1819,7 @@ object ModularProofEncoding {
     // 1. Abstract over free variables
     // For each of the rewrite clauses applied:
     //    2. Use the have tactic to provide a proof-term for the equality used to rewrite the focused goal. The exact form depends on the kind of clause used as a rewrite rule by Leo-III:
-    //        a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
+    //       a) case I) If the rewrite-clause is a non-equational single literal, proof the transformation to equational form using topPosProp_eq or botNegProp_eq
     //       a) case II) If the rewrite-clause is an equational single literal, use eqSym_eq to prove the reverse rewrite rule
     //       b) Refine with the rewrite-clause and - if a substitution was applied - instanciate it accordingly
     //   For each of the literals that are transformed:
@@ -1817,9 +1838,14 @@ object ModularProofEncoding {
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     // temporariy: If versions of the rule are needed that are not encoded yet, return admit
     var allTransformationsEncoded = true
+    val notEncodedReasons: mutable.LinkedHashSet[String] = mutable.LinkedHashSet.empty
+    def markNotEncoded(reason: String): Unit = {
+      allTransformationsEncoded = false
+      notEncodedReasons += reason
+    }
     if (addInfoSimp.nonEmpty) {
       Out.lp_debug_info("Simplification steps not yet encoded")
-      allTransformationsEncoded = false
+      markNotEncoded("RW: Literal simplification or transformation not encoded")
     }
 
     // 1. Abstract over free variables
@@ -1853,7 +1879,7 @@ object ModularProofEncoding {
 
       // check that none of the things not yet encoded occur
       if (rewriteEqClause.implicitlyBound.nonEmpty || rewriteEqClause.typeVars.nonEmpty) {
-        allTransformationsEncoded = false
+        markNotEncoded("RW: Non-ground rewrite rule requires instantiation")
         Out.lp_debug_info(s"Rewriting with ${sourceBeforeEq.name} : ${if (!rwPol) lpNot.pretty} (${rwLhs.pretty} = ${rwRhs.pretty}) is non-ground and therefore not yet encoded")
       } else {
         Out.lp_debug_info(s"Rewriting with ${sourceBeforeEq.name} : ${if (!rwPol) lpNot.pretty} (${rwLhs.pretty} = ${rwRhs.pretty})")
@@ -1898,7 +1924,7 @@ object ModularProofEncoding {
         rewriteenLits.foreach {encLit =>
           val (patternTerm, rewrittenLit, counter, rwUnderBinder) = findRWTerm0(Seq((rwLhs, rwRhs)).toMap, encLit)
           if (rwUnderBinder) {
-            allTransformationsEncoded = false
+            markNotEncoded("RW: Rewrite under binder required")
             Out.lp_debug_info(s"Rewriting-Tactic can not be used on literal of the parent clause: ${encLit.pretty} since term is under binder")
           } else if (counter != 0) {
             rewriteenLits = rewriteenLits.updated(litCount,rewrittenLit)
@@ -1925,7 +1951,7 @@ object ModularProofEncoding {
           if (canEncode) Out.lp_debug_info(s"proposed Steps: \n${additionalSteps.map(_.pretty).mkString("\n")}")
           else {
             Out.lp_debug_info(s"unable to encode the transformation of ${encLitChild.pretty} to ${rewrittenLit.pretty}}")
-            allTransformationsEncoded = false
+            markNotEncoded("RW: Literal simplification or transformation not encoded")
           }
           allSteps = allSteps :++ additionalSteps
         }
@@ -1951,7 +1977,7 @@ object ModularProofEncoding {
     val finishedProof = lpProofScript(allSteps)
 
     if (allTransformationsEncoded) (finishedProof, None)
-    else (finishedProof, Some("RW: Non-ground rewrite step or missing transformation"))
+    else (finishedProof, Some(notEncodedReasons.mkString("; ")))
   }
 
   ////////////////////////////////////////////////////////////////

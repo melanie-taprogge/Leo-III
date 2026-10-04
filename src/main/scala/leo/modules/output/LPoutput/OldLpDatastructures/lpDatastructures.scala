@@ -363,7 +363,9 @@ object lpDatastructures {
   )
 
   val tptpDefinedTypeMap: Map[String, lpOlMonoType] = Map(
-    "$int" -> lpIntType
+    "$int" -> lpOlUserDefinedType("tptp_int"),
+    "$rat" -> lpOlUserDefinedType("tptp_rat"),
+    "$real" -> lpOlUserDefinedType("tptp_real")
   )
 
   case class lpOlFunctionType(args: Seq[lpOlType]) extends lpOlMonoType {
@@ -570,7 +572,17 @@ object lpDatastructures {
 
   val tptpDefinedSymbolMap: Map[String, lpOlTerm] = Map(
     "$false" -> lpOlBot,
-    "$true" -> lpOlTop)
+    "$true" -> lpOlTop,
+    "$less" -> lpOlConstantTerm("tptp_less"),
+    "$lesseq" -> lpOlConstantTerm("tptp_lesseq"),
+    "$greater" -> lpOlConstantTerm("tptp_greater"),
+    "$greatereq" -> lpOlConstantTerm("tptp_greatereq"),
+    "$uminus" -> lpOlConstantTerm("tptp_uminus"),
+    "$sum" -> lpOlConstantTerm("tptp_sum"),
+    "$difference" -> lpOlConstantTerm("tptp_difference"),
+    "$product" -> lpOlConstantTerm("tptp_product"),
+    "$quotient" -> lpOlConstantTerm("tptp_quotient")
+  )
 
   case class lpOlConstantTerm(name : String) extends lpOlTerm{
     override def pretty (implicit prefix : PrettyConfig): String = name
@@ -905,6 +917,22 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpEval(tacticTerm, tab)))
   }
 
+  case class lpOrElse(tacticTerm0: lpStatement, tacticTerm1: lpStatement, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+
+    def addTab(i: Int): lpOrElse = lpOrElse(tacticTerm0, tacticTerm1, tab + i)
+
+    override def pretty(implicit prefix: PrettyConfig): String = {
+      val tabs: String = "\t" * tab
+      s"${tabs}orelse ${tacticTerm0.pretty} ${tacticTerm1.pretty}"
+    }
+
+    val tabs = "\t" * tab
+
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix: PrettyConfig): String = s"${tabs}{orelse ${tacticTerm0.pretty} ${tacticTerm1.pretty}"
+
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpOrElse(tacticTerm0, tacticTerm1, tab)))
+  }
+
   abstract class lpUserTactic extends lpOlTerm {
     override def prf: lpMlType = throw new Exception(s"Error in LP encoding: Trying to generate proof for user tactic")
   }
@@ -951,6 +979,32 @@ object lpDatastructures {
     override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"$tabs{${lpRewrite(rewritePattern0, rewriteTerm, rwRhs).pretty}"
 
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpRewrite(rewritePattern0, rewriteTerm, rwRhs, tab)))
+  }
+
+  /**
+    * Rewrite with a workaround for Lambdapi matching failures involving dependent arrows.
+    *
+    * The ordinary rewrite is attempted first. If it fails, the tactic tries to unfold the
+    * dependent-arrow encoding before retrying the exact same rewrite. The simplification is
+    * optional because a functional equality need not expose a dependent-arrow redex.
+    */
+  case class lpRewriteWithDepArrowFallback(rewritePattern0: Option[lpRewritePattern], rewriteTerm: lpTerm, rwRhs: Boolean = false, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    def addTab(i: Int): lpRewriteWithDepArrowFallback =
+      lpRewriteWithDepArrowFallback(rewritePattern0, rewriteTerm, rwRhs, tab + i)
+
+    private def rewrite(implicit prefix: PrettyConfig): String =
+      lpRewrite(rewritePattern0, rewriteTerm, rwRhs).pretty
+
+    override def pretty(implicit prefix: PrettyConfig): String = {
+      val tabs = "\t" * tab
+      s"${tabs}orelse $rewrite compose try simplify ⤳d; $rewrite"
+    }
+
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix: PrettyConfig): String =
+      s"${"\t" * tab}{${lpRewriteWithDepArrowFallback(rewritePattern0, rewriteTerm, rwRhs).pretty}"
+
+    override def toProofScrips: lpProofScript =
+      lpProofScript(Seq(lpRewriteWithDepArrowFallback(rewritePattern0, rewriteTerm, rwRhs, tab)))
   }
 
   case class lpReflexivity(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
@@ -1007,19 +1061,21 @@ object lpDatastructures {
     override def toProofScrips: lpProofScript = lpProofScript(Seq(lpSetTac(name, dfn, tab)))
   }
 
-  case class lpTacSimplify(tab: Int = 0) extends lpProofScriptStep(tab: Int) {
-    def addTab(i: Int): lpTacSimplify = lpTacSimplify(tab + i)
+  case class lpTacSimplify(ruleOff: Boolean = false, tab: Int = 0) extends lpProofScriptStep(tab: Int) {
+    def addTab(i: Int): lpTacSimplify = lpTacSimplify(ruleOff, tab + i)
+
+    val ruleOffStr = if (ruleOff) " rule off" else ""
 
     override def pretty (implicit prefix : PrettyConfig): String = {
       val tabs: String = "\t" * tab
-      s"${tabs}simplify"
+      s"${tabs}simplify$ruleOffStr"
     }
 
     val tabs = "\t" * tab
 
-    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"${tabs}{simplify"
+    override private[lpDatastructures] def openCurlyBracket(implicit prefix : PrettyConfig): String = s"${tabs}{simplify$ruleOffStr"
 
-    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpTacSimplify(tab)))
+    override def toProofScrips: lpProofScript = lpProofScript(Seq(lpTacSimplify(ruleOff, tab)))
   }
 
   case class lpRepeat(stepToRepeat: lpStatement, tab: Int = 0) extends lpProofScriptStep(tab: Int) {

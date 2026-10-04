@@ -44,7 +44,7 @@ object AccessoryRules {
     }
   }
 
-  def flipStep(litCount: Int, clauseLen: Int, pol: Boolean, eqType: lpOlType, embedInPattern: Option[lpOlTerm => lpOlTerm] = None) = {
+  def flipStep(litCount: Int, clauseLen: Int, pol: Boolean, eqType: lpOlType, embedInPattern: Option[lpOlTerm => lpOlTerm] = None): lpRewrite = {
     val rewritePatternEq = generateClausePattern(Seq(litCount), clauseLen, pol)
     val pattern = if (!embedInPattern.isDefined) rewritePatternEq else embedInPattern.get(rewritePatternEq)
     lpRewrite(Some(lpRewritePattern(pattern)), lpFunctionApp(flipLiteral.name, Seq.empty, Seq(eqType)))
@@ -72,7 +72,7 @@ object AccessoryRules {
   }
 
   // todo: restructure to use lpLiterl as input
-  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int, embedInPattern: Option[lpOlTerm => lpOlTerm] = None): (Seq[lpProofScriptStep], Boolean) = {
+  def transformLiteral(lit0 : lpOlTerm, lit1 : lpOlTerm, litCount: Int, clauseLen:Int, embedInPattern: Option[lpOlTerm => lpOlTerm] = None, useFallback: Boolean = false): (Seq[lpProofScriptStep], Boolean) = {
     Out.lp_debug_info(s"Trying to transform literal ${lit0.pretty} to ${lit1.pretty}")
     // todo: compare modulo alpha conversion?
 
@@ -86,6 +86,15 @@ object AccessoryRules {
       if (!embedInPattern.isDefined) clausePattern
       else embedInPattern.get(clausePattern)
     val rewritePattern = Some(lpRewritePattern(embclausePattern))
+
+    def flipRewriteStep(pol: Boolean, eqType: lpOlType): lpProofScriptStep = {
+      val ordinaryRewrite = flipStep(litCount, clauseLen, pol, eqType, embedInPattern)
+      // Unfolding ⤳d only helps for functional equality and fails if no dependent arrow is present.
+      if (useFallback && eqType.isInstanceOf[lpOlFunctionType]) {
+        lpRewriteWithDepArrowFallback(ordinaryRewrite.rewritePattern0, ordinaryRewrite.rewriteTerm, ordinaryRewrite.rwRhs)
+      }
+      else ordinaryRewrite
+    }
 
     // first we register the two sides of the literals and weather or not the literals are negative
     val (lhs0, rhs0, ty0, pol0, _) = extractSides(lit0)
@@ -151,7 +160,7 @@ object AccessoryRules {
         necessaryRule match {
           case Some(rule) =>
             if (flip) {
-              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty0.get, embedInPattern)
+              allSteps = allSteps :+ flipRewriteStep(necessaryFlip, ty0.get)
               Out.lp_debug_info(s"Applying ${flipLiteral} to flip literal ${lit0.pretty}")
             }
             allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name, Seq()))
@@ -232,7 +241,7 @@ object AccessoryRules {
             allSteps = allSteps :+ lpRewrite(rewritePattern, lpFunctionApp(rule.name, Seq()), true)
             Out.lp_debug_info(s"Applying ${rule.name} to transform non-equational literal to equational form")
             if (flip) {
-              allSteps = allSteps :+ flipStep(litCount, clauseLen, necessaryFlip, ty1.get, embedInPattern)
+              allSteps = allSteps :+ flipRewriteStep(necessaryFlip, ty1.get)
               Out.lp_debug_info(s"Applying ${flipLiteral} to flip literal ${lit0.pretty}")
             }
             true
@@ -255,7 +264,7 @@ object AccessoryRules {
         // the only possible difference is if the sides differ:
         if (lhs0 != lhs1){
           val necessaryFlip = if (pol0) true else false
-          allSteps = allSteps :+ flipStep(litCount,clauseLen,necessaryFlip,ty0.get, embedInPattern)
+          allSteps = allSteps :+ flipRewriteStep(necessaryFlip, ty0.get)
           Out.lp_debug_info(s"Applying ${flipLiteral} to flip literal ${lit0.pretty}")
           true
         }else {

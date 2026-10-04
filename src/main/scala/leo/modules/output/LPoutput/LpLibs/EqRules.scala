@@ -3,6 +3,7 @@ package leo.modules.output.LPoutput.LpLibs
 import leo.modules.output.LPoutput.NewLpDatastructures._
 import leo.modules.output.LPoutput.NewLpDatastructures.Level
 import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig._
+import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder.{LiteralBody, LiteralPatternTarget, WholeLiteral}
 object EqRules {
 
   //todo: do naming uniformly
@@ -11,7 +12,7 @@ object EqRules {
 
     // ** Names as Strings
     // Simplifications of PropExt.lp in Standard Library
-    private val negEq_idem = "¬=_idem"
+    private val negEq_idem = "¬=_irrefl"
     private val orBot = "∨⊥"
     private val eqTop = "=⊤"
     private val topEq = "⊤="
@@ -63,11 +64,13 @@ object EqRules {
   trait LitNormRules {
     def lpConst[L <: Level]: LpTerm[L]
     def applyTo(l: lpLiteralInst): Option[lpLiteralInst]
+    def patternTarget: LiteralPatternTarget
   }
 
   object EqTop extends LitNormRules {
     import AsTerms.lpSimp_eqTop
     def lpConst[L <: Level] = lpSimp_eqTop
+    override val patternTarget: LiteralPatternTarget = LiteralBody
 
     def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Eq(_, lhs, LogicConst.Top) => Some(lpLiteralInst(lhs,true,false))
@@ -79,6 +82,7 @@ object EqRules {
   object TopEq extends LitNormRules {
     import AsTerms.lpSimp_topEq
     def lpConst[L <: Level] = lpSimp_topEq
+    override val patternTarget: LiteralPatternTarget = LiteralBody
 
     def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Eq(_, LogicConst.Top, rhs) => Some(lpLiteralInst(rhs, true, false))
@@ -92,6 +96,7 @@ object EqRules {
     import AsTerms.lpSimp_eqBot
 
     def lpConst[L <: Level] = lpSimp_eqBot
+    override val patternTarget: LiteralPatternTarget = WholeLiteral
 
     def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Eq(_, lhs, LogicConst.Bot) => Some(lpLiteralInst(LogicConst.Not(lhs), false, false))
@@ -105,6 +110,7 @@ object EqRules {
     import AsTerms.lpSimp_botEq
 
     def lpConst[L <: Level] = lpSimp_botEq
+    override val patternTarget: LiteralPatternTarget = WholeLiteral
 
     def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Eq(_, LogicConst.Bot, rhs) => Some(lpLiteralInst(LogicConst.Not(rhs), false, false))
@@ -118,6 +124,7 @@ object EqRules {
     import AsTerms.lpSimp_negEqBot
 
     def lpConst[L <: Level] = lpSimp_negEqBot
+    override val patternTarget: LiteralPatternTarget = WholeLiteral
 
     def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Not(LogicConst.Eq(_, lhs, LogicConst.Bot)) => Some(lpLiteralInst(lhs, true, false))
@@ -131,6 +138,7 @@ object EqRules {
     import AsTerms.lpSimp_negBotEq
 
     def lpConst[L <: Level] = lpSimp_negBotEq
+    override val patternTarget: LiteralPatternTarget = WholeLiteral
 
     def applyTo(l: lpLiteralInst): Option[lpLiteralInst] = l.term match {
       case LogicConst.Not(LogicConst.Eq(_, LogicConst.Bot, rhs)) => Some(lpLiteralInst(rhs, true, false))
@@ -216,9 +224,9 @@ object FunRules {
       */
     def LiftedDecompStepResult(binders: Seq[LpTerm.Var[Level.Obj]], argTy: OlMonoType, resultTy: OlMonoType, lhsArg: LpTerm[Level.Obj], rhsArg: LpTerm[Level.Obj], lhsFun: LpTerm[Level.Obj], rhsFun: LpTerm[Level.Obj]): (lpLiteralInst, Vector[lpLiteralInst]) = {
       val funTy = OlMonoType.Fun(Seq(argTy,resultTy))
-      val initial = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(lhsFun,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(rhsFun,Seq(Arg.Explicit(rhsArg)))))
-      val residual = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,funTy), lpTermBuilder.lam(binders,lhsFun), lpTermBuilder.lam(binders,rhsFun))
-      val argLit = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
+      val initial = lpLiteralInst.equality(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(lhsFun,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(rhsFun,Seq(Arg.Explicit(rhsArg)))), polarity = false)
+      val residual = lpLiteralInst.equality(lpTermBuilder.funTy(binders,funTy), lpTermBuilder.lam(binders,lhsFun), lpTermBuilder.lam(binders,rhsFun), polarity = false)
+      val argLit = lpLiteralInst.equality(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg), polarity = false)
       (initial,Vector(residual,argLit))
     }
 
@@ -245,8 +253,8 @@ object FunRules {
       *   ↦ ¬((λ xs. s xs) = (λ xs. t xs))
       */
     def LiftedDecompSingleResult(binders: Seq[LpTerm.Var[Level.Obj]], argTy: OlMonoType, resultTy: OlMonoType, lhsArg: LpTerm[Level.Obj], rhsArg: LpTerm[Level.Obj], hd: LpTerm[Level.Obj]): (lpLiteralInst, Vector[lpLiteralInst]) = {
-      val initial = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(rhsArg)))))
-      val argLit = lpTermBuilder.negEq(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg))
+      val initial = lpLiteralInst.equality(lpTermBuilder.funTy(binders,resultTy), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(lhsArg)))), lpTermBuilder.lam(binders,LpTerm.App(hd,Seq(Arg.Explicit(rhsArg)))), polarity = false)
+      val argLit = lpLiteralInst.equality(lpTermBuilder.funTy(binders,argTy), lpTermBuilder.lam(binders,lhsArg), lpTermBuilder.lam(binders,rhsArg), polarity = false)
       (initial,Vector(argLit))
     }
   }

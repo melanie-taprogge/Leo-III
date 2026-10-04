@@ -1492,8 +1492,15 @@ object Miniscope extends CalculusRule {
   import leo.datastructures.Term._
   import leo.modules.HOLSignature._
 
-  type QUANT_LIST = Vector[(Boolean, Type)]
-  type QUANT_ITERATOR = Iterator[(Boolean, Type)]
+  type QUANT_LIST = Vector[MiniscopeBinder]
+  type QUANT_ITERATOR = Iterator[MiniscopeBinder]
+
+  private final case class PushResult(retained: Vector[MiniscopeBinder],
+                                      leftQuants: QUANT_LIST,
+                                      leftSubst: Subst,
+                                      rightQuants: QUANT_LIST,
+                                      rightSubst: Subst,
+                                      decisions: Vector[MiniscopePushDecision])
 
   type PUSH_TYPE = Int
   @inline final val BOTH : PUSH_TYPE = 3
@@ -1505,15 +1512,21 @@ object Miniscope extends CalculusRule {
   final val name = "miniscope"
 
   final def apply(t : Term, pol : Boolean)(implicit sig: Signature): Term = {
-    apply0(t, pol, Vector[(Boolean, Type)]())
+    applyWithTrace(t, pol)._1
+  }
+
+  /** Run the ordinary Miniscope traversal while retaining its source decisions. */
+  final def applyWithTrace(t: Term, pol: Boolean)(implicit sig: Signature): (Term, MiniscopeTrace) = {
+    val observations = Vector.newBuilder[MiniscopeObservation]
+    val result = apply0(t, pol, Vector.empty, Position.root, observations)
+    (result, MiniscopeTrace(observations.result()))
   }
 
   /**
     *
     * Performs miniscoping.
-    * quants is a stack of removed quantifiers, where
-    * (true, ty) --> Forall(\(ty)...)
-    * (false, ty) --> Exists(\(ty)...)
+    * quants is a stack of removed quantifiers. Its storedUniversal member
+    * retains the previous polarity-adjusted Boolean used by quantToTerm.
     *
     * @param t The term to miniscope
     * @param pol The current polarity
@@ -1521,28 +1534,62 @@ object Miniscope extends CalculusRule {
     * @param sig the signature
     * @return a miniscoped term
     */
-  private def apply0(t : Term, pol : Boolean, quants : QUANT_LIST)(implicit sig : Signature): Term = {
+  private def apply0(t : Term, pol : Boolean, quants : QUANT_LIST,
+                     sourcePosition: Position,
+                     observations: scala.collection.mutable.Builder[MiniscopeObservation, Vector[MiniscopeObservation]])
+                    (implicit sig : Signature): Term = {
     t match {
-      case Exists(ty :::> body) => apply0(body, pol, quants :+ (!pol, ty))
-      case Forall(ty :::> body) => apply0(body, pol, quants :+ (pol, ty))
-      case Not(a) => Not(apply0(a, !pol, quants))
+      case Exists(ty :::> body) =>
+        val binder = MiniscopeBinder(sourcePosition, sourceUniversal = false, storedUniversal = !pol, typ = ty)
+        apply0(body, pol, quants :+ binder, sourcePosition.argPos(2).abstrPos, observations)
+      case Forall(ty :::> body) =>
+        val binder = MiniscopeBinder(sourcePosition, sourceUniversal = true, storedUniversal = pol, typ = ty)
+        apply0(body, pol, quants :+ binder, sourcePosition.argPos(2).abstrPos, observations)
+      case Not(a) =>
+        quants.indices.foreach { ordinal =>
+          observations += MiniscopeCrossNegation(sourcePosition, ordinal)
+        }
+        Not(apply0(a, !pol, quants, sourcePosition.argPos(1), observations))
       case (a & b) =>
-        val (rest, leftQ, leftSub, rightQ, rightSub) = pushQuants(a, b, quants, pol, pol)
-        val amini = apply0(a.substitute(leftSub).betaNormalize, pol, leftQ)
-        val bmini = apply0(b.substitute(rightSub).betaNormalize, pol, rightQ)
-        prependQuantList(&(amini, bmini), pol, rest)
+        val pushed = pushQuants(a, b, quants, pol, pol)
+        recordPushDecisions(sourcePosition, quants.size, pushed.decisions, observations)
+        val amini = apply0(a.substitute(pushed.leftSubst).betaNormalize, pol,
+          pushed.leftQuants, sourcePosition.argPos(1), observations)
+        val bmini = apply0(b.substitute(pushed.rightSubst).betaNormalize, pol,
+          pushed.rightQuants, sourcePosition.argPos(2), observations)
+        prependQuantList(&(amini, bmini), pol, pushed.retained.iterator)
       case (a ||| b) =>
-        val (rest, leftQ, leftSub, rightQ, rightSub) = pushQuants(a, b, quants, pol, !pol)
-        val amini = apply0(a.substitute(leftSub).betaNormalize, pol, leftQ)
-        val bmini = apply0(b.substitute(rightSub).betaNormalize, pol, rightQ)
-        prependQuantList(|||(amini, bmini), pol, rest)
+        val pushed = pushQuants(a, b, quants, pol, !pol)
+        recordPushDecisions(sourcePosition, quants.size, pushed.decisions, observations)
+        val amini = apply0(a.substitute(pushed.leftSubst).betaNormalize, pol,
+          pushed.leftQuants, sourcePosition.argPos(1), observations)
+        val bmini = apply0(b.substitute(pushed.rightSubst).betaNormalize, pol,
+          pushed.rightQuants, sourcePosition.argPos(2), observations)
+        prependQuantList(|||(amini, bmini), pol, pushed.retained.iterator)
       case Impl(a, b) =>
-        val (rest, leftQ, leftSub, rightQ, rightSub) = pushQuants(a, b, quants, pol, !pol)
-        val amini = apply0(a.substitute(leftSub), !pol, leftQ)
-        val bmini = apply0(b.substitute(rightSub), pol, rightQ)
-        prependQuantList(Impl(amini, bmini), pol, rest)
+        val pushed = pushQuants(a, b, quants, pol, !pol)
+        recordPushDecisions(sourcePosition, quants.size, pushed.decisions, observations)
+        val amini = apply0(a.substitute(pushed.leftSubst), !pol,
+          pushed.leftQuants, sourcePosition.argPos(1), observations)
+        val bmini = apply0(b.substitute(pushed.rightSubst), pol,
+          pushed.rightQuants, sourcePosition.argPos(2), observations)
+        prependQuantList(Impl(amini, bmini), pol, pushed.retained.iterator)
       case other =>
         prependQuantList(other, pol, quants.reverseIterator)
+    }
+  }
+
+  /** Decisions are tested inner-to-outer; ordinals name the outer-to-inner prefix. */
+  private def recordPushDecisions(sourcePosition: Position,
+                                  pendingCount: Int,
+                                  decisions: Vector[MiniscopePushDecision],
+                                  observations: scala.collection.mutable.Builder[MiniscopeObservation, Vector[MiniscopeObservation]]): Unit = {
+    decisions.zipWithIndex.foreach { case (decision, testedIndex) =>
+      val ordinal = pendingCount - 1 - testedIndex
+      decision.movement match {
+        case MiniscopeNoPush => observations += MiniscopeStopAtConnective(sourcePosition, ordinal)
+        case movement => observations += MiniscopePushAtConnective(sourcePosition, ordinal, movement)
+      }
     }
   }
 
@@ -1555,16 +1602,25 @@ object Miniscope extends CalculusRule {
     * @param and if(true) op = AND else op = OR
     * @return
     */
-  @inline private final def pushQuants(left : Term, right : Term, quants : QUANT_LIST, pol : Boolean, and : Boolean) : (QUANT_ITERATOR, QUANT_LIST, Subst, QUANT_LIST, Subst) = {
+  @inline private final def pushQuants(left : Term, right : Term, quants : QUANT_LIST, pol : Boolean, and : Boolean) : PushResult = {
     val it = quants.reverseIterator
     var leftQ : QUANT_LIST = Vector() // Quantifiers pushed left
     var leftSubst : Seq[Int] = Seq()  // Substitution (reversed) removed Quants left
     var rightQ : QUANT_LIST = Vector()  // Quantifiers pushed right
     var rightSubst : Seq[Int] = Seq()  // Substitution (reversed) removed Quants right
+    val decisions = Vector.newBuilder[MiniscopePushDecision]
     var loop = 1
     while(it.hasNext){
-      val q@(quant , ty) = it.next()
-      val push = testPush(left, right, loop, quant, and)
+      val q = it.next()
+      val (occurrences, push) = testPush(left, right, loop, q.storedUniversal, and)
+      val movement = push match {
+        case NONE => MiniscopeNoPush
+        case LEFT => MiniscopePushLeft
+        case RIGHT => MiniscopePushRight
+        case BOTH => MiniscopePushBoth
+      }
+      decisions += MiniscopePushDecision(q, loop,
+        (occurrences & LEFT) == LEFT, (occurrences & RIGHT) == RIGHT, movement)
       if(push != 0) {
         if ((push & LEFT) == LEFT) leftQ = q +: leftQ // Push the quantifier left if possible
         val nFrontl = leftQ.size
@@ -1576,11 +1632,13 @@ object Miniscope extends CalculusRule {
       } else {
         val lSub = revListToSubst(leftSubst, leftQ.size)
         val rSub = revListToSubst(rightSubst, rightQ.size)
-        return (Iterator(q)++it, leftQ, lSub, rightQ, rSub)
+        return PushResult((Iterator(q) ++ it).toVector, leftQ, lSub, rightQ, rSub,
+          decisions.result())
       }
       loop += 1
     }
-    return (it, leftQ, revListToSubst(leftSubst, leftQ.size), rightQ, revListToSubst(rightSubst, rightQ.size))
+    PushResult(Vector.empty, leftQ, revListToSubst(leftSubst, leftQ.size),
+      rightQ, revListToSubst(rightSubst, rightQ.size), decisions.result())
   }
 
   @inline private final def revListToSubst(preSubst : Seq[Int], shift : Int) = {
@@ -1592,13 +1650,13 @@ object Miniscope extends CalculusRule {
     s
   }
 
-  @inline private final def testPush(left : Term, right : Term, bound : Int, quant : Boolean, and : Boolean) : PUSH_TYPE = {
+  @inline private final def testPush(left : Term, right : Term, bound : Int, quant : Boolean, and : Boolean) : (PUSH_TYPE, PUSH_TYPE) = {
     var result = 0
     if (left.looseBounds.contains(bound)) result |= 1
     if (right.looseBounds.contains(bound)) result |= 2
 
-    if((!quant && and || quant && !and) && result == 3) 0
-    else result
+    val push = if((!quant && and || quant && !and) && result == 3) 0 else result
+    (result, push)
   }
 
 
@@ -1608,8 +1666,8 @@ object Miniscope extends CalculusRule {
   private def prependQuantList(t : Term, pol : Boolean, quants : QUANT_ITERATOR) : Term = {
     var itTerm : Term = t
     while(quants.hasNext){
-      val (q, ty) = quants.next()
-      itTerm = quantToTerm(q, pol)(\(ty)(itTerm))
+      val binder = quants.next()
+      itTerm = quantToTerm(binder.storedUniversal, pol)(\(binder.typ)(itTerm))
     }
     itTerm
   }

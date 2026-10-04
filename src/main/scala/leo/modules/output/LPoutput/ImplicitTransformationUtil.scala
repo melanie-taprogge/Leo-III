@@ -1,13 +1,13 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.{LitNorm, Literal, LiteralInfo, LiteralTransformation}
+import leo.datastructures.{LitNorm, LiteralInfo, LiteralTransformation}
 import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.{lpSimp_botEq, lpSimp_eqBot, lpSimp_eqTop, lpSimp_negBotEq, lpSimp_negEqBot, lpSimp_topEq}
 import leo.modules.output.LPoutput.LpLibs.EqRules._
 import leo.modules.output.LPoutput.LpLibs.ND.Terms.eqSym
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Rewrite, Side}
-import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpTerm, lpLiteralInst}
+import leo.modules.output.LPoutput.NewLpDatastructures.{HolBaseTypes, Level, LogicConst, LpTerm, lpLiteralInst}
 
 object ImplicitTransformationUtil {
 
@@ -53,6 +53,78 @@ object ImplicitTransformationUtil {
     case LitNorm.BotR => EqBot
     case LitNorm.NegBotL => NegBotEq
     case LitNorm.NegBotR => NegEqBot
+  }
+
+  /**
+    * Apply the literal ordering/normalisation operations recorded by Leo to an
+    * encoded clause. This is the forward counterpart of
+    * `reconstructBeforeLiteralNormalisation`.
+    */
+  def applyLiteralTransformations(lits: Seq[lpLiteralInst],
+                                  transformations: LiteralTransformation): Option[Seq[lpLiteralInst]] = {
+    val normalisationMap = transformations.normalizedEq.toMap
+    if (transformations.transforamtionsHappened) {
+      Some(lits.zipWithIndex.map { case (lit, index) =>
+        if (transformations.flippedLits.contains(index)) {
+          lit.flipIfEq
+        } else if (normalisationMap.contains(index)) {
+          val appliedRule = litNorm2lpRule(normalisationMap(index))
+          Out.lp_debug_info(s"trying to apply normalisation $appliedRule to ${lit.term}")
+          val transformedLit = appliedRule.applyTo(lit)
+          Out.lp_debug_info(s"resulting in $transformedLit")
+          transformedLit match {
+            case Some(result) => result
+            case None => return None
+          }
+        } else {
+          lit
+        }
+      })
+    } else Some(lits)
+  }
+
+  /**
+    * Reconstruct the equational literals that existed immediately before
+    * `Literal.mkOrdered` normalized the result of a rewrite step.
+    */
+  def reconstructBeforeLiteralNormalisation(lits: Seq[lpLiteralInst],
+                                             transformations: LiteralTransformation): Either[String, Vector[lpLiteralInst]] = {
+    def at(index: Int): Either[String, lpLiteralInst] =
+      if (lits.isDefinedAt(index)) Right(lits(index))
+      else Left(s"literal transformation index $index is outside a clause of length ${lits.length}")
+
+    val afterNormalisation = transformations.normalizedEq.foldLeft[Either[String, Vector[lpLiteralInst]]](Right(lits.toVector)) {
+      case (left @ Left(_), _) => left
+      case (Right(current), (index, mode)) =>
+        at(index).flatMap { normalizedLit =>
+          normalizedLit.unsignedTerm.toRight(s"negative literal does not have the expected encoded negation: ${normalizedLit.term}").flatMap { body =>
+            def booleanEquality(lhs: LpTerm[Level.Obj],
+                                rhs: LpTerm[Level.Obj],
+                                polarity: Boolean): lpLiteralInst =
+              lpLiteralInst.equality(HolBaseTypes.O, lhs, rhs, polarity)
+
+            mode match {
+              case LitNorm.TopL => Right(current.updated(index, booleanEquality(LogicConst.Top, body, normalizedLit.polarity)))
+              case LitNorm.TopR => Right(current.updated(index, booleanEquality(body, LogicConst.Top, normalizedLit.polarity)))
+              case LitNorm.BotL if !normalizedLit.polarity => Right(current.updated(index, booleanEquality(LogicConst.Bot, body, polarity = true)))
+              case LitNorm.BotR if !normalizedLit.polarity => Right(current.updated(index, booleanEquality(body, LogicConst.Bot, polarity = true)))
+              case LitNorm.NegBotL if normalizedLit.polarity => Right(current.updated(index, booleanEquality(LogicConst.Bot, body, polarity = false)))
+              case LitNorm.NegBotR if normalizedLit.polarity => Right(current.updated(index, booleanEquality(body, LogicConst.Bot, polarity = false)))
+              case _ => Left(s"literal $index has polarity ${normalizedLit.polarity}, incompatible with normalization mode $mode")
+            }
+          }
+        }
+    }
+
+    afterNormalisation.flatMap { current =>
+      transformations.flippedLits.foldLeft[Either[String, Vector[lpLiteralInst]]](Right(current)) {
+        case (left @ Left(_), _) => left
+        case (Right(acc), index) =>
+          if (!acc.isDefinedAt(index)) Left(s"literal flip index $index is outside a clause of length ${acc.length}")
+          else if (!acc(index).eq) Left(s"literal $index was recorded as flipped but is not equational")
+          else Right(acc.updated(index, acc(index).flipIfEq))
+      }
+    }
   }
 
   /**
@@ -111,12 +183,13 @@ object ImplicitTransformationUtil {
     //val polarities = goalLits.map(_.polarity)
 
     // helper for looking up the mapped index and polarity of a given index
-    def generatePatternInfo(id: Int): PatternBuilder.PatternInfo = {
+    def generatePatternInfo(id: Int,
+                            target: PatternBuilder.LiteralPatternTarget): PatternBuilder.PatternInfo = {
       val idxInGoal = idxMap(id)
-      if (goalLitPolarities.isDefinedAt(idxInGoal)) PatternBuilder.PatternInfo(idxInGoal, None, goalLitPolarities(idxInGoal))
+      if (goalLitPolarities.isDefinedAt(idxInGoal)) PatternBuilder.PatternInfo(idxInGoal, None, goalLitPolarities(idxInGoal), target)
       else {
         Out.lp_debug_info(s"Warning: trying to generate pattern for literal with index $id, which is out of bounds for goal literals. Using default polarity positive")
-        PatternBuilder.PatternInfo(idxInGoal, None, true)
+        PatternBuilder.PatternInfo(idxInGoal, None, true, target)
       }
     }
 
@@ -128,8 +201,9 @@ object ImplicitTransformationUtil {
       Out.lp_debug_info(s"need to normalize: ${addInfo.normalizedEq}")
       addInfo.normalizedEq.map { pair =>
         val (pos, normMode) = pair
-        val rule: LpTerm[Level.Meta] = litNorm2lpRule(normMode).lpConst
-        val patternInfo = generatePatternInfo(pos)
+        val normalisationRule = litNorm2lpRule(normMode)
+        val rule: LpTerm[Level.Meta] = normalisationRule.lpConst
+        val patternInfo = generatePatternInfo(pos, normalisationRule.patternTarget)
         val pattern = PatternBuilder.generateClausePattern(Seq(patternInfo), clauseLen)
         Rewrite(Some(pattern), rule, Side.Left)
       }
@@ -143,7 +217,7 @@ object ImplicitTransformationUtil {
     val allFlipSteps = (addInfo.flippedLits).sorted
     val maybeFlipStep: Seq[Rewrite] = if (allFlipSteps.nonEmpty) {
       Out.lp_debug_info(s"the following literals need to be flipped: $allFlipSteps")
-      val flipInfo = allFlipSteps.map(generatePatternInfo)
+      val flipInfo = allFlipSteps.map(generatePatternInfo(_, PatternBuilder.LiteralBody))
       Out.lp_debug_info(s"pattern info: $flipInfo")
       val flipPatterns = flipInfo.map(flipInfo0 => PatternBuilder.generateClausePattern(Seq(flipInfo0), clauseLen))
       flipPatterns.map(flipPattern0 => Rewrite(Some(flipPattern0), eqSym))

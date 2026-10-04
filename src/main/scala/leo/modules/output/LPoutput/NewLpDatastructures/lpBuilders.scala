@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput.NewLpDatastructures
 
 import LogicConst._
 import leo.Out
-import leo.datastructures.{Clause, fuseMaps}
+import leo.datastructures.{Clause, Type, fuseMaps}
 import leo.modules.output.LPoutput.NewLpDatastructures.Lifting.{ProofTerm, liftOlVars}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Var
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.Pi
@@ -65,6 +65,48 @@ object lpTermBuilder {
   def app(f: LpTerm[Level.Obj], args: Seq[LpTerm[Level.Obj]]): LpTerm[Level.Obj] =
     if (args.isEmpty) f else LpTerm.App(f,args.map(Arg.Explicit[Level.Obj]))
 
+  /** Substitute a free, named object-level variable without crossing a same-named binder. */
+  def substituteVariable(term: LpTerm[Level.Obj],
+                         variable: Name,
+                         replacement: LpTerm[Level.Obj]): LpTerm[Level.Obj] = term match {
+    case current @ LpTerm.Var(name, _) => if (name == variable) replacement else current
+    case current @ LpTerm.Const(_) => current
+    case current @ LpTerm.Wildcard() => current
+    case current @ LpTerm.TptpInt(_) => current
+    case current @ LpTerm.LpInt(_) => current
+    case current @ LpTerm.TptpRational(_, _) => current
+    case current @ LpTerm.TptpReal(_, _, _) => current
+    case LpTerm.LpList(elements) =>
+      LpTerm.LpList(elements.map(substituteVariable(_, variable, replacement)))
+    case current @ LpTerm.Lam((binderName, _), _) if binderName == variable => current
+    case LpTerm.Lam(binder, body) =>
+      LpTerm.Lam(binder, substituteVariable(body, variable, replacement))
+    case LpTerm.App(function, args) =>
+      LpTerm.App(
+        substituteVariable(function, variable, replacement),
+        args.map {
+          case Arg.Explicit(argument) => Arg.Explicit(substituteVariable(argument, variable, replacement))
+          case Arg.Implicit(argument) => Arg.Implicit(substituteVariable(argument, variable, replacement))
+          case typeArgument => typeArgument
+        }
+      )
+  }
+
+  /** Apply arguments and beta-reduce the leading object-level lambda binders. */
+  def betaApply(function: LpTerm[Level.Obj],
+                args: Seq[Arg[Level.Obj]]): LpTerm[Level.Obj] = {
+    def applyRemaining(current: LpTerm[Level.Obj], remaining: Seq[Arg[Level.Obj]]): LpTerm[Level.Obj] =
+      (current, remaining) match {
+        case (LpTerm.Lam((binderName, _), body), Arg.Explicit(argument) +: tail) =>
+          applyRemaining(substituteVariable(body, binderName, argument), tail)
+        case (LpTerm.Lam((binderName, _), body), Arg.Implicit(argument) +: tail) =>
+          applyRemaining(substituteVariable(body, binderName, argument), tail)
+        case (_, Seq()) => current
+        case _ => LpTerm.App(current, remaining)
+      }
+    applyRemaining(function, args)
+  }
+
   /** Reference to a proof-local Lambdapi symbol. */
   def localObj(name: Name): LpTerm[Level.Obj] =
     LpTerm.Const[Level.Obj](SymRef.LP(QName.local(name.value)))
@@ -86,10 +128,6 @@ object lpTermBuilder {
   /** Build the object-level function type represented by lambda-wrapping a term of `bodyTy`. */
   def funTy(binders: Seq[Var[Level.Obj]], bodyTy: OlMonoType): OlMonoType =
     if (binders.isEmpty) bodyTy else OlMonoType.Fun(binders.map(olTy) :+ bodyTy)
-
-  /** Build a negated equational literal. */
-  def negEq(ty: OlMonoType, lhs: LpTerm[Level.Obj], rhs: LpTerm[Level.Obj]): lpLiteralInst =
-    lpLiteralInst(Not(Eq(ty,lhs,rhs)),polarity = false,eq = true)
 
   /** Build a proof type of the form `π premise -> π (l1 ∨ ... ∨ ln)`. */
   def proofArrow(premise: lpLiteralInst, derived: Seq[lpLiteralInst]): LpType =
@@ -120,6 +158,21 @@ case class lpLiteralInst(term: LpTerm[Level.Obj], polarity: Boolean, eq: Boolean
     else term0
   }
 
+  /**
+    * The proposition represented by this literal without its polarity wrapper.
+    *
+    * A negative encoded literal is expected to store its proposition below one
+    * leading negation. `None` reports a malformed value instead of silently
+    * returning the already-negated term.
+    */
+  def unsignedTerm: Option[LpTerm[Level.Obj]] = {
+    if (polarity) Some(term)
+    else term match {
+      case LogicConst.Not(body) => Some(body)
+      case _ => None
+    }
+  }
+
   def flipIfEq: lpLiteralInst = {
     val strippedEq = stripLeadingNeg(term)
     strippedEq._1 match {
@@ -131,8 +184,31 @@ case class lpLiteralInst(term: LpTerm[Level.Obj], polarity: Boolean, eq: Boolean
     }
   }
 
+  /** Type of the sides of an equational literal, ignoring leading negations. */
+  def equalitySideType: Option[OlMonoType] = {
+    stripLeadingNeg(term)._1 match {
+      case LogicConst.Eq(ty, _, _) => Some(ty)
+      case _ => None
+    }
+  }
+
   def termEq(lit2: lpLiteralInst) = {
     this.term == lit2.term
+  }
+}
+
+object lpLiteralInst {
+  /** Construct an equational literal; `sideType` is the type of `lhs` and `rhs`. */
+  def equality(sideType: OlMonoType,
+               lhs: LpTerm[Level.Obj],
+               rhs: LpTerm[Level.Obj],
+               polarity: Boolean): lpLiteralInst = {
+    val equality = LogicConst.Eq(sideType, lhs, rhs)
+    lpLiteralInst(
+      if (polarity) equality else LogicConst.Not(equality),
+      polarity,
+      eq = true
+    )
   }
 }
 
@@ -172,8 +248,8 @@ object lpClauseInst {
     lpClauseInst(disjunction,lits,vars,mlTerm)
   }
 
-  private def apply_to_single(cl: Clause, fullBvarsMap: Map[Int, String]) = {
-    val encCls = ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap)
+  private def apply_to_single(cl: Clause, fullBvarsMap: Map[Int, String], suppressReduction: Boolean = false) = {
+    val encCls = ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap, suppressReduction = suppressReduction)
     val encVars = TermEncoding.vars2Lp(cl.implicitlyBound, fullBvarsMap).map(Left(_))
     lpClauseInst(encCls,encVars)
   }
@@ -183,9 +259,22 @@ object lpClauseInst {
     * clause instances and a map of all implicitly bound variables.
     */
   def apply_to_set(cls: Seq[Clause]): (Map[Int, String], Seq[lpClauseInst]) = {
-    val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
+    apply_to_set(cls, Seq.empty)
+  }
+
+  /**
+    * Encode clauses with additional variables that must use the same Lambdapi
+    * names, for example variables occurring in raw proof-trace clauses.
+    * `suppressReductionAt` selects clauses whose term structure is retained.
+    */
+  def apply_to_set(cls: Seq[Clause],
+                   additionalImplicitlyBound: Seq[(Int, Type)],
+                   suppressReductionAt: Set[Int] = Set.empty): (Map[Int, String], Seq[lpClauseInst]) = {
+    val allImpBoundVars = (cls.flatMap(_.implicitlyBound) ++ additionalImplicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
-    val encCls = cls.map(cl => apply_to_single(cl, fullBvarsMap))
+    val encCls = cls.zipWithIndex.map { case (cl, index) =>
+      apply_to_single(cl, fullBvarsMap, suppressReductionAt.contains(index))
+    }
     (fullBvarsMap, encCls)
   }
 

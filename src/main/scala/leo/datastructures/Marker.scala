@@ -204,6 +204,20 @@ case class AddInfoPara(withClause: Clause,
                        preSimpClause: Clause,
                        typeSubstNeeded: Boolean)
 
+/** Exact occurrence changed by one application of a rewrite rule. */
+case class RewriteOccurrence(literalIndex: Int,
+                             side: Literal.Side,
+                             position: Position,
+                             redex: Term,
+                             contractum: Term)
+
+/** One ordered rewrite application and the exact proof parent justifying it. */
+case class AddInfoRewrite(rewriteRuleParentId: Long,
+                          rewriteRule: Clause,
+                          origTermSubst: Subst = Subst.id,
+                          origTypeSubst: Subst = Subst.id,
+                          occurrence: Option[RewriteOccurrence] = None)
+
 sealed trait UniTermRhs
 case class UniTermByTerm(term: Term,
                          tyVarCount: Int,
@@ -311,6 +325,8 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
                         unencodableCNF: Boolean = false,
                         cnfInfo: AddInfoCnf = AddInfoCnf(),
                         cnfConjInfo: Option[AddInfoCnfConj] = None){
+  /** Source decisions for a changed Miniscope result in the uncompressed proof. */
+  var miniscopeTrace: Option[MiniscopeTrace] = None
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
   var addInfoBoolExt: Set[(Literal,Seq[Literal])] = Set.empty
   var addInfoSimp: Seq[(Seq[Int],Int)] = Seq.empty
@@ -322,7 +338,10 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
   //var addInfoUni: (Seq[(Int,Any,Int,Map[Int,String])],Seq[(Int,Any)]) = (Seq.empty,Seq.empty)
   var addInfoUni: AddInfoUni = AddInfoUni()
   var addInfoDetUni: AddInfoDetUni = AddInfoDetUni()
-  var addInfoRewriting: Option[Clause] = None
+  var addInfoRw: Seq[AddInfoRewrite] = Seq.empty
+  /** Raw clause after all rewrites, before literal ordering and normalization. */
+  var addInfoRwFinalResult: Option[RawClause] = None
+  var addInfoRwLiteralTransformation: LiteralTransformation = LiteralTransformation()
   var addInfoLiftEq: Seq[Seq[Int]] = Seq.empty
 }
 

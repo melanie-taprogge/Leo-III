@@ -1886,11 +1886,12 @@ package inferenceControl {
 
       val lit = cl.cl.lits.head
       val term = lit.left
-      val resultterm = Miniscope.apply(term, lit.polarity)
-      val result = if (term != resultterm)
-          AnnotatedClause(Clause(Literal(resultterm, lit.polarity)), InferredFrom(Miniscope, cl), cl.properties)
-        else
-          cl
+      val (resultterm, miniscopeTrace) = Miniscope.applyWithTrace(term, lit.polarity)
+      val result = if (term != resultterm) {
+        val furtherInfo = FurtherInfo()
+        furtherInfo.miniscopeTrace = Some(miniscopeTrace)
+        AnnotatedClause(Clause(Literal(resultterm, lit.polarity)), InferredFrom(Miniscope, cl), cl.properties, furtherInfo)
+      } else cl
       Out.trace(s"Miniscope Result: ${result.pretty(sig)}")
       result
     }
@@ -2258,6 +2259,10 @@ package inferenceControl {
       }
     }
     type RewriteTable = Map[Term, (Term, AnnotatedClause)]
+    private final case class RewrittenLiteral(ordered: Literal,
+                                                raw: RawLiteral,
+                                                literalInfo: LiteralInfo)
+
     final def rewriteSimp(cw: AnnotatedClause)(implicit state: State[AnnotatedClause]): AnnotatedClause = {
       implicit val sig: Signature = state.signature
       Out.trace(s"[Rewriting] Processing ${cw.id}")
@@ -2296,13 +2301,33 @@ package inferenceControl {
         }.toMap
         val vargen = freshVarGen(cl.cl)
         val rewriteRulesUsed: mutable.Set[AnnotatedClause] = mutable.Set.empty
+        val rewriteInfo: mutable.ArrayBuffer[AddInfoRewrite] = mutable.ArrayBuffer.empty
         leo.Out.finest(s"vargen in rewriteSimp: ${vargen.existingVars.toString()}")
-        val newLits = cl.cl.lits.map(lit => rewriteLit(vargen, lit, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig))
+        val rewrittenLits = cl.cl.lits.zipWithIndex.map { case (lit, literalIndex) =>
+          rewriteLit(vargen, lit, literalIndex, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, rewriteInfo)(sig)
+        }
+        // extract normalized rewritten literals
+        val newLits = rewrittenLits.map(_.ordered)
         val newCl = Clause(newLits)
-        val information: FurtherInfo = cl.furtherInfo
+
+        // construct the additional information needed for the Lambdapi encoding
+        val finalRawClause = RawClause(rewrittenLits.map(_.raw))
+
         val result0 = if (rewriteRulesUsed.isEmpty) cl else {
           leo.Out.finest(s"Rewriting happend!")
-          information.addInfoRewriting = Some(newCl)
+          // Rewrite metadata is specific to this inference. Reusing the mutable
+          // FurtherInfo of the rewritten parent lets later RewriteSimp steps
+          // overwrite the substitutions needed to reconstruct this proof step.
+          val information = FurtherInfo()
+          information.addInfoRw = rewriteInfo.toSeq
+          information.addInfoRwFinalResult = Some(finalRawClause)
+          information.addInfoRwLiteralTransformation = rewrittenLits.zipWithIndex.foldLeft(LiteralTransformation()) {
+            case (acc, (rewrittenLit, index)) if rewrittenLit.literalInfo.flip =>
+              acc.copy(flippedLits = acc.flippedLits :+ index)
+            case (acc, (rewrittenLit, index)) if rewrittenLit.literalInfo.normalize.isDefined =>
+              acc.copy(normalizedEq = acc.normalizedEq :+ (index -> rewrittenLit.literalInfo.normalize.get))
+            case (acc, _) => acc
+          }
           val newAnnotation = if (rewriteRulesUsed.exists(_.cl.lits.head.left.ty == HOLSignature.o))
             deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified | ClauseAnnotation.PropFuncExt,cl.properties)
           else deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties)
@@ -2324,13 +2349,38 @@ package inferenceControl {
     private final def rewriteClause(cl: AnnotatedClause)(state: State[AnnotatedClause]): AnnotatedClause = {
       rewriteClause(cl, state.groundRewriteRules, state.nonGroundRewriteRules)(state.signature)
     }
-    private def rewriteLit(vargen: FreshVarGen, lit: Literal, groundRewriteTable: RewriteTable, nonGroundRewriteTable: RewriteTable, rewriteRulesUsed: mutable.Set[AnnotatedClause])(sig: Signature): Literal = {
-      if (lit.equational) Literal.mkOrdered(rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), rewriteTerm(vargen, lit.right, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), lit.polarity)(sig)._1
-      else Literal.apply(rewriteTerm(vargen, lit.left, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed)(sig), lit.polarity)
+    private def rewriteLit(vargen: FreshVarGen,
+                           lit: Literal,
+                           literalIndex: Int,
+                           groundRewriteTable: RewriteTable,
+                           nonGroundRewriteTable: RewriteTable,
+                           rewriteRulesUsed: mutable.Set[AnnotatedClause],
+                           rewriteInfo: mutable.ArrayBuffer[AddInfoRewrite])(sig: Signature): RewrittenLiteral = {
+      if (lit.equational) {
+        val rewrittenLeft = rewriteTerm(vargen, lit.left, literalIndex, Literal.leftSide, Position.root, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, rewriteInfo)(sig)
+        val rewrittenRight = rewriteTerm(vargen, lit.right, literalIndex, Literal.rightSide, Position.root, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, rewriteInfo)(sig)
+        val rawLiteral = RawEqLiteral(rewrittenLeft, rewrittenRight, lit.polarity)
+        val (orderedLiteral, literalInfo) = Literal.mkOrdered(rewrittenLeft, rewrittenRight, lit.polarity)(sig)
+        RewrittenLiteral(orderedLiteral, rawLiteral, literalInfo)
+      } else {
+        val rewrittenTerm = rewriteTerm(vargen, lit.left, literalIndex, Literal.leftSide, Position.root, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, rewriteInfo)(sig)
+        val rewrittenLiteral = Literal(rewrittenTerm, lit.polarity)
+        val rawLiteral = RawNonEqLiteral(rewrittenTerm, lit.polarity)
+        RewrittenLiteral(rewrittenLiteral, rawLiteral, LiteralInfo(flip = false, normalize = None))
+      }
     }
 
 
-    private def rewriteTerm(vargen: FreshVarGen, term: Term, groundRewriteTable: RewriteTable, nonGroundRewriteTable: RewriteTable, rewriteRulesUsed: mutable.Set[AnnotatedClause], depth: Int = 0)(sig: Signature): Term = {
+    private def rewriteTerm(vargen: FreshVarGen,
+                            term: Term,
+                            literalIndex: Int,
+                            side: Literal.Side,
+                            position: Position,
+                            groundRewriteTable: RewriteTable,
+                            nonGroundRewriteTable: RewriteTable,
+                            rewriteRulesUsed: mutable.Set[AnnotatedClause],
+                            rewriteInfo: mutable.ArrayBuffer[AddInfoRewrite],
+                            depth: Int = 0)(sig: Signature): Term = {
       import leo.datastructures.Term._
       import leo.datastructures.partitionArgs
 
@@ -2338,6 +2388,8 @@ package inferenceControl {
         val (res, origin) = groundRewriteTable(term)
         leo.Out.finest(s"Yeah! replace ${term.pretty(sig)} by ${res.pretty(sig)}")
         rewriteRulesUsed += origin
+        val occurrence = RewriteOccurrence(literalIndex, side, position, term, res)
+        rewriteInfo += AddInfoRewrite(origin.id, origin.cl, occurrence = Some(occurrence))
         res
       } else {
         val toFind = nonGroundRewriteTable.keysIterator
@@ -2363,6 +2415,8 @@ package inferenceControl {
               leo.Out.finest(s"via subst ${termSubst.pretty}")
               if (term != result) {
                 rewriteRulesUsed += origin
+                val occurrence = RewriteOccurrence(literalIndex, side, position, term, result)
+                rewriteInfo += AddInfoRewrite(origin.id, origin.cl, termSubst, typeSubst, Some(occurrence))
                 return result
               } else {
                 leo.Out.finest(s"...ignored")
@@ -2374,12 +2428,16 @@ package inferenceControl {
         term match {
           case Bound(_,_) | Symbol(_) | Integer(_) | Rational(_, _) | Real(_, _, _) => term
           case hd ∙ args =>
-            val rewrittenHd = rewriteTerm(vargen, hd, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth)(sig)
+            val rewrittenHd = rewriteTerm(vargen, hd, literalIndex, side, position.headPos, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, rewriteInfo, depth)(sig)
             val (tyArgs, termArgs) = partitionArgs(args)
 
             val res0 = Term.mkTypeApp(rewrittenHd, tyArgs)
-            Term.mkTermApp(res0, termArgs.map(t => rewriteTerm(vargen, t, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth)(sig)))
-          case ty :::> body => /* term */ Term.mkTermAbs(ty, rewriteTerm(vargen, body, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, depth + 1)(sig))
+            val rewrittenArgs = termArgs.indices.map { argIndex =>
+              val argumentPosition = position.argPos(tyArgs.length + argIndex + 1)
+              rewriteTerm(vargen, termArgs(argIndex), literalIndex, side, argumentPosition, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, rewriteInfo, depth)(sig)
+            }
+            Term.mkTermApp(res0, rewrittenArgs)
+          case ty :::> body => /* term */ Term.mkTermAbs(ty, rewriteTerm(vargen, body, literalIndex, side, position.abstrPos, groundRewriteTable, nonGroundRewriteTable, rewriteRulesUsed, rewriteInfo, depth + 1)(sig))
             // FIXME: Rewriting under lambda? What can go wrong? See SYO532^1.p
             // Found the error: inside lambdas, there are more (higher) variables that are already used
             // so the template needs to be lifted again. but then the vargen needs to be updated as well
