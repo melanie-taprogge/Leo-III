@@ -16,7 +16,7 @@ The generated proofs use experiemntal features of a version currently only avail
 - [Lambdapi](https://github.com/melanie-taprogge/lambdapi)
 - [Lambdapi Standard Library](https://github.com/Deducteam/lambdapi-stdlib)
 
-Furthermore, the [library for Leo-III encodings in Lambdapi]([https://anonymous.4open.science/r/Leo-III-lambdapi-lib-8044](https://github.com/Deducteam/Leo-III-lambdapi-lib)) is required and can be installed by following the instructions provided in its GitHub repository.
+Furthermore, the [library for Leo-III encodings in Lambdapi](https://github.com/Deducteam/Leo-III-lambdapi-lib) is required and can be installed by following the instructions provided in its GitHub repository.
 
 
 <details>
