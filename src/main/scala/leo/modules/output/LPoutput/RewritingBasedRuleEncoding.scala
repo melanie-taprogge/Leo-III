@@ -236,7 +236,9 @@ object RewriteSimpEncoding {
     *    final raw result. Replay every recorded occurrence with a focused
     *    rewrite in Leo's order, then close modulo beta/eta conversion.
     *
-    * 5. Apply the local implication to the instantiated parent proof.
+    * 5. Apply the local implication to the instantiated parent proof. If some
+    *    parent variables disappear from the child, first prove the child under
+    *    those variables and then instantiate that local proof with witnesses.
     */
   def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], Int)], parentNameLpEnc: Seq[Name], _sig: LpSig): EncodeResult = {
     Out.lp_debug_info("Encoding instance of rewrite simplification")
@@ -334,6 +336,10 @@ object RewriteSimpEncoding {
       // Replay the rewrite under the variables that disappear from the child,
       // then instantiate that local proof with witnesses. This keeps each such
       // variable consistent across the rewrite-rule instance and main parent.
+      // TODO: The local proof may be avoidable by substituting the same witness
+      // for each disappearing variable throughout the rule proofs, rewrite
+      // patterns, implication, and parent application. Validate this for
+      // occurrences whose recorded redex contains a disappearing variable.
       val localProofName = Name("RewriteWithParentVars")
       val disappearingBinders = disappearingParentVars.map { case (index, ty) =>
         Lifting.OlVarM(var2Lp(index, ty, sharedVarMap))
