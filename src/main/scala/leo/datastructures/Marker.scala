@@ -2,8 +2,6 @@ package leo.datastructures
 
 import leo.datastructures.TPTP.AnnotatedFormula.FormulaType.FormulaType
 import leo.modules.HOLSignature.{LitFalse, LitTrue}
-import leo.modules.calculus.FullCNF.FVs
-import leo.modules.calculus.Unification
 import leo.modules.output.Output
 
 import scala.annotation.tailrec
