@@ -276,9 +276,10 @@ object TermEncoding {
           case Exists(argument) =>
             App(LogicConst.cEx, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
         }
-      case Choice(_) =>
+      case Choice(_) | Epsilon(_) =>
+        val selector: HOLUnaryConnective = if (Epsilon.unapply(t).isDefined) Epsilon else Choice
         t match {
-          case Choice(bVarTy :::> body) =>
+          case selector(bVarTy :::> body)  =>
             val newBVar = bVarGen(bVars,bVarTy,replaceUnknownVars)//(intToName(bVars.size), bVarTy) //makeBVarList(Seq(bVarTys), bVars.size)
             val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction, replaceUnknownVars)
             val quantifiedVar = {
@@ -286,7 +287,7 @@ object TermEncoding {
               (Name(newBVar._1), El(encType))
             }
             LogicConst.Choice(quantifiedVar, encBody)
-          case Choice(argument) =>
+          case selector(argument) =>
             App(LogicConst.cCh, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
         }
       /*
