@@ -481,9 +481,11 @@ object SeqLoop {
     /* Print proof object if possible and requested. */
     if (Configuration.PROOF_OBJECT && proof != null) {
       try {
-        val proofSignature = userSignatureToTPTP(symbolsInProof(proof))(sig)
-        val proofString = if (Configuration.isSet("compressProof")) proofToTPTP(compressedProofOf(CompressProof.stdImportantInferences)(state.derivationClause.get))
-        else proofToTPTP(proof)
+        val outputProof = if (Configuration.isSet("compressProof")) compressedProofOf(CompressProof.stdImportantInferences)(state.derivationClause.get)
+        else proof
+        val definitionsInProof = symbolsInProof(outputProof.filter(_.role == Role_Definition)).filter(key => sig(key).hasDefn)
+        val proofSignature = userSignatureToTPTP(symbolsInProof(outputProof), definitionsInProof)(sig)
+        val proofString = proofToTPTP(outputProof)
         val proofOutput: String = if (proofSignature.isEmpty) proofString else proofSignature + "\n" + proofString
         Out.output(SZSOutput(SZS_Refutation, Configuration.PROBLEMFILE, proofOutput))
       } catch {

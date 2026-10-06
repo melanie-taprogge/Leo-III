@@ -80,10 +80,11 @@ object HOLSignature {
   private final val norKey = nandKey + 1
   private final val niffKey = norKey + 1
   private final val neqKey = niffKey + 1
+  private final val epsilonKey = neqKey + 1
 //  private final val iteKey = neqKey + 1
 
   /** The last id that was used by predefined HOL symbols. Keep up to date! */
-  val lastId: Int = neqKey
+  val lastId: Int = epsilonKey
 
   final val o: Type = Type.mkType(oKey)
   final val i: Type = Type.mkType(iKey)
@@ -333,6 +334,15 @@ object HOLSignature {
       case _ => None
     }
   }
+  /** Epsilon binder used in Skolem definitions. */
+  object Epsilon extends HOLUnaryConnective { final val key = epsilonKey; final val ty = Choice.ty
+    override final def apply(arg: Term): Term = mkApp(mkAtom(key,ty), Vector(Right(arg.ty._funDomainType), Left(arg)))
+
+    override final def unapply(t: Term): Option[Term] = t match {
+      case Symbol(`key`) ∙ Seq(Right(_), Left(t1)) => Some(t1)
+      case _ => None
+    }
+  }
   /** HOL description @- */
   object Description extends HOLUnaryConnective { final val key = descKey; final val ty = forall((1 ->: o) ->: 1)
     override final def apply(arg: Term): Term = mkApp(mkAtom(key,ty), Vector(Right(arg.ty._funDomainType), Left(arg)))
@@ -490,6 +500,9 @@ object HOLSignature {
     ("<~>", niffDef, <~>.ty, multProp),
     ("!=", neqDef, !===.ty, multProp)
   )
+
+  // Registered after definedConsts to preserve the keys of existing HOL symbols.
+  val epsilonConst = ("#", Epsilon.ty, multProp)
 
 
   //////////////////////

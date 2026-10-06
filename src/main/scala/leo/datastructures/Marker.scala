@@ -348,8 +348,10 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
 
 object ClauseAnnotation {
   import leo.modules.calculus.CalculusRule
-  case class InferredFrom[A <: ClauseProxy](rule: leo.modules.calculus.CalculusRule, cws: Seq[(A, Output)]) extends ClauseAnnotation {
-    def pretty: String = s"inference(${rule.name},[status(${rule.inferenceStatus.pretty.toLowerCase})],[${
+  case class InferredFrom[A <: ClauseProxy](rule: leo.modules.calculus.CalculusRule, cws: Seq[(A, Output)], inferenceInfo: Option[Output] = None) extends ClauseAnnotation {
+    def pretty: String = {
+      val printInfo = inferenceInfo.map(_.apply()).filter(_.nonEmpty).map("," + _).getOrElse("")
+      s"inference(${rule.name},[status(${rule.inferenceStatus.pretty.toLowerCase})$printInfo],[${
       cws.map { case (cw, add) => if (add == null) {
         cw.id
       } else {
@@ -357,6 +359,7 @@ object ClauseAnnotation {
       }
       }.mkString(",")
     }])"
+    }
 
     def fromRule: CalculusRule = rule
     def parents = cws.map(_._1)
@@ -408,8 +411,10 @@ object ClauseAnnotation {
     final val fromRule: CalculusRule = null
     final def parents = Seq.empty
   }
-  case class FromSystem[A <: ClauseProxy](hint: String, parents: Seq[A]) extends ClauseAnnotation {
-    final def pretty = s"introduced($hint)"
+  case class FromSystem[A <: ClauseProxy](hint: String, parents: Seq[A], info: Option[Output] = None) extends ClauseAnnotation {
+    val printInfo = if (info.isDefined) s",[${info.map(_.apply()).get}]" else ""
+    val printParents = if (parents.nonEmpty) s",[${parents.map(_.id).mkString(",")}]" else ""
+    final def pretty = s"introduced($hint$printInfo$printParents)"
     final val fromRule: CalculusRule = null
   }
 

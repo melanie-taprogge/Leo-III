@@ -31,7 +31,7 @@ class CNFTestSuite extends LeoTestSuite {
       s.append("\n")
       val vargen1 = freshVarGen(pc)
       val vargen2 = freshVarGen(pc)
-      val cnf1 = FullCNF(vargen1, pc)
+      val cnf1 = FullCNF(vargen1, pc).clauses
 //      val cnf2 = CNF(vargen2, pc)
       val cnf3 = StepCNF.exhaust(pc)
       s.append(" >Max CNF\n   ")
