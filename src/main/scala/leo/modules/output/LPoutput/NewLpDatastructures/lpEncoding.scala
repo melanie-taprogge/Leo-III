@@ -35,7 +35,7 @@ object TypeEncoding {
   @inline def tyVar2LP(tv: Int): Name = nameTyVar(tv)
 
   def polyType2LP(ty: Type): OlPolyType = ty match {
-    case ∀(_) =>
+    case PolyType(_) =>
       val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
       val encBodyTy = type2LP(bodyTy)
       val quantifiers = (1 to tyAbsCount).map(scope => OlMonoType.TyVar(tyVar2LP(scope)))
@@ -62,7 +62,7 @@ object TypeEncoding {
       case ProductType(tys) =>
         throw new Error(s"ProductType not yet encoded, unable to do ${ty.pretty}")
       //todo
-      case ∀(_) =>
+      case PolyType(_) =>
 //        TyQuant
         throw new Error(s"Error in LP Encoding: Found quantified type outside of prefix position")
       //todo
@@ -76,7 +76,7 @@ object TypeEncoding {
     * */
   def polyType2Lp(ty: Type): LpType = {
     ty match {
-      case ∀(_) => val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
+      case PolyType(_) => val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
         val variables = (1 to tyAbsCount).map(i => Var[Level.Meta](tyVar2LP(i), Some(LpType.LpSet)))
         val encBody = type2LP(bodyTy)
         LpType.Pi(variables, LpType.El(encBody))
@@ -93,7 +93,7 @@ object TypeEncoding {
         Left(NotEncodable("Error: trying to encode ComposedType"))
       case ProductType(_) =>
         Left(NotEncodable("Error: trying to encode ProductType"))
-      case ∀(_) =>
+      case PolyType(_) =>
         Left(NotEncodable("Error: trying to encode quantified Type"))
       case _ => Right(type2LP(ty))
     }

@@ -82,7 +82,7 @@ object Encodings {
   def polyType2Lp (ty: Type, sig: Signature):(lpOlType,Seq[lpOlType])={
     // for the time being, we only allow polymorphic types when declaring symbols
     ty match {
-      case ∀(_) => val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
+      case PolyType(_) => val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
         //s"!> [${(1 to tyAbsCount).map(i => s"T${intToName(i - 1)}: $$tType").mkString(",")}]: ${typeToTHF1(c)(sig)}"
         val variables = (1 to tyAbsCount).map(i => lpOlUserDefinedType("T" + intToName(i-1)))
         val encBody = type2LP(bodyTy,sig)
@@ -127,7 +127,7 @@ object Encodings {
       case ProductType(tys) =>
         throw new Error(s"ProductType not yet encoded, unable to do ${ty.pretty}")
         //todo
-      case ∀(_) =>
+      case PolyType(_) =>
         throw new Error(s"Poly Type not yet encoded, unable to do ${ty.pretty}")
         //todo
     }
