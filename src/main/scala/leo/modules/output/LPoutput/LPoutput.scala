@@ -276,12 +276,15 @@ object LPoutput {
               val encProof = encCnfConj(cl, parent, idx, sig.orig)
               (toProofStepOld(stepName, encStep, rule.name, encProof, None), outputInfo)
 
+              /*
             case leo.modules.calculus.RenameCNF =>
               val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig.orig)
               val compatibleStep = LpType.Old(encodingCNF._3.pretty(PrettyConfig(!outputSingleFile,!outputSingleFile)))
               val stepsCNF = toProofStepOld(stepName, compatibleStep, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
               val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,encodingCNF._4)
               (stepsCNF,outputInfo)
+
+               */
 
             case leo.modules.calculus.PolaritySwitch =>
               val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig.orig) //¿polarity switch always only has one parent, right?

@@ -107,8 +107,8 @@ object CnfConj extends CalculusRule{
 
   final def apply(cls0 : Seq[Clause]): (Clause, Set[(Clause, AddInfoCnfConj)]) = {
     import scala.collection.mutable.LinkedHashMap
-    val unquantifiedClauses = cls0.map(c => mkDisjunction(c.lits.map(Literal.asTerm(_))))
-    val conjCl =  Clause(Literal(mkConjunction(unquantifiedClauses),true))
+    val unquantifiedClauses = cls0.map(c => CoreCNF.disjunctionOf(c.lits.map(Literal.asTerm(_))))
+    val conjCl =  Clause(Literal(CoreCNF.conjunctionOf(unquantifiedClauses),true))
 
     val clauseCount = cls0.length
     val seen = LinkedHashMap.empty[Clause, AddInfoCnfConj]
@@ -452,8 +452,20 @@ object CoreCNF {
     }
   }
 
+  // Match the right-nested conjunction used by Lambdapi's list-based conjunction elimination.
+  private[calculus] def conjunctionOf(terms: Seq[Term]): Term = terms match {
+    case Seq() => LitTrue()
+    case _ => terms.reduceRight((left, right) => &(left, right))
+  }
+
+  // Match the right-nested disjunction used by the Lambdapi clause encoding.
+  private[calculus] def disjunctionOf(terms: Seq[Term]): Term = terms match {
+    case Seq() => LitFalse()
+    case _ => terms.reduceRight((left, right) => |||(left, right))
+  }
+
   private def formulaOf(clauses: Seq[Seq[Literal]]): Term = {
-    mkConjunction(clauses.map(lits => mkDisjunction(lits.map(Literal.asTerm))))
+    conjunctionOf(clauses.map(lits => disjunctionOf(lits.map(Literal.asTerm))))
   }
 
   private def flatten(fragment: CnfFragment): Seq[Seq[Literal]] = {
