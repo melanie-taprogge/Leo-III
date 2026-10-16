@@ -659,6 +659,7 @@ object PatternUnification extends Unification {
             // binding is idx2 -> lamdas(idx1(args1'))
             val binding = λ(tys)(mkTermApp(liftedVar, newArgs))
             leo.Out.finest(s"binding: $idx2 -> ${binding.pretty}")
+            
             (Subst.singleton(idx2, binding), Subst.id)
           } else if (subset(args2, args1)) { // ditto
           val tys = args1.map(_.ty)
@@ -670,6 +671,7 @@ object PatternUnification extends Unification {
             // binding is idx1 -> lamdas(idx2(args2))
             val binding = λ(tys)(mkTermApp(liftedVar, newArgs))
             leo.Out.finest(s"binding: $idx1 -> ${binding.pretty}")
+            
             (Subst.singleton(idx1, binding), Subst.id)
           } else { // two bindings
           val sameArgs = args1.intersect(args2)
@@ -694,6 +696,7 @@ object PatternUnification extends Unification {
             val binding2 = λ(tys2)(mkTermApp(liftedFreshVar2, newArgs2))
             leo.Out.finest(s"binding1: $idx1 -> ${binding1.pretty}")
             leo.Out.finest(s"binding2: $idx2 -> ${binding1.pretty}")
+            
             (Subst.fromMap(Map(idx1 -> binding1, idx2 -> binding2)), Subst.id)
           }
         }

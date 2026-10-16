@@ -107,7 +107,7 @@ object Role {
 abstract sealed class ClauseOrigin extends Ordered[ClauseOrigin] {
   protected[ClauseOrigin] def priority: Int
 
-  def compare(that: ClauseOrigin) = this.priority - that.priority
+  def compare(that: ClauseOrigin): Int = this.priority - that.priority
 }
 case object FromAxiom extends ClauseOrigin { val priority = 3 }
 case object FromConjecture extends ClauseOrigin { val priority = 2 }
@@ -360,7 +360,7 @@ object ClauseAnnotation {
     }
 
     def fromRule: CalculusRule = rule
-    def parents = cws.map(_._1)
+    def parents: Seq[A] = cws.map(_._1)
   }
   object InferredFrom {
     def apply[A <: ClauseProxy](rule: leo.modules.calculus.CalculusRule, cs: Seq[A]): ClauseAnnotation =
@@ -405,7 +405,7 @@ object ClauseAnnotation {
     final def parents = Seq.empty
   }
   case class FromFile(fileName: String, formulaName: String) extends ClauseAnnotation {
-    final def pretty = s"file('$fileName',${leo.modules.output.escapeTPTPName(formulaName)})"
+    final def pretty: String = s"file('$fileName',${leo.modules.output.escapeTPTPName(formulaName)})"
     final val fromRule: CalculusRule = null
     final def parents = Seq.empty
   }

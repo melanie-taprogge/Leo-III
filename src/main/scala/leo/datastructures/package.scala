@@ -23,10 +23,6 @@ package object datastructures {
   // More or less general traits used throughout the project
   /////////////////////////////////
 
-  /** Supplement trait for custom toString methods. */
-  trait Pretty {
-    def pretty: String
-  }
   /** Another supplement trait for custom toString methods for signature-dependent
     * objects (e.g. terms, types). */
   trait Prettier {
@@ -157,11 +153,11 @@ package object datastructures {
     }
 
     /** Return a (simple) ordering that is induced by a weighting. */
-    def simple[A](weighting: Weight[A]) = new Ordering[A] {
+    def simple[A](weighting: Weight[A]): Ordering[A] = new Ordering[A] {
       def compare(a: A, b: A): Int = weighting.weightOf(a).compare(weighting.weightOf(b))
     }
 
-    val intOrd = new Ordering[Int] {
+    val intOrd: Ordering[Int] = new Ordering[Int] {
       def compare(a: Int, b: Int): Int = a-b
     }
 
@@ -526,11 +522,11 @@ package object datastructures {
     private val timeStampCounter : AtomicLong = new AtomicLong(0)
 
     private case class TimeStampImpl(time: Long) extends TimeStamp {
-      def compareTo(o: TimeStamp) = o match {
+      def compareTo(o: TimeStamp): Int = o match {
         case TimeStampImpl(oTime) => time.compareTo(oTime)
       }
 
-      def pretty = s"$time"
+      def pretty: String = s"$time"
     }
   }
 
@@ -549,7 +545,7 @@ package object datastructures {
 
     def hasPrev = l.nonEmpty
     def hasNext = r.nonEmpty
-    def next() = {
+    def next(): A = {
       if (!hasNext) throw new NoSuchElementException("next on empty right side of zipper")
       val elem = r.head
       if (cur != null) {
@@ -559,7 +555,7 @@ package object datastructures {
       cur = elem
       elem
     }
-    def prev() = {
+    def prev(): A = {
       if (!hasPrev) throw new NoSuchElementException("prev on empty left side of zipper")
       val elem = l.head
       r = cur +: r
@@ -649,7 +645,7 @@ package object datastructures {
   }
 
   final def mkPolyUnivType(count: Int, body: Type): Type = if (count <= 0) body
-  else Type.∀(mkPolyUnivType(count-1, body))
+  else Type.mkPolyType(mkPolyUnivType(count-1, body))
 
   /** For a term `t` return `(t', (ty_i)_i)` where `t'` is the subterm of `t`
     * that is acquired by stripping all prefix-lambdas (term abstraction) and

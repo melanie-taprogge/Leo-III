@@ -1,11 +1,16 @@
+val scala2 = "2.13.18"
+val scala3 = "3.9.0"
+
 lazy val leo = (project in file("."))
   .settings(
     name := "Leo-III",
     description := "A Higher-Order Theorem Prover.",
     version := "1.8.1",
     organization := "org.leo",
-    scalaVersion := "2.13.18",
     licenses += "BSD-3-Clause" -> url("https://opensource.org/licenses/BSD-3-Clause"),
+
+    crossScalaVersions := Seq(scala2) ++ Seq(scala3),
+    scalaVersion := crossScalaVersions.value.head,
 
     logLevel := Level.Warn,
 
@@ -26,8 +31,9 @@ lazy val leo = (project in file("."))
       "-Xmx2g"
     ),
     //resolvers += "Sonatype S01 OSS Snapshots" at "https://s01.oss.sonatype.org/content/repositories/snapshots",
-    libraryDependencies += "io.github.leoprover" %% "scala-tptp-parser" % "1.7.3",
-    libraryDependencies ++= Seq("org.scalatest" %% "scalatest" % "3.2.19" % "test"),
+    libraryDependencies += "io.github.leoprover" %% "scala-tptp-parser" % "1.7.5",
+    libraryDependencies += "io.github.leoprover" %% "logic-embedding-runtime" % "2.0.0",
+    libraryDependencies += "org.scalatest" %% "scalatest" % "3.2.20" % "test",
     
     nativeImageOptions += s"-H:ReflectionConfigurationFiles=${baseDirectory.value / "contrib" / "native-image-configs" / "reflect-config.json"}",
     nativeImageOptions += s"-H:ConfigurationFileDirectories=${baseDirectory.value / "contrib" / "native-image-configs" }",
