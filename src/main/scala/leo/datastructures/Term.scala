@@ -90,7 +90,7 @@ trait Term extends Pretty with Prettier {
   /** true iff this term anywhere contains a binder (λ, ∀, ∃ or a bound‐variable) */
   def hasBinder: Boolean
 
-  val numbers: Multiset[Term]
+  def numbers: Multiset[Term]
   def feasibleOccurrences: Map[Term, Set[Position]]
   def headSymbol: Term
   def headSymbolDepth: Int

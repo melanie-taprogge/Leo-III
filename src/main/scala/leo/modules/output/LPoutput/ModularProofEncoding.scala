@@ -251,7 +251,7 @@ object ModularProofEncoding {
         ///////////////////////////////////////////////////////////////////////////////////////
         //// 1. Assume any free variables
         // change names of the meta-vars to avoid overlap with variables in the sub-steps
-        val (assumeStep, apply2parent, apply2step): (Seq[lpProofScriptStep], Seq[lpTypedVar], Seq[lpTypedVar]) = handleClauseVars(cnfInfo,varCtxt,sig)
+        val (assumeStep, apply2parent, apply2step) = handleClauseVars(cnfInfo,varCtxt,sig)
 
         ///////////////////////////////////////////////////////////////////////////////////////
         //// 2. Proof the conjunction in a sub-step using a Lambdapi tactic

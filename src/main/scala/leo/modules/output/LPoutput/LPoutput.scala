@@ -740,7 +740,7 @@ object LPoutput {
     // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
     proofSteps = gdvParentProofSteps ++ proofSteps
     proofSteps = LpProofScript.Assume(Seq(conjName.local)) +: proofSteps
-    val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]))))
+    val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]()))))
     proofSteps = refineStep +: proofSteps
     gdvProofParam.foreach { proofParamName => proofSteps = LpProofScript.Assume(Seq(Name(proofParamName))) +: proofSteps}
     // finally, test if the derived last clause is the empty clause or a flex-flex clause.
