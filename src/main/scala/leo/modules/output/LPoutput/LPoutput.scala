@@ -111,7 +111,7 @@ object LPoutput {
         }
         (scripts, LpProofScript.Comment(ruleName))
     }
-    // Assembly later chooses the wrapper (currently a local Have) around this body.
+    // Assembly later chooses a local Have for GDV or a standalone package lemma.
     Some(EncodedProofStep(step, nameStep_new(step.id).local, encStep, body, comment))
   }
 
@@ -189,8 +189,8 @@ object LPoutput {
   }
 
   /** Construct source proof references after alias resolution.
-    * Resolves the dependency on the negated conjecture, and applies it to the
-    * proof steps if necessary.
+    * Registered derived lemmas uniformly take the negated-conjecture proof
+    * when present; this does not analyse whether an individual step uses it.
     */
   final case class ProofReferences(negConjRef: Option[(QName, Name)] = None,
                                    derivedSteps: Set[QName] = Set.empty) {
@@ -199,8 +199,7 @@ object LPoutput {
       //  return the local reference to it as a term
       case Some((rootName, localProofName)) if name == rootName =>
         LpTerm.Var[Level.Obj](localProofName, None)
-      // When fetching the reference to a step depending on the negated conjecture,
-      //  apply the reference to it accordingly
+      // Supply the common assumption required by every registered derived lemma.
       case Some((_, localProofName)) if derivedSteps.contains(name) =>
         LpTerm.App[Level.Obj](LpTerm.Const(SymRef.LP(name)), Seq(Arg.Explicit(LpTerm.Var[Level.Obj](localProofName, None))))
       // Else return the name as a term
@@ -651,6 +650,7 @@ object LPoutput {
     val formulaeFileSB: mutable.StringBuilder = new StringBuilder()
     var proofSteps: Seq[LpProofScript] = Seq.empty
     var gdvParentProofSteps: Seq[LpProofScript] = Seq.empty
+    val packageSteps = mutable.ArrayBuffer.empty[EncodedProofStep] // collect encoded steps
 
     val flagSt = new lpProofObject
 
@@ -674,7 +674,29 @@ object LPoutput {
 
     val problemEncSB: mutable.StringBuilder = new StringBuilder()
 
-    var conjecture: LpTerm[Level.Obj] = LogicConst.Bot // default Bot, as Leo omits conjecture from proof in this case todo: should we change that?!
+    // Decide if a negated conjecture is needed based on reachable source nodes, so an unused input conjecture does not
+    // introduce an artificial assumption into an axioms-only refutation.
+    val packageRoots = if (gdv_mode) Seq.empty else proof.filter(_.role == Role_NegConjecture)
+    if (packageRoots.size > 1)
+      throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
+    val packageRoot = packageRoots.headOption
+
+    // Reserve signature, clause-variable, and helper names before choosing
+    // the package's proposition abbreviation and common proof parameter.
+    val occupiedNames = if (gdv_mode) Set.empty[String] else {
+      sig.reserved ++ (sig.termNames.values ++ sig.typeNames.values).map(_.local.value) ++
+        proof.flatMap(step => ClauseEncoding.clause2LP(step.cl).metaVars.map(_.name.value)) ++
+        proof.map(step => nameStep_new(step.id).local.value) ++
+        // Legacy definition expansion and paramodulation introduce h/h1 in
+        // helper proofs, we therefore exclude them here.
+        // todo: carry general record of used names thoruhgout the proof
+        Set(nameProofFile, conjName.local.value, applyAllDefsTacName0, "h", "h1")
+    }
+    val ncName = Name(LpSig.freshIfNeeded("NC", occupiedNames))
+    val hypothesisName = Name(LpSig.freshIfNeeded("h", occupiedNames + ncName.value))
+    var packageReferences = ProofReferences(packageRoot.map(_ => conjName -> hypothesisName))
+    // Default conjecture to bot; update if the traversal finds the root (if the proof is not just showing that axioms are contradictory).
+    var conjecture: LpTerm[Level.Obj] = LogicConst.Bot
 
     compressedProof foreach { step =>
       val stepId = step.id
@@ -683,12 +705,13 @@ object LPoutput {
       if (step.role == Role_NegConjecture) {
         if (conjEnc) throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
         conjEnc = true
-        val (encConj, _) = clause2LP(step.cl, Set(), sig.orig)
-        val (newEncConj) = ClauseEncoding.clause2LP(step.cl)
         identicalSteps += (stepId -> conjName)
-        conjecture = newEncConj.lits.map(_.term) match {
+        // Extract the conjecture from its negation.
+        conjecture = ClauseEncoding.clause2LP(step.cl).lits.map(_.term) match {
           case Seq(LogicConst.Not(conj)) => conj
-          case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
+          case _ =>
+            val (encConj, _) = clause2LP(step.cl, Set(), sig.orig)
+            throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
         }
       } else if (step.role == Role_Axiom) { //todo: what about other roles like lamme etc. ?
         val encClause = ClauseEncoding.clause2LP(step.cl)
@@ -714,16 +737,22 @@ object LPoutput {
         axCounter = axCounter + 1
       } else {
         val infoForStep = new lpProofStepInfo(clausifiedSteps.toMap, identicalSteps)
-        val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep)
+        val references = if (gdv_mode) ProofReferences() else packageReferences
+        val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep, references)
         clausifiedSteps ++= newInfo.clausifiedSteps
         identicalSteps ++= newInfo.identicalSteps
         additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
-        val newStepsSeq = newProofSteps.toSeq.flatMap { result =>
-          val have = LpProofScript.Have(result.name, result.ty, result.body)
-          if (gdv_mode) Seq(have)
-          else Seq(result.comment, have)
+        newProofSteps.foreach { result =>
+          if (gdv_mode) {
+            proofSteps = proofSteps :+ LpProofScript.Have(result.name, result.ty, result.body)
+          } else {
+            packageSteps += result
+            // Only emitted lemmas receive the common proof argument.
+            // Input axioms or the (negated) conjecture keep their own reference kind.
+            packageReferences = packageReferences.copy(
+              derivedSteps = packageReferences.derivedSteps + QName.local(result.name.value))
+          }
         }
-        proofSteps = proofSteps ++ newStepsSeq
       }
     }
 
@@ -784,67 +813,119 @@ object LPoutput {
 
     proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
 
-    // construct the proof based on all the individual steps
-    // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
-    proofSteps = gdvParentProofSteps ++ proofSteps
-    proofSteps = LpProofScript.Assume(Seq(conjName.local)) +: proofSteps
-    val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]()))))
-    proofSteps = refineStep +: proofSteps
-    gdvProofParam.foreach { proofParamName => proofSteps = LpProofScript.Assume(Seq(Name(proofParamName))) +: proofSteps}
-    // finally, test if the derived last clause is the empty clause or a flex-flex clause.
-    // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
-    val emptyClause = NewLpDatastructures.lpClauseInst(Seq(),Seq()).asMl//lpClause(Seq(), Seq(lpOlBot))
-    val lastStep: LpTerm[Level.Meta] = proofSteps.last match {
-      //case lpHave(name, `emptyClause`, _, _) => lpConstantTerm(name)
-      case LpProofScript.Have(name,`emptyClause`,_) => LpTerm.Const(SymRef.LP(QName.local(name.value)))
-      case LpProofScript.Have(name, flexFlex0, _) =>
-        //throw new Exception(s"flex flex clause!")
-        // transformation of flex-flex to bot necessary todo
-        Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
-        val proofFun = LpType.Arrow(flexFlex0,LpType.Prf(LogicConst.Bot))//lpMlFunctionType(Seq(flexFlex0, lpOlBot.prf))
-        val flexFlexStepName = "flexflex_to_bot"
-        throw new Exception(s"flex flex clause!, ${flexFlex0}")
-        LpTerm.Const(SymRef.LP(QName.local(name.value)))
-        /*
-        val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
-          case LpType.Pi(binders, body) =>
-            val appliedVars = binders.map(bind => bind.ty match {
-              case Some(LpType.El(olT)) => ND.Inst.lpWitness(olT)
-              case _ => throw new Exception(s"encountered clause bindings with illegal format")
-            }
-          case lpClause(vars, lits) =>
-            val appliedVars = vars.map(var0 => lpWitness(isTermVar(var0).ty))
-            (lpFunctionApp(lpConstantTerm(flexFlexStepName), appliedVars), (lpFunctionApp(lpConstantTerm(name), appliedVars)))
-          case _ => (lpConstantTerm(flexFlexStepName), lpConstantTerm(name))
-        }
-        //throw new Exception(s"vars are ${variablesToApply.map(_.pretty)}")
-        val proofHave = lpHave(flexFlexStepName, proofFun, lpProofScript(Seq(lpProofScriptAdmit())))
-        proofSteps = proofSteps :+ proofHave
-        lpFunctionApp(appliedflexFlexStepName, Seq(appliedStepName))
+    if (gdv_mode) {
+      // construct the proof based on all the individual steps
+      // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
+      proofSteps = gdvParentProofSteps ++ proofSteps
+      proofSteps = LpProofScript.Assume(Seq(conjName.local)) +: proofSteps
+      val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]()))))
+      proofSteps = refineStep +: proofSteps
+      gdvProofParam.foreach { proofParamName => proofSteps = LpProofScript.Assume(Seq(Name(proofParamName))) +: proofSteps}
+      // finally, test if the derived last clause is the empty clause or a flex-flex clause.
+      // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
+      val emptyClause = NewLpDatastructures.lpClauseInst(Seq(),Seq()).asMl//lpClause(Seq(), Seq(lpOlBot))
+      val lastStep: LpTerm[Level.Meta] = proofSteps.last match {
+        //case lpHave(name, `emptyClause`, _, _) => lpConstantTerm(name)
+        case LpProofScript.Have(name,`emptyClause`,_) => LpTerm.Const(SymRef.LP(QName.local(name.value)))
+        case LpProofScript.Have(name, flexFlex0, _) =>
+          //throw new Exception(s"flex flex clause!")
+          // transformation of flex-flex to bot necessary todo
+          Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
+          val proofFun = LpType.Arrow(flexFlex0,LpType.Prf(LogicConst.Bot))//lpMlFunctionType(Seq(flexFlex0, lpOlBot.prf))
+          val flexFlexStepName = "flexflex_to_bot"
+          throw new Exception(s"flex flex clause!, ${flexFlex0}")
+          LpTerm.Const(SymRef.LP(QName.local(name.value)))
+          /*
+          val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
+            case LpType.Pi(binders, body) =>
+              val appliedVars = binders.map(bind => bind.ty match {
+                case Some(LpType.El(olT)) => ND.Inst.lpWitness(olT)
+                case _ => throw new Exception(s"encountered clause bindings with illegal format")
+              }
+            case lpClause(vars, lits) =>
+              val appliedVars = vars.map(var0 => lpWitness(isTermVar(var0).ty))
+              (lpFunctionApp(lpConstantTerm(flexFlexStepName), appliedVars), (lpFunctionApp(lpConstantTerm(name), appliedVars)))
+            case _ => (lpConstantTerm(flexFlexStepName), lpConstantTerm(name))
+          }
+          //throw new Exception(s"vars are ${variablesToApply.map(_.pretty)}")
+          val proofHave = lpHave(flexFlexStepName, proofFun, lpProofScript(Seq(lpProofScriptAdmit())))
+          proofSteps = proofSteps :+ proofHave
+          lpFunctionApp(appliedflexFlexStepName, Seq(appliedStepName))
 
 
          */
 
 
 
-      case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last}")
+        case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last}")
+      }
+      //proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
+      proofSteps = proofSteps :+ LpProofScript.Refine(lastStep)
+      //val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
+      val prettyTy = Renderer.ty(LpType.Prf(conjecture),RenderOptions(),sig)
+      Out.lp_debug_info(s"can encode conjecture: $prettyTy")
+      /*
+      proofSteps foreach{st =>
+        val encSt = Renderer.proof(st,RenderOptions(true,true,true),sig)
+        Out.lp_debug_info(s"can encode: \n$encSt")
+      }
+       */
+      val gdvParams = gdvProofParam.toSeq.map { proofParamName =>
+        Name(proofParamName) -> LpType.Prf(LpTerm.Const[Level.Obj](SymRef.LP(QName.in(Prefix.Formula, gdvNegatedConjectureName))))
+      }
+      val completeProof = Stmt.Definition(Name("encodedProof"),gdvParams,Some(LpType.Prf(conjecture)),Stmt.DefBody.ProofBody(proofSteps.map(Left(_))),Seq(),Seq(Opaque))
+      proofFileSB.append(Renderer.stmt(completeProof,sig,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
+    } else {
+      val ro = RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)
+      val nc = LpTerm.Const[Level.Obj](SymRef.LP(QName.local(ncName.value)))
+      val assumptionType = LpType.Prf(nc)
+
+      // Introduce a notation for the negated conjecture in Lambdapi proofs
+      packageRoot.foreach { _ =>
+        val abbreviation = Stmt.Definition(ncName, Seq.empty, Some(El(HolBaseTypes.O)),
+          Stmt.DefBody.LpTermBody(Obj(LogicConst.Not(conjecture))))
+        proofFileSB.append(Renderer.stmt(abbreviation, sig, ro)).append("\n")
+      }
+
+      packageSteps.foreach { result =>
+        val parents = result.source.annotation.parents.map(parent => s"step${parent.id}").mkString(", ")
+        val source = LpProofScript.Comment(s"parents: [$parents]")
+        proofFileSB.append(Renderer.proof(result.comment, ro, sig)).append("\n")
+        proofFileSB.append(Renderer.proof(source, ro, sig)).append("\n")
+
+        // Let derived steps depend on negated conjecture
+        // retain the clause's own quantification inside thae outer product.
+        val ty = if (packageRoot.isDefined)
+          LpType.Pi(Seq(LpTerm.Var[Level.Meta](hypothesisName, Some(assumptionType))), result.ty)
+        else result.ty
+        val body = if (packageRoot.isDefined)
+          Left(LpProofScript.Assume(Seq(hypothesisName))) +: result.body
+        else result.body
+        val lemma = Stmt.Definition(result.name, Seq.empty, Some(ty),
+          Stmt.DefBody.ProofBody(body), modifiers = Seq(Opaque))
+        proofFileSB.append(Renderer.stmt(lemma, sig, ro)).append("\n")
+      }
+
+      // construct the proof by contradiction relying on dne
+      val terminal = proof.lastOption.getOrElse(
+        throw new Exception("no source proof steps in the Lambdapi encoding"))
+      val terminalType = ClauseEncoding.clause2LP(terminal.cl).asMl
+      // the last emitted step must be bot, representing the conjecture
+      val emptyClause = NewLpDatastructures.lpClauseInst(Seq.empty, Seq.empty).asMl
+      if (terminalType != emptyClause)
+        throw new Exception(s"flex flex clause!, $terminalType")
+      val contradiction = LpProofScript.Refine(Obj(packageReferences.resolve(terminal.id, identicalSteps.toMap)))
+      // if the negated conjecture was used, use dne to construct the final proof
+      val conclusion: LpProofScript.Body = if (packageRoot.isDefined) {
+        val dne = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),
+          Seq(Arg.Explicit(Obj(conjecture)), Arg.Explicit(Wildcard[Level.Meta]()))))
+        Seq(Left(dne), Left(LpProofScript.Assume(Seq(hypothesisName))), Left(contradiction))
+      // otherwise proof bot directly from the axioms
+      } else Seq(Left(contradiction))
+      val completeProof = Stmt.Definition(Name(nameProofFile), Seq.empty,
+        Some(LpType.Prf(conjecture)), Stmt.DefBody.ProofBody(conclusion), modifiers = Seq(Opaque))
+      proofFileSB.append(Renderer.stmt(completeProof, sig, ro))
     }
-    //proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
-    proofSteps = proofSteps :+ LpProofScript.Refine(lastStep)
-    //val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
-    val prettyTy = Renderer.ty(LpType.Prf(conjecture),RenderOptions(),sig)
-    Out.lp_debug_info(s"can encode conjecture: $prettyTy")
-    /*
-    proofSteps foreach{st =>
-      val encSt = Renderer.proof(st,RenderOptions(true,true,true),sig)
-      Out.lp_debug_info(s"can encode: \n$encSt")
-    }
-     */
-    val gdvParams = gdvProofParam.toSeq.map { proofParamName =>
-      Name(proofParamName) -> LpType.Prf(LpTerm.Const[Level.Obj](SymRef.LP(QName.in(Prefix.Formula, gdvNegatedConjectureName))))
-    }
-    val completeProof = Stmt.Definition(Name("encodedProof"),gdvParams,Some(LpType.Prf(conjecture)),Stmt.DefBody.ProofBody(proofSteps.map(Left(_))),Seq(),Seq(Opaque))
-    proofFileSB.append(Renderer.stmt(completeProof,sig,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
 
     (proofFileSB,signatureFileSB,formulaeFileSB)
   }
