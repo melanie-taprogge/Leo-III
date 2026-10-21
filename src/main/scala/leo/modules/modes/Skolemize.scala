@@ -247,7 +247,7 @@ object Skolemize {
           )
         ),
         Some(LpType.Prf(target.formula)),
-        Stmt.DefBody.ProofBody(proofScript)
+        Stmt.DefBody.ProofBody(proofScript.map(Left(_)))
       ),
       negatedConjecture
     )

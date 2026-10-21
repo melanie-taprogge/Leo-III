@@ -130,7 +130,7 @@ object Stmt {
   sealed trait DefBody
   object DefBody {
     final case class LpTermBody(t: LpTerm[Level.Meta]) extends DefBody
-    final case class ProofBody(proofScript: Seq[LpProofScript]) extends DefBody
+    final case class ProofBody(proofScript: LpProofScript.Body) extends DefBody
   }
 
   /** Modifiers of the declared/ defined Lambdapi symbols */
@@ -141,12 +141,15 @@ object Stmt {
 /** Lambdapi proof-scripts are (sequences of) applications of the various tactics the system offers*/
 sealed trait LpProofScript
 object LpProofScript {
+  /** Shared proof body while existing legacy scripts are still in use. */
+  type Body = Seq[Either[LpProofScript, lpProofScriptStep]]
+
   // ** Tactics
 
   /** Instantiate the proof term */
   final case class Refine(t: LpTerm[Level.Meta], proofScript: Seq[LpProofScript] = Nil) extends LpProofScript
   /** Define a sub-proof */
-  final case class Have(name: Name, ty: LpType, proofScript: Seq[Either[LpProofScript,lpProofScriptStep]]) extends LpProofScript // for compatibility: until fully migrated to new DS, allow stirngs here
+  final case class Have(name: Name, ty: LpType, proofScript: Body) extends LpProofScript
   /**
     * Use the proof of an equality to replace occurrences of the LHS with the RHS
     * @param pattern Apply (only) at a specified position

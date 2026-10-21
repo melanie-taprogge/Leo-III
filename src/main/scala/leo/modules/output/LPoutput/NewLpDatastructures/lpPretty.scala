@@ -44,8 +44,7 @@ object Renderer {
       val eq = body match {
         case DefBody.LpTermBody(t0) => " " + renderTerm(t0, ro, sig) + ";"
         case DefBody.ProofBody(p) =>
-          val proofScript = p.map(step =>
-            indent(proof(step, ro, sig))).mkString("\n")
+          val proofScript = indent(proofBody(p, ro, sig, terminateLegacy = true))
           "\n" + "begin\n" + proofScript + "\nend;"
       }
       s"${mod}symbol ${n.value}$imp$par$colonTy ≔$eq\n"
@@ -54,6 +53,28 @@ object Renderer {
       val vs = if (vars.isEmpty) "" else " " + vars.map(_.value).mkString(" ")
       s"rule ${renderTerm(h, ro, sig)}$vs ↪ ${renderTerm(rhs, ro, sig)};\n"
   }
+
+  /** Render new and legacy script fragments in their original order.
+    * The caller supplies the enclosing `begin/end` or local `have` braces and indentation.
+    *
+    * @param terminateLegacy true for top-level definitions, where the final legacy
+    *                        fragment needs a separator before `end`; false preserves
+    *                        its existing optional separator before a local closing brace
+    */
+  private def proofBody(body: LpProofScript.Body, ro: RenderOptions, sig: LpSig,
+                        terminateLegacy: Boolean = false): String = body.zipWithIndex.map {
+    // New tactics already include their terminating semicolon in `proof`.
+    case (Left(step), _) => proof(step, ro, sig)
+    case (Right(script), index) =>
+      // Reuse the legacy printer for nested proofs and the caller's symbol prefixes.
+      val rendered = script.pretty(PrettyConfig(ro.sigPrefix, ro.formulaPrefix))
+      // Legacy fragments omit their final separator inside a local have.
+      // Fragments need separators before subsequent fragments or top-level `end`.
+      val needsSeparator = terminateLegacy || index < body.size - 1
+      // Empty fragments contribute no tactic; already-terminated fragments need no extra ';'.
+      if (needsSeparator && rendered.trim.nonEmpty && !rendered.trim.endsWith(";")) rendered + ";"
+      else rendered
+  }.mkString("\n")
 
   /**
     * Print Lambdapi proof scripts
@@ -69,11 +90,7 @@ object Renderer {
       val proofScript = if (subs.isEmpty) "" else s"\n${curly(subs.map(step => indent(proof(step, ro, sig))).mkString("\n"))}"
       s"refine ${renderTerm(t, ro, sig)}$proofScript;"
     case Have(n, ty0, pr) =>
-      //val proofScript = curly(pr.map(step => indent(proof(step, ro, sig))).mkString("\n"))
-      val proofScript = curly(pr.map {
-        case Left(step) => proof(step, ro, sig)
-        case Right(lpScript) => lpScript.pretty(PrettyConfig(ro.sigPrefix, ro.formulaPrefix))
-      }.mkString("\n"))
+      val proofScript = curly(proofBody(pr, ro, sig))
       s"have ${n.value} : ${ty(ty0, ro, sig)}\n" + indent(proofScript) + ";"
     case Rewrite(pattern, rule, side) =>
       val sside = side match {
