@@ -43,7 +43,7 @@ object ModularProofEncoding {
   ////////// Additional Leo-III Inferences
   ////////////////////////////////////////////////////////////////
 
-  def encPolaritySwitch(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript) = {
+  def encPolaritySwitch(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpTerm, sig: Signature): (lpProofScript) = {
 
     val bVarMap = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
 
@@ -145,7 +145,7 @@ object ModularProofEncoding {
     }
   }
 
-  def EncDefExSimp(child: ClauseProxy, parent: ClauseProxy, defRuleDefined: Boolean, additionalInfoSimp: Boolean, reducedTerm0: Option[Literal], applyAllDefsTacName: String, parentNameLpEnc: lpConstantTerm, sig: Signature):(Seq[lpProofScriptStep],Option[String]) = {
+  def EncDefExSimp(child: ClauseProxy, parent: ClauseProxy, defRuleDefined: Boolean, additionalInfoSimp: Boolean, reducedTerm0: Option[Literal], applyAllDefsTacName: String, parentNameLpEnc: lpTerm, sig: Signature):(Seq[lpProofScriptStep],Option[String]) = {
 
     // Encoding of the application of the EP rule defexp_and_simp_and_etaexpand (Definition expansion)
     // The modular proof script can consist of the following steps:
@@ -543,7 +543,7 @@ object ModularProofEncoding {
     }
   }
 
-  def encFuncExtPos(child: ClauseProxy, parent: ClauseProxy, editedLiterals: Seq[(Literal, Literal)], parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Option[String]) = {
+  def encFuncExtPos(child: ClauseProxy, parent: ClauseProxy, editedLiterals: Seq[(Literal, Literal)], parentNameLpEnc: lpTerm, sig: Signature): (lpProofScript, Option[String]) = {
     
     // Encoding of the application of the EP rule FuncExt (Functional Extensionality)
       // The modular proof script can consist of the following steps:
@@ -760,7 +760,7 @@ object ModularProofEncoding {
 
 
 
-  def encBoolExt(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpConstantTerm, addInfo: Set[(Literal,Seq[Literal])], sig: Signature): (lpProofScript, Option[String]) = {
+  def encBoolExt(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpTerm, addInfo: Set[(Literal,Seq[Literal])], sig: Signature): (lpProofScript, Option[String]) = {
 
     val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
 
@@ -853,8 +853,8 @@ object ModularProofEncoding {
 
   object ParamodEncoding {
     // paramod-only data holders
-    final case class ParaWithClause(withLit: Literal, otherLits: Seq[lpOlTerm], enc: lpClauseInst, encWithLit: lpLiteral, name: lpConstantTerm, currentRef: lpTerm, withLitIdx: Int, len: Int)
-    final case class ParaIntoClause(intoLit: Literal, enc: lpClauseInst, encIntoLit: lpLiteral, name: lpConstantTerm, currentRef: lpTerm)
+    final case class ParaWithClause(withLit: Literal, otherLits: Seq[lpOlTerm], enc: lpClauseInst, encWithLit: lpLiteral, name: lpTerm, currentRef: lpTerm, withLitIdx: Int, len: Int)
+    final case class ParaIntoClause(intoLit: Literal, enc: lpClauseInst, encIntoLit: lpLiteral, name: lpTerm, currentRef: lpTerm)
     final case class ParaChildClause(uni: Literal, intoLit: Literal, enc: lpClauseInst, encUniLit: lpOlTerm, encIntoLit: lpLiteral, encPosUniLit: lpOlTerm, intoLitIdx: Int, len: Int)
     final case class EncParaCtx(withC: ParaWithClause, intoC: ParaIntoClause, childC: ParaChildClause, bvars: Map[Int, String])
     final case class EncParaProofSteps(transformIntoLitSteps: Seq[lpProofScriptStep], maybeFlipIntoLitStep: Seq[lpProofScriptStep], rewriteWithUniLit: lpRewrite, childIntoTermPattern: lpRewritePattern, vIntro1_intoClause_uniLit: lpFunctionApp, assumeUniConsT: lpAssume)
@@ -1392,7 +1392,7 @@ object ModularProofEncoding {
 
   }
 
-  def encEqFact_proofScript(child: ClauseProxy, parent: ClauseProxy, additionalInfo: (Literal, Literal, Literal, Literal, Boolean, Boolean), parentNameLpEnc: lpConstantTerm, sig: Signature): (lpProofScript, Option[String]) = {
+  def encEqFact_proofScript(child: ClauseProxy, parent: ClauseProxy, additionalInfo: (Literal, Literal, Literal, Literal, Boolean, Boolean), parentNameLpEnc: lpTerm, sig: Signature): (lpProofScript, Option[String]) = {
 
     val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
 
@@ -1651,7 +1651,7 @@ object ModularProofEncoding {
 
     allSteps}
 
-  def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpConstantTerm, sig: Signature, ignoreIndices: Seq[Int] = Seq()):Seq[lpProofScriptStep]={
+  def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpTerm, sig: Signature, ignoreIndices: Seq[Int] = Seq()):Seq[lpProofScriptStep]={
 
     // Encoding of the simplification via exhaustive application of the encoded boolean equalities via the rewrite tactic
     // The modular proof script can consist of the following steps:
@@ -1684,7 +1684,7 @@ object ModularProofEncoding {
     allSteps0
   }
 
-  def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpConstantTerm], sig: Signature):(lpProofScript,Option[String]) = {
+  def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpTerm], sig: Signature):(lpProofScript,Option[String]) = {
 
     // encode the lift of equality literals
     // ((x = y) = T)^a to (x = y)^a

@@ -171,7 +171,43 @@ object LPoutput {
     (encodeStep, identicalSteps)
   }
 
-  final case class ParentInfo(clPr: ClauseProxy, lpName: lpConstantTerm)
+  /** Construct source proof references after alias resolution.
+    * Resolves the dependency on the negated conjecture, and applies it to the
+    * proof steps if necessary.
+    */
+  final case class ProofReferences(negConjRef: Option[(QName, Name)] = None,
+                                   derivedSteps: Set[QName] = Set.empty) {
+    def proof(name: QName): LpTerm[Level.Obj] = negConjRef match {
+      // if the name of the step matches the name of the negated conjecture,
+      //  return the local reference to it as a term
+      case Some((rootName, localProofName)) if name == rootName =>
+        LpTerm.Var[Level.Obj](localProofName, None)
+      // When fetching the reference to a step depending on the negated conjecture,
+      //  apply the reference to it accordingly
+      case Some((_, localProofName)) if derivedSteps.contains(name) =>
+        LpTerm.App[Level.Obj](LpTerm.Const(SymRef.LP(name)), Seq(Arg.Explicit(LpTerm.Var[Level.Obj](localProofName, None))))
+      // Else return the name as a term
+      case _ => LpTerm.Const[Level.Obj](SymRef.LP(name))
+    }
+
+    def resolve(id: Long, aliases: Map[Long, QName]): LpTerm[Level.Obj] =
+      proof(aliases.getOrElse(id, nameStep_new(id)))
+  }
+
+  /** Bridge only source references, before encoders add clause instantiations. */
+  private[output] def legacyProofReference(proof: LpTerm[Level.Obj]): lpTerm = proof match {
+    case LpTerm.Const(SymRef.LP(name)) =>
+      lpConstantTerm(Renderer.qname(name, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+    case LpTerm.Var(name, _) => lpUntypedVar(lpConstantTerm(name.value))
+    case LpTerm.App(function, arguments) =>
+      lpFunctionApp(legacyProofReference(function), arguments.map {
+        case Arg.Explicit(argument) => legacyProofReference(argument)
+        case argument => throw new IllegalArgumentException(s"Unexpected argument in a resolved parent proof: $argument")
+      })
+    case _ => throw new IllegalArgumentException(s"Unexpected resolved parent proof: $proof")
+  }
+
+  final case class ParentInfo(clPr: ClauseProxy, lpName: lpTerm)
 
   def extractParentInfoN(child: ClauseProxy,
                          identicalSteps: Map[Long, lpConstantTerm],
@@ -190,18 +226,14 @@ object LPoutput {
 
   def extractParentInfoN_new(child: ClauseProxy,
                          identicalSteps: Map[Long, QName],
-                         expectedParents: Int
+                         expectedParents: Int,
+                         proofReferences: ProofReferences = ProofReferences()
                         ): Either[String, Seq[ParentInfo]] = {
     val parents = child.annotation.parents
     if (parents.length != expectedParents)
       Left(s"Lambdapi encoding error: expected $expectedParents parents, got ${parents.length} (child id ${child.id})")
     else {
-      def nameOf(p: ClauseProxy): lpConstantTerm = {
-        val asName = identicalSteps.getOrElse(p.id, nameStep_new(p.id))
-        lpConstantTerm(Renderer.qname(asName,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
-      }
-
-      Right(parents.map(p => ParentInfo(p, nameOf(p))))
+      Right(parents.map(p => ParentInfo(p, legacyProofReference(proofReferences.resolve(p.id, identicalSteps)))))
     }
   }
 
@@ -213,8 +245,8 @@ object LPoutput {
     }
   }
 
-  def extractParentInfo2_new(child: ClauseProxy, identicalSteps: Map[Long, QName]): Either[String, (ParentInfo, ParentInfo)] = {
-    extractParentInfoN_new(child, identicalSteps, 2) match {
+  def extractParentInfo2_new(child: ClauseProxy, identicalSteps: Map[Long, QName], proofReferences: ProofReferences = ProofReferences()): Either[String, (ParentInfo, ParentInfo)] = {
+    extractParentInfoN_new(child, identicalSteps, 2, proofReferences) match {
       case Left(error) => Left(error)
       case Right(Seq(parent0, parent1)) => Right((parent0, parent1))
       case _ => Left(s"Lambdapi encoding error: Failure when extracting parent info")
@@ -229,25 +261,24 @@ object LPoutput {
     }
   }
 
-  def extractParentInfo1_new(child: ClauseProxy, identicalSteps: Map[Long, QName]): Either[String, ParentInfo] = {
-    extractParentInfoN_new(child, identicalSteps, 1) match {
+  def extractParentInfo1_new(child: ClauseProxy, identicalSteps: Map[Long, QName], proofReferences: ProofReferences = ProofReferences()): Either[String, ParentInfo] = {
+    extractParentInfoN_new(child, identicalSteps, 1, proofReferences) match {
       case Left(error) => Left(error)
       case Right(Seq(parent0)) => Right(parent0)
       case _ => Left(s"Lambdapi encoding error: Failure when extracting parent info")
     }
   }
 
-  def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo): (Option[(LpProofScript.Comment,LpProofScript)], lpProofStepInfo) = {
+  def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo,
+              proofReferences: ProofReferences = ProofReferences()): (Option[(LpProofScript.Comment,LpProofScript)], lpProofStepInfo) = {
 
     val stepName = nameStep(cl.id).name
     val rule = cl.annotation.fromRule
     // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
     val parentInLpEncID_new = cl.annotation.parents.map(parent => stepInfo.identicalSteps.getOrElse(parent.id, nameStep_new(parent.id)))
 
-    // for compatibility, temproarily translate the names to constantnt terms...
-    val parentInLpEncID = {
-      parentInLpEncID_new.map(nm => lpConstantTerm(Renderer.qname(nm,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic))))
-    }
+    val parentProofs = parentInLpEncID_new.map(proofReferences.proof)
+    val parentInLpEncID = parentProofs.map(legacyProofReference)
     Out.lp_debug_info(s"parents in lp encoding new : $parentInLpEncID_new, as terms: $parentInLpEncID")
 
     Out.lp_debug_info(s"Encoding step $stepName: application of caluclus rule ${if (rule == null) "Tautology" else rule.name}")
@@ -265,7 +296,7 @@ object LPoutput {
 
           rule match {
             case leo.modules.calculus.CnfConj =>
-              val parent = extractParentInfo1_new(cl, stepInfo.identicalSteps.toMap) match {
+              val parent = extractParentInfo1_new(cl, stepInfo.identicalSteps.toMap, proofReferences) match {
                 case Left(error) => throw new Exception(error)
                 case Right(value) => value
               }
@@ -305,7 +336,7 @@ object LPoutput {
             ////////////////////////////////////////
             // Paramodulation encoding
             case leo.modules.calculus.OrderedParamod =>
-              val (parentWithClause, parentIntoClause) = extractParentInfo2_new(cl, stepInfo.identicalSteps.toMap) match {
+              val (parentWithClause, parentIntoClause) = extractParentInfo2_new(cl, stepInfo.identicalSteps.toMap, proofReferences) match {
                 case Left(error) => throw new Exception(error)
                 case Right(value) => value
               }
@@ -342,7 +373,7 @@ object LPoutput {
                     (toProofStepOld(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None), outputInfo)
 //                  }
                 }else if (cl.furtherInfo.addInfoSimpRule.get == "detUniInferences") {
-                  val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,Name(parentInLpEncID.head.name),sig)
+                  val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,parentProofs.head,sig)
                   encProof match {
                     case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "DetUniSimp", Left(scripts), None), outputInfo)
                     case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some(reason)), outputInfo)
@@ -357,21 +388,21 @@ object LPoutput {
               }
 
             case leo.modules.calculus.PreUni =>
-              val encProof = encodePreUni(cl.annotation.parents.head, cl, Name(parentInLpEncID.head.name), sig)
+              val encProof = encodePreUni(cl.annotation.parents.head, cl, parentProofs.head, sig)
               encProof match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "PreUni", Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", Left(Seq.empty), Some(reason)), outputInfo)
               }
 
             case leo.modules.calculus.RewriteSimp =>
-              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentInLpEncID.map(id => Name(id.name)), sig)
+              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentProofs, sig)
               encodingRewrite match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "RewriteSimp", Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, "RewriteSimp", Left(Seq.empty), Some(reason)), outputInfo)
               }
 
             case leo.modules.calculus.Miniscope =>
-              val encoding = MiniscopeEncoding.encMiniscope(cl, parentInLpEncID_new, sig)
+              val encoding = MiniscopeEncoding.encMiniscope(cl, parentProofs, sig)
               encoding match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "Miniscope", Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, "Miniscope", Left(Seq.empty), Some(reason)), outputInfo)
@@ -382,14 +413,14 @@ object LPoutput {
               (toProofStepOld(stepName, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
 
             case leo.modules.calculus.PatternUni =>
-              val encProof = encodePatternUni(cl.annotation.parents.head,cl,Name(parentInLpEncID.head.name),sig)
+              val encProof = encodePatternUni(cl.annotation.parents.head,cl,parentProofs.head,sig)
               encProof match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, rule.name, Left(scripts), None),outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, rule.name, Left(Seq.empty), Some(reason)),outputInfo)
               }
 
             case _ =>
-              val parentIDs = parentInLpEncID.map(id => id.name)
+              val parentIDs = parentInLpEncID_new.map(name => Renderer.qname(name, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
               (toProofStepOld(stepName, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")),outputInfo)
           }
       }

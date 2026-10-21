@@ -29,7 +29,7 @@ object Util {
 
   final case class EncUniCtx(encChild: lpClauseInst, encParent: lpClauseInst, sharedVarMap: Map[Int, String], childVarMap: Map[Int, String], childVarNames: Seq[Name], parentNameLpEnc: LpTerm[Level.Obj], substClauseLen: Int)
 
-  def initUniRuleCtxt(childCl: Clause, parentCl: Clause, parentNameLpEnc0: Name): EncUniCtx = {
+  def initUniRuleCtxt(childCl: Clause, parentCl: Clause, parentNameLpEnc0: LpTerm[Level.Obj]): EncUniCtx = {
 
     //todo: do any checks here?
 
@@ -37,7 +37,7 @@ object Util {
     val (sharedVarMap, encChild, encParent) = lpClauseInst.apply_to_pair(childCl, parentCl)
 
     // compute names and clause length
-    val parentNameLpEnc: LpTerm[Level.Obj] = Const(SymRef.LP(QName.local(parentNameLpEnc0.value)))
+    val parentNameLpEnc = parentNameLpEnc0
     val substClauseLen = parentCl.lits.length
 
     // filter out only the vars relevant to the child
@@ -167,7 +167,7 @@ object UnificationEncoding {
     *
     * @return (proof script, optional error message)
     */
-  def encodePatternUni(parent: ClauseProxy, child: ClauseProxy, parentNameLpEnc0: Name, sig: LpSig): EncodeResult = {
+  def encodePatternUni(parent: ClauseProxy, child: ClauseProxy, parentNameLpEnc0: LpTerm[Level.Obj], sig: LpSig): EncodeResult = {
     Out.lp_debug_info(s"Encoding instance of Pattern Unification")
     //todo only do substitution step if we actually have subst, sometimes we can also have trivial stuff
     val ro = RenderOptions()
@@ -372,7 +372,7 @@ object DetUniSimpEncoding {
     *
     * @return (proof scripts, optional failure reason)
     */
-  def encodeDetUniSimp(parent: ClauseProxy, child: ClauseProxy, parentNameLpEnc0: Name, sig: LpSig): EncodeResult = {
+  def encodeDetUniSimp(parent: ClauseProxy, child: ClauseProxy, parentNameLpEnc0: LpTerm[Level.Obj], sig: LpSig): EncodeResult = {
     Out.lp_debug_info(s"Encoding instance of DetUniSimp")
     val ro = RenderOptions()
 
@@ -1185,7 +1185,7 @@ object PreUniVerification {
     *
     * @return encoded proof script or an explanatory NotEncodable result
     */
-  def encodePreUni(parent: ClauseProxy, child: ClauseProxy, parentNameLpEnc0: Name, sig: LpSig): EncodeResult = {
+  def encodePreUni(parent: ClauseProxy, child: ClauseProxy, parentNameLpEnc0: LpTerm[Level.Obj], sig: LpSig): EncodeResult = {
     val ro = RenderOptions()
 
     ////////////////////////////
