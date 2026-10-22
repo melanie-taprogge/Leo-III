@@ -1152,9 +1152,9 @@ object PreUniVerification {
     *
     * 1) Reconstruct the substituted parent
     *    Rebuild the parent clause with the shared reconstruction helper by
-    *    applying the original PreUni substitution and the recorded literal
-    *    transformations. This yields the clause before removing the tracked
-    *    unification constraints and is used as the target type of the
+    *    applying the original PreUni substitution (including normalization)
+    *    and the recorded equality flips. This yields the clause before removing
+    *    the tracked unification constraints and is used as the target type of the
     *    substitution subproof.
     *
     * 2) Substitution subproof
@@ -1224,12 +1224,20 @@ object PreUniVerification {
     }
     val childToParentIdxDefault = childToParentIdx.withDefault(identity)
 
-    // Literal transformations are tracked relative to the child clause.
-    // Reindex them to reconstruct the substituted parent before deletion.
+    // Surviving-literal transformations use child positions; deleted constraints
+    // already use parent positions. Combine both in the parent's position space.
     val substParentLitTransf = reindexLiteralTransformation(litTransf, childToParentIdxDefault)
+    val allLitTransf = substParentLitTransf.copy(
+      normalizedEq = substParentLitTransf.normalizedEq ++ deletedUniLits.flatMap { lit =>
+        lit.normalization.map(mode => lit.position -> mode)
+      }
+    )
 
     // Reconstruct the parent after PreUni substitution, but before deleting constraints.
-    val normalizedSubstParent = reconstructSubstParent(addInfoUni.origTermSubst, addInfoUni.origTypeSubst, substParentLitTransf, ctxt, parent.cl) match {
+    // Leo's substitution already normalizes Boolean equalities. Apply only the
+    // recorded flips here; normalization still needs justifying in the proof below.
+    val flipsOnly = substParentLitTransf.copy(normalizedEq = Seq.empty)
+    val normalizedSubstParent = reconstructSubstParent(addInfoUni.origTermSubst, addInfoUni.origTypeSubst, flipsOnly, ctxt, parent.cl) match {
       case Some(lits) => lits
       case None => return NotEncodable("Trying to encode PreUni substitution substep, error when reconstructing substituted parent")
     }
@@ -1241,8 +1249,10 @@ object PreUniVerification {
     ////////////////////////////
     // 1) Substitution subproof
     val nameHaveSubstStep = Name("Substitution")
+    // Justify transformations on both surviving and deleted literals before using
+    // the instantiated parent proof. Their positions are already parent positions.
     val (substStepName, substStep) =
-      encodeSubstitutionSubstep(nameHaveSubstStep, ctxt, termSubst, litTransf, normalizedSubstParent, child.cl.implicitlyBound, parent.cl.implicitlyBound, childToParentIdxDefault)
+      encodeSubstitutionSubstep(nameHaveSubstStep, ctxt, termSubst, allLitTransf, normalizedSubstParent, child.cl.implicitlyBound, parent.cl.implicitlyBound)
 
     ////////////////////////////
     // 2) Constraint-elimination subproof
@@ -1262,9 +1272,9 @@ object PreUniVerification {
     * Compute how child-clause literal positions embed into the substituted parent.
     *
     * PreUni tracks deleted unification constraints as `UniLitInfo`, with
-    * positions in the parent before deletion. The substitution proof, however,
-    * receives literal-transformation metadata in child positions. This helper
-    * builds the required child-position to parent-position map.
+    * positions in the parent before deletion. Surviving-literal transformations
+    * are recorded in child positions. This helper builds the required
+    * child-position to parent-position map so both can be combined.
     *
     * Limitation: If the remaining parent positions do not match the child length, PreUni
     * produced a different literal shape, for example by adding residual
