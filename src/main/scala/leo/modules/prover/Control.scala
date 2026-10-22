@@ -1292,7 +1292,13 @@ package inferenceControl {
       val (clause, subst) = uniResult
       val (tPTPRepresent, addInfoUnification0) = ToTHF.apply_andTrack(subst._1, subst._2, origin.cl.implicitlyBound, origin.cl.typeVars)(sig)
       val addInfoUnification = FurtherInfo()
-      val uniLitSubst = uniLitsInfo.map(uniLit => UniLitInfo(uniLit.position, uniLit.literal.substitute(subst._1, subst._2)))
+      // Deleted constraints can normalize too. Keep that information at their
+      // original parent positions, separately from surviving-literal metadata.
+      // Unordered substitution preserves the literal representation used before.
+      val uniLitSubst = uniLitsInfo.map { uniLit =>
+        val (literal, info) = uniLit.literal.substituteAndTrack(subst._1, subst._2)
+        UniLitInfo(uniLit.position, literal, info.normalize)
+      }
       addInfoUnification.addInfoUni = AddInfoUni(addInfoUnification0, uniLitSubst, flippedIds, subst._1, subst._2)
       if (rule == PreUni) addInfoUnification.addInfoUniRule = (mode, preUniModeLits(uniLitsInfo))
       val res = AnnotatedClause(clause, Role_Plain, InferredFrom(rule, Seq((origin, tPTPRepresent))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,origin.properties | ClauseAnnotation.PropUnified),addInfoUnification)

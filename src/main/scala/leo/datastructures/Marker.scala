@@ -249,11 +249,15 @@ object LitNorm {
 
 /**
   * @param position Index of the unification Constraint (in reference to the original position in the parent)
-  * @param literal The original unification constraint
-  *                todo: sometimes literal is used to save the original one, and sometimes the substituted one
+  * @param literal The constraint at the producer's current stage. In AddInfoUni annotations made by
+  *                UnificationControl, this is the substituted, normalized literal without additional ordering.
+  * @param normalization Boolean-equality normalization performed by that substitution, if any.
+  *                      It belongs to this original parent position, not a position in the child.
+  *                      Producers storing an original constraint leave it empty.
   */
 case class UniLitInfo(position: Int,
-                      literal: Literal)
+                      literal: Literal,
+                      normalization: Option[LitNorm] = None)
 
 /**
   * Additional information for unification steps where the substituted and deleted literals

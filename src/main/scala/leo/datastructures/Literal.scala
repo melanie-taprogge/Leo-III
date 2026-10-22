@@ -93,6 +93,19 @@ trait Literal extends Pretty with Prettier {
       }
     }
   }
+  /** Apply the same substitution as [[substitute]], retaining any Boolean-equality
+    * normalization performed when rebuilding an equational literal.
+    */
+  @inline final def substituteAndTrack(termSubst: Subst, typeSubst: Subst = Subst.id): (Literal, LiteralInfo) = {
+    if (termSubst == Subst.id && typeSubst == Subst.id) (this, LiteralInfo(false, None))
+    else {
+      val lsubst = left.substitute(termSubst, typeSubst)
+      if (equational) {
+        val rsubst = right.substitute(termSubst, typeSubst)
+        Literal.mkLitAndTrack(lsubst, rsubst, polarity)
+      } else (Literal.mkLit(lsubst, polarity), LiteralInfo(false, None))
+    }
+  }
   /** Apply substitution `(termSubst, typeSubst)` to literal (i.e. to both sides of the equation).
     * Result it beta-normalized and oriented if possible. */
   @inline final def substituteOrdered(termSubst : Subst, typeSubst: Subst = Subst.id)(implicit sig: Signature) : (Literal, LiteralInfo) = {
@@ -153,6 +166,14 @@ object Literal {
     assert(Term.wellTyped(t2), s"Right side of literal not well-typed: ${t2.pretty}")
     assert(t1.ty == t2.ty)
     LitImpl.mkLit(t1,t2,pol,oriented)
+  }
+  /** Construct the same literal as [[mkLit]], also reporting Boolean normalization.
+    */
+  @inline final def mkLitAndTrack(t1: Term, t2: Term, pol: Boolean, oriented: Boolean = false): (Literal, LiteralInfo) = {
+    assert(Term.wellTyped(t1), s"Left side of literal not well-typed: ${t1.pretty}")
+    assert(Term.wellTyped(t2), s"Right side of literal not well-typed: ${t2.pretty}")
+    assert(t1.ty == t2.ty)
+    LitImpl.mkLitAndTrack(t1, t2, pol, oriented)
   }
   /** Creates a new (equational) literal of the two terms t1 and t2
     * and polarity `polarity`. During construction, the method
