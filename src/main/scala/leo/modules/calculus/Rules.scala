@@ -674,10 +674,12 @@ object OrderedParamod extends CalculusRule {
     * @param intoIndex index of literal `l=r` in `intoClause` that is rewritten
     * @param intoSide side of `l=r` that is rewritten
     * @param intoPosition position in `side(l=r)` that is rewritten
+    * @return Result and pre-simplification clauses, followed by the rewriting-under-binders
+    *         and false-literal lambda-distinctness flags.
     */
   final def apply(withClause: Clause, withIndex: Int, withSide: Literal.Side,
             intoClause: Clause, intoIndex: Int, intoSide: Literal.Side, intoPosition: Position, intoSubterm: Term,
-                  simulateResolution: Boolean = false)(implicit sig: Signature): (Clause,Clause,Boolean) = {
+                  simulateResolution: Boolean = false)(implicit sig: Signature): (Clause,Clause,Boolean,Boolean) = {
     assert(withClause.lits.isDefinedAt(withIndex))
     assert(intoClause.lits.isDefinedAt(intoIndex))
     assert(withClause.lits(withIndex).polarity)
@@ -719,12 +721,12 @@ object OrderedParamod extends CalculusRule {
 
     val withoutUniLit = withLits_without_withLiteral ++ rewrittenIntoLits
     val result_preSimp = Clause(withoutUniLit :+ unificationLit)
-    val (newlits_simp0, rwUnderBinder) = Simp.shallowSimp_rwUnderBinder(withoutUniLit)(sig)
+    val (newlits_simp0, rwUnderBinder, usedLambdaDistinctness) = Simp.shallowSimp_rwUnderBinder(withoutUniLit)(sig)
     val newlits_simp = newlits_simp0 :+ unificationLit
 
     val result = Clause(newlits_simp)
     Out.finest(s"result: ${result.pretty(sig)}")
-    (result,result_preSimp,rwUnderBinder)
+    (result,result_preSimp,rwUnderBinder,usedLambdaDistinctness)
   }
 }
 

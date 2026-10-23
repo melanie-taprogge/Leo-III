@@ -431,7 +431,7 @@ package inferenceControl {
                                      intoPos: Position,
                                      shiftedIntoTerm: Term)(implicit sig: Signature): AnnotatedClause = {
 
-      val (result0,preSimp,simpUnderBilnder) = OrderedParamod(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm)(sig)
+      val (result0,preSimp,simpUnderBilnder,usedLambdaDistinctness) = OrderedParamod(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm)(sig)
 
       val uniLit = result0.lits.last
       val (uniEqLeft,uniEqRight) = UnificationControl.getUniTaskFromLit(uniLit)
@@ -446,7 +446,7 @@ package inferenceControl {
         addInfoPara.para = Some(AddInfoPara(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm, preSimp, false))
         val intermediateClause =  if (result0 != preSimp) {
           val intermediateClause0 = AnnotatedClause(preSimp, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
-          val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder)
+          val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder, simpUsedLambdaDistinctness = usedLambdaDistinctness)
           AnnotatedClause(result0, InferredFrom(Simp, intermediateClause0), newProperties, addInfoSimp) // todo: properties and annotations
         }
         else {
@@ -470,7 +470,7 @@ package inferenceControl {
             val preSimpRes1 = preSimp.substituteOrdered(Subst.id, initialTypeSubst)(sig)._1
             val preSimpRes2 = Clause(preSimpRes1.lits.map(l => Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)))
             val intermediateClause0 = AnnotatedClause(preSimpRes2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
-            val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder)
+            val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder, simpUsedLambdaDistinctness = usedLambdaDistinctness)
             AnnotatedClause(result2, InferredFrom(Simp, intermediateClause0), newProperties, addInfoSimp)
           }else {
             AnnotatedClause(result2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
@@ -2230,9 +2230,9 @@ package inferenceControl {
         cl
       } else {
         //val simpresult = Simp.shallowSimp(cl.cl)
-        val (simpresult, rewrittenUnderBinder) = Simp.shallowSimp_rwUnderBinder(cl.cl)
+        val (simpresult, rewrittenUnderBinder, usedLambdaDistinctness) = Simp.shallowSimp_rwUnderBinder(cl.cl)
         val result = if (simpresult != cl.cl){
-          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rewrittenUnderBinder)
+          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rewrittenUnderBinder, simpUsedLambdaDistinctness = usedLambdaDistinctness)
           AnnotatedClause(simpresult, InferredFrom(Simp, cl), addProp(ClauseAnnotation.PropShallowSimplified, cl.properties), furtherInfo)
         }
         else cl
@@ -2354,13 +2354,13 @@ package inferenceControl {
           else deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties)
           AnnotatedClause(newCl, Role_Plain, InferredFrom(RewriteSimp, Seq(cl) ++ rewriteRulesUsed.toSeq), newAnnotation, information)
         }
-        val (simpResult, rewrittenUnderBinder) = Simp.shallowSimp_rwUnderBinder(result0.cl)(sig)
+        val (simpResult, rewrittenUnderBinder, usedLambdaDistinctness) = Simp.shallowSimp_rwUnderBinder(result0.cl)(sig)
         val result = if (simpResult == result0.cl) result0
         else {
           //print(s"${result0.cl.pretty}\n")
           //print(s"${simpResult.pretty}\n")
           //information.addInfoSimp = information.addInfoSimp ++ addInfo
-          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rewrittenUnderBinder)
+          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rewrittenUnderBinder, simpUsedLambdaDistinctness = usedLambdaDistinctness)
           AnnotatedClause(simpResult, Role_Plain, InferredFrom(Simp, Seq(result0)), result0.properties, furtherInfo)
         }
         Out.debug(s"[Rewriting] Result: ${result.pretty(sig)}")

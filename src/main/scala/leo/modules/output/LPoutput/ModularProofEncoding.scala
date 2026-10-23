@@ -1651,7 +1651,13 @@ object ModularProofEncoding {
 
     allSteps}
 
-  def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpTerm, sig: Signature, ignoreIndices: Seq[Int] = Seq()):Seq[lpProofScriptStep]={
+  def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpTerm, sig: Signature, simpUsedLambdaDistinctness: Boolean, ignoreIndices: Seq[Int] = Seq()):(Seq[lpProofScriptStep], Option[String])={
+
+    // The general simplification tactic cannot justify function-level distinctness
+    // by comparing lambda bodies. Report the unsupported occurrence to the caller.
+    if (simpUsedLambdaDistinctness) {
+      return (Seq.empty, Some("Simp: removing a false literal using distinctness beneath lambdas is not reconstructed yet"))
+    }
 
     // Encoding of the simplification via exhaustive application of the encoded boolean equalities via the rewrite tactic
     // The modular proof script can consist of the following steps:
@@ -1681,7 +1687,7 @@ object ModularProofEncoding {
     //// 2 - 4
     val allSteps0 = encSimpProofScript(parent.lits, child.lits, encParent, encChild, child.lits.length, bVarMap, parentNameLpEnc, ignoreIndices, sig)
 
-    allSteps0
+    (allSteps0, None)
   }
 
   def encLiftEq(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfo: Seq[Seq[Int]], parentNameLpEnc: Seq[lpTerm], sig: Signature):(lpProofScript,Option[String]) = {

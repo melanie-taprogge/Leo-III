@@ -1077,21 +1077,27 @@ object Simp extends CalculusRule {
     newLits
   }
 
-  final def shallowSimp_rwUnderBinder(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Boolean) = {
+  /** Return simplified literals, rewriting-under-binders information, and whether
+    * deleting a false literal used distinctness beneath lambdas.
+    */
+  final def shallowSimp_rwUnderBinder(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Boolean, Boolean) = {
     var newLits: Seq[Literal] = Vector.empty
     val litIt = lits.iterator
     var rewrittenUnderBinder = false
+    var usedLambdaDistinctness = false
     while (litIt.hasNext) {
       val lit0 = litIt.next()
       val (lit, rewrittenUnderBinder0) = apply_infoUnderBinder(lit0)(sig)
       if (rewrittenUnderBinder0) rewrittenUnderBinder = true
-      if (!Literal.isFalse(lit)) {
+      val (isFalse, lambdaDistinctness) = Literal.isFalseWithInfo(lit)
+      if (lambdaDistinctness) usedLambdaDistinctness = true
+      if (!isFalse) {
         if (!newLits.contains(lit)) {
           newLits = newLits :+ lit
         }
       }
     }
-    (newLits, rewrittenUnderBinder)
+    (newLits, rewrittenUnderBinder, usedLambdaDistinctness)
   }
 
   final def shallowSimp_andTrack(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Seq[(Seq[Int], Int)]) = {
@@ -1115,9 +1121,9 @@ object Simp extends CalculusRule {
     Clause(shallowSimp(cl.lits)(sig))
   }
 
-  final def shallowSimp_rwUnderBinder(cl: Clause)(implicit sig: Signature): (Clause, Boolean) = {
-    val (simpLits, rewrittenUnderBinder) = shallowSimp_rwUnderBinder(cl.lits)(sig)
-    (Clause(simpLits),rewrittenUnderBinder)
+  final def shallowSimp_rwUnderBinder(cl: Clause)(implicit sig: Signature): (Clause, Boolean, Boolean) = {
+    val (simpLits, rewrittenUnderBinder, usedLambdaDistinctness) = shallowSimp_rwUnderBinder(cl.lits)(sig)
+    (Clause(simpLits),rewrittenUnderBinder,usedLambdaDistinctness)
   }
 
   final def shallowSimp_andTrack(cl: Clause)(implicit sig: Signature): (Clause, Seq[(Seq[Int], Int)]) = {

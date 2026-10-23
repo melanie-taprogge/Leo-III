@@ -326,7 +326,9 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
                         val rwUnderBinder: Boolean = false,
                         unencodableCNF: Boolean = false,
                         cnfInfo: AddInfoCnf = AddInfoCnf(),
-                        cnfConjInfo: Option[AddInfoCnfConj] = None){
+                        cnfConjInfo: Option[AddInfoCnfConj] = None,
+                        // A false literal was deleted by comparing bodies beneath lambdas.
+                        val simpUsedLambdaDistinctness: Boolean = false){
   /** Source decisions for a changed Miniscope result in the uncompressed proof. */
   var miniscopeTrace: Option[MiniscopeTrace] = None
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty

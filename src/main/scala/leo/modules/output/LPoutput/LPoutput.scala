@@ -377,16 +377,16 @@ object LPoutput {
 //                    (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
 //                  }
 //                  else {
-                    val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig)
-                    (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), None),outputInfo)
+                    val (allSteps, notEncoded) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, cl.furtherInfo.simpUsedLambdaDistinctness)
+                    (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded),outputInfo)
 //                  }
                 } else if (cl.furtherInfo.addInfoSimpRule.get == "paraSimp") {
 //                  if (cl.furtherInfo.rwUnderBinder) {
 //                    (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
 //                  }
 //                  else {
-                    val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, Seq(cl.annotation.parents.head.cl.lits.length - 1))
-                    (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), None), outputInfo)
+                    val (allSteps, notEncoded) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, cl.furtherInfo.simpUsedLambdaDistinctness, Seq(cl.annotation.parents.head.cl.lits.length - 1))
+                    (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded), outputInfo)
 //                  }
                 }else if (cl.furtherInfo.addInfoSimpRule.get == "detUniInferences") {
                   val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,parentProofs.head,sig)
