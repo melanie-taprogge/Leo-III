@@ -178,7 +178,8 @@ sealed trait QuantStep
 final case class SkolemStep(sko: Signature.Key,
                              fVs: Seq[(Int, Type)],
                              ftVs: Seq[Int],
-                             polarity: QuantPolarity
+                             polarity: QuantPolarity,
+                             position: Option[ClausePosition] = None // Eliminated quantifier in the immediate formula parent.
                            ) extends QuantStep
 final case class MoveQuantStep(corrChildVar: (Int, Type),
                                 polarity: QuantPolarity

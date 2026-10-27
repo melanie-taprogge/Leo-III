@@ -374,8 +374,9 @@ object CoreCNF {
 
       val eventAfter = Clause(Literal(event.afterFormula, true))
       val binderPath = ClausePosition(currentClause, 0, Literal.leftSide, event.binderPath)
+      val skolemInfo = event.addInfo.map(_.copy(position = Some(binderPath)))
       steps += CnfStep(eventAfter, Some((event.data, binderPath)),
-        AddInfoCnf(addInfoQuants = event.addInfo.toVector, derivedClauses = Seq(eventAfter)))
+        AddInfoCnf(addInfoQuants = skolemInfo.toVector, derivedClauses = Seq(eventAfter)))
       currentClause = eventAfter
       currentFragment = event.remainingFragment
 

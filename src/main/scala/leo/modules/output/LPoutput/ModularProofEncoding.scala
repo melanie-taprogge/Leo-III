@@ -292,7 +292,7 @@ object ModularProofEncoding {
       else if (cnfInfo.rewriteUnderBinder) Some("Clausification involving Binders not encoded")
       else if (parent.cl.implicitlyBound.nonEmpty && (parent.cl.implicitlyBound.length != allBvars.length)) Some("Fresh variables in re-clausification")
       else if (parent.cl.lits.length > 1) Some("Re-clausification of clause longer than one currently not encoded")
-      else if (cnfInfo.addInfoQuants.exists { case SkolemStep(_, _, ftVs, _) => ftVs.nonEmpty; case _ => false}) Some("Free type-variables in Skolems")
+      else if (cnfInfo.addInfoQuants.exists { case SkolemStep(_, _, ftVs, _, _) => ftVs.nonEmpty; case _ => false}) Some("Free type-variables in Skolems")
       else None
     }
 
