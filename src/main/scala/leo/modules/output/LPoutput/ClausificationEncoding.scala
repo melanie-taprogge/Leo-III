@@ -168,17 +168,21 @@ object ClausificationEncoding {
     PatternBuilder.prepareClausePositionPattern(focus)
       .left.map(reason => s"Skolemization step ${ctx.step.id}: $reason")
       .flatMap { context =>
-        // extract predicate applied to the skolemized quantifier
+        // Locate the quantifier before encoding its predicate.
         val binder: Either[String, (Type, Term)] = (ctx.skolemInfo.polarity, context.selectedTerm) match {
-          case (QuantExists, Exists(predicate @ (ty :::> _))) => Right((ty, predicate))
-          case (QuantUniv, Not(Forall(predicate @ (ty :::> _)))) => Right((ty, predicate))
+          case (QuantExists, quantifier @ Exists(ty :::> _)) => Right((ty, quantifier))
+          case (QuantUniv, Not(quantifier @ Forall(ty :::> _))) => Right((ty, quantifier))
           case _ => Left(s"Skolemization step ${ctx.step.id}: recorded position does not select the expected existential or negated universal with an explicit predicate abstraction")
         }
-        binder.map { case (ty, predicate) =>
-          val hole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
-          SkolemSite(type2LP(ty),
-            term2LP(predicate, ctx.variableMap, suppressReduction = true),
-            context.plug(RewritePattern(hole, hole)))
+        binder.flatMap { case (ty, quantifier) =>
+          // Normal quantifier encoding preserves the predicate's outer lambda
+          // while reducing its body to match the child and Skolem definition.
+          term2LP(quantifier, ctx.variableMap) match {
+            case LpTerm.App(_, Seq(Arg.Explicit(predicate @ LpTerm.Lam(_, _)))) =>
+              val hole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
+              Right(SkolemSite(type2LP(ty), predicate, context.plug(RewritePattern(hole, hole))))
+            case _ => Left(s"Skolemization step ${ctx.step.id}: expected an encoded quantifier with a predicate abstraction")
+          }
         }
       }
   }
@@ -211,7 +215,10 @@ object ClausificationEncoding {
           LogicConst.Not(lpTermBuilder.app(LogicConst.cAll, Seq(site.predicate))),
           LpTerm.Lam[Level.Obj](binder, LogicConst.Not(body)))
     }
-    val choice = lpTermBuilder.app(LogicConst.cCh, Seq(choicePredicate))
+    // Fix epsilon's type explicitly so inference does not introduce a
+    // convertible dependent-arrow type that the rewrite matcher cannot match.
+    val choice = LpTerm.App[Level.Obj](LogicConst.cCh,
+      Seq(Arg.ImplicitTypeArg(site.quantifiedType), Arg.Explicit(choicePredicate)))
     val instantiatedBody = lpTermBuilder.betaApply(site.predicate, Seq(Arg.Explicit(choice)))
     val skolemized = ctx.skolemInfo.polarity match {
       case QuantExists => instantiatedBody
