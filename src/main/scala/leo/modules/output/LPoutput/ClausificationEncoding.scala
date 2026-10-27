@@ -8,10 +8,10 @@ import leo.modules.calculus.CnfSkolem
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpLibs.Clausification
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Repeat, Rewrite, RewritePattern, Side}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Have, Refine, Repeat, Rewrite, RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
-import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpProofScript, LpSig, LpTerm, Name, OlMonoType, QName, SymRef, lpClauseInst}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, SymRef, lpClauseInst, lpTermBuilder}
 import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, extractVarNames}
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
 
@@ -121,7 +121,7 @@ object ClausificationEncoding {
     * 3. Unfold every occurrence of the Skolem term using its pointwise definition.
     * 4. Rewrite the instantiated Skolemization lemma backwards at the selected site.
     * 5. Refine with the formula-parent proof applied to the available variables.
-    * Unfinished helpers return an explicit unsupported reason.
+    * Unsupported source shapes return an explicit reason.
     */
   def encSkolem(step: ClauseProxy,
                 parentProofs: Seq[LpTerm[Level.Obj]],
@@ -134,7 +134,7 @@ object ClausificationEncoding {
     } yield {
       val parent = SubstitutionEncoding.instantiateProofTerm(
         ctx.parent.implicitlyBound, ctx.step.cl.implicitlyBound, Seq.empty, ctx.variableMap, ctx.parentProof)
-      ctx.assumptions ++ unfolding ++ Seq(folding, Refine(proofTermAsTacticArg(parent)))
+      ctx.assumptions ++ unfolding ++ folding ++ Seq(Refine(proofTermAsTacticArg(parent)))
     }
     result match {
       case Left(reason) => NotEncodable(reason)
@@ -194,14 +194,34 @@ object ClausificationEncoding {
   }
 
   /** Instantiate the existential or negative-universal Skolemization lemma with
-    * the site's type and predicate, and generate its backward patterned rewrite.
+    * the site's type and predicate. Expose its beta-reduced right-hand side in a
+    * proved local equality before matching it in the backward patterned rewrite.
     */
-  private def encSkolemQuantifierRewrite(ctx: SkolemContext, site: SkolemSite): Either[String, LpProofScript] = {
-    val instance = ctx.skolemInfo.polarity match {
-      case QuantExists => Clausification.Inst.skolemExists(site.quantifiedType, site.predicate)
-      case QuantUniv => Clausification.Inst.skolemNotForall(site.quantifiedType, site.predicate)
+  private def encSkolemQuantifierRewrite(ctx: SkolemContext, site: SkolemSite): Either[String, Seq[LpProofScript]] = {
+    val (binder, body) = site.predicate match {
+      case LpTerm.Lam(binding, value) => (binding, value)
+      case _ => return Left(s"Skolemization step ${ctx.step.id}: expected an encoded predicate abstraction")
     }
-    Right(Rewrite(Some(site.pattern), proofTermAsTacticArg(instance), Side.Left))
+    val (instance, quantified, choicePredicate) = ctx.skolemInfo.polarity match {
+      case QuantExists =>
+        (Clausification.Inst.skolemExists(site.quantifiedType, site.predicate),
+          lpTermBuilder.app(LogicConst.cEx, Seq(site.predicate)), site.predicate)
+      case QuantUniv =>
+        (Clausification.Inst.skolemNotForall(site.quantifiedType, site.predicate),
+          LogicConst.Not(lpTermBuilder.app(LogicConst.cAll, Seq(site.predicate))),
+          LpTerm.Lam[Level.Obj](binder, LogicConst.Not(body)))
+    }
+    val choice = lpTermBuilder.app(LogicConst.cCh, Seq(choicePredicate))
+    val instantiatedBody = lpTermBuilder.betaApply(site.predicate, Seq(Arg.Explicit(choice)))
+    val skolemized = ctx.skolemInfo.polarity match {
+      case QuantExists => instantiatedBody
+      case QuantUniv => LogicConst.Not(instantiatedBody)
+    }
+    val equalityName = Name(s"skolemEq_${ctx.step.id}")
+    val equalityType = LpType.Prf(LogicConst.Eq(HolBaseTypes.O, quantified, skolemized))
+    Right(Seq(
+      Have(equalityName, equalityType, Seq(Left(Refine(proofTermAsTacticArg(instance))))),
+      Rewrite(Some(site.pattern), proofTermAsTacticArg(lpTermBuilder.localObj(equalityName)), Side.Left)))
   }
 
   /** Selection of one clause from a clausified conjunction.
