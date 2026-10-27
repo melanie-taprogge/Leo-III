@@ -401,7 +401,7 @@ object RewriteSimpEncoding {
     }
 
     // prepare the pattern context at applied position
-    val patternContext = PatternBuilder.prepareClausePositionPattern(rewrittenParent, rewriteUse.occurrence) match {
+    val patternContext = prepareRewriteOccurrenceContext(rewrittenParent, rewriteUse.occurrence) match {
       case Left(reason) => return Left(reason)
       case Right(context) => context
     }
@@ -410,6 +410,17 @@ object RewriteSimpEncoding {
       val clausePattern = patternContext.plug(pattern)
       val implicationPattern = PatternBuilder.embedPatternInBinaryConnective(clausePattern, Side.Left, LogicConst.Imp.apply)
       (state2, FocusedRewrite(implicationPattern, pointwise.proof))
+    }
+  }
+
+  /** Prepare a recorded RewriteSimp occurrence and check its expected redex. */
+  private def prepareRewriteOccurrenceContext(clause: Clause,
+                                              occurrence: RewriteOccurrence): Either[String, PatternBuilder.ClausePositionPatternContext] = {
+    val position = ClausePosition(clause, occurrence.literalIndex, occurrence.side, occurrence.position)
+    PatternBuilder.prepareClausePositionPattern(position).flatMap { context =>
+      if (context.selectedTerm != occurrence.redex)
+        Left(s"RW: Recorded redex does not match the subterm at position ${occurrence.position.pretty}")
+      else Right(context)
     }
   }
 
