@@ -345,7 +345,7 @@ object LPoutput {
 
             case leo.modules.calculus.OrderedEqFac =>
               val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig.orig)
-              (toProofStepOld(cl, encStep, "OrderedEqFac", encodings._1, None),outputInfo)
+              (toProofStepOld(cl, encStep, "OrderedEqFac", encodings._1, encodings._2),outputInfo)
 
             ////////////////////////////////////////
             // Paramodulation encoding
