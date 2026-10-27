@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput
 
 import leo.{Out, modules}
 import leo.datastructures.Term.Integer
-import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
+import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Term, isPropSet}
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
 import leo.modules.prover.LocalState
@@ -441,8 +441,26 @@ object LPoutput {
     }else{
       val outputInfo = new lpProofStepInfo(Map.empty, newIdenticalSteps)
       if (rule == null && (cl.role != Role_Conjecture)) {
-        Out.lp_debug_info(s"role : ${cl.role}")
-        (toProofStepOld(cl, encStep, "Tautology", lpProofScript(Seq.empty), Some("Tautology generation not yet encoded")), outputInfo)
+        val skolemDefinition = (cl.role, cl.annotation, cl.cl.lits) match {
+          case (Role_Definition, ClauseAnnotation.FromSystem("definition", _, _), Seq(literal))
+            if literal.equational && literal.polarity =>
+            literal.left match {
+              case Term.Symbol(key) if isPropSet(Signature.PropSkolemConstant, sig.orig(key).flag) &&
+                  sig.orig(key).hasDefn && literal.right == sig.orig(key)._defn =>
+                Some(nameSkDef(key, sig.orig))
+              case _ => None
+            }
+          case _ => None
+        }
+        skolemDefinition match {
+          case Some(definitionName) =>
+            // Skolemization consumes the declared pointwise equality, instantiated with its recorded variables.
+            newIdenticalSteps.update(cl.id, definitionName)
+            (None, outputInfo)
+          case None =>
+            Out.lp_debug_info(s"role : ${cl.role}")
+            (toProofStepOld(cl, encStep, "Tautology", lpProofScript(Seq.empty), Some("Tautology generation not yet encoded")), outputInfo)
+        }
       }else{
         (None, outputInfo)
       }
