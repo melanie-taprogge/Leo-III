@@ -6,8 +6,9 @@ import leo.datastructures.Term.:::>
 import leo.modules.HOLSignature.{Exists, Forall, Not}
 import leo.modules.calculus.CnfSkolem
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
+import leo.modules.output.LPoutput.LpLibs.Clausification
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, RewritePattern}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Repeat, Rewrite, RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpProofScript, LpSig, LpTerm, Name, OlMonoType, QName, SymRef, lpClauseInst}
@@ -184,17 +185,24 @@ object ClausificationEncoding {
 
   /** Apply the pointwise definition to the recorded fVs in order, then generate
     * a repeated forward rewrite to unfold every Skolem occurrence in the goal.
+    * Parameters absent from the child are instantiated with witnesses.
     */
   private def encSkolemDefinitionRewrite(ctx: SkolemContext): Either[String, Seq[LpProofScript]] = {
-    // todo: will beta cleanup still be necessary in backward proofs?
-    Left(s"Skolemization step ${ctx.step.id}: definition unfolding is not implemented yet")
+    val definition = SubstitutionEncoding.instantiateProofTerm(
+      ctx.skolemInfo.fVs, ctx.step.cl.implicitlyBound, Seq.empty, ctx.variableMap, ctx.definitionProof)
+    Right(Seq(Repeat(Rewrite(None, proofTermAsTacticArg(definition), Side.Right))))
   }
 
   /** Instantiate the existential or negative-universal Skolemization lemma with
     * the site's type and predicate, and generate its backward patterned rewrite.
     */
-  private def encSkolemQuantifierRewrite(ctx: SkolemContext, site: SkolemSite): Either[String, LpProofScript] =
-    Left(s"Skolemization step ${ctx.step.id}: quantifier folding is not implemented yet")
+  private def encSkolemQuantifierRewrite(ctx: SkolemContext, site: SkolemSite): Either[String, LpProofScript] = {
+    val instance = ctx.skolemInfo.polarity match {
+      case QuantExists => Clausification.Inst.skolemExists(site.quantifiedType, site.predicate)
+      case QuantUniv => Clausification.Inst.skolemNotForall(site.quantifiedType, site.predicate)
+    }
+    Right(Rewrite(Some(site.pattern), proofTermAsTacticArg(instance), Side.Left))
+  }
 
   /** Selection of one clause from a clausified conjunction.
     */
