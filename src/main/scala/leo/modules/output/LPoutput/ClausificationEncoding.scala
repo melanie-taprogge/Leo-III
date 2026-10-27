@@ -4,9 +4,9 @@ import leo.Out
 import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, Literal, Position, QuantExists, QuantUniv, Role_Definition, Signature, SkolemStep, Term, Type, isPropSet}
 import leo.datastructures.Term.:::>
 import leo.modules.HOLSignature.{Exists, Forall, Not}
-import leo.modules.calculus.CnfSkolem
+import leo.modules.calculus.{CnfConj, CnfSkolem}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
-import leo.modules.output.LPoutput.LpLibs.Clausification
+import leo.modules.output.LPoutput.LpLibs.{Clausification, MetaTheorems}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Have, Refine, Repeat, Rewrite, RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
@@ -47,6 +47,16 @@ object ClausificationEncoding {
   private final case class SkolemSite(quantifiedType: OlMonoType,
                                       predicate: LpTerm[Level.Obj],
                                       pattern: RewritePattern)
+
+  /** Validated conjunction selection and the variable context needed by its proof. */
+  private final case class CnfConjContext(parentVars: Seq[(Int, Type)],
+                                          childVars: Seq[(Int, Type)],
+                                          parentProof: LpTerm[Level.Obj],
+                                          encChild: lpClauseInst,
+                                          variableMap: Map[Int, String],
+                                          clauseIndex: Int,
+                                          clauseCount: Int,
+                                          assumptions: Seq[LpProofScript])
 
   /** Residual clausification for both FullCNF and RenameCNF.
     */
@@ -257,11 +267,85 @@ object ClausificationEncoding {
       Rewrite(Some(site.pattern), proofTermAsTacticArg(lpTermBuilder.localObj(equalityName)), Side.Left)))
   }
 
-  /** Selection of one clause from a clausified conjunction.
+  /** encCnfConj — Outline of the encoded proof
+    *
+    * From a parent C₀ ∧ (C₁ ∧ ... ∧ Cₙ₋₁), derive the selected clause Cᵢ:
+    *
+    *   assume childVariables;
+    *   refine (∧ₑₙ i [_, ..., Cᵢ, ..., _] ⊤ᵢ (parent parentArguments));
+    *
+    * Variables absent from the child are instantiated with witnesses.
+    * The recorded count and index refer to the original conjunction, including
+    * duplicate conjuncts, even when duplicate output clauses were eliminated.
     */
   def encCnfConj(step: ClauseProxy,
                  parentProofs: Seq[LpTerm[Level.Obj]],
                  sig: LpSig): EncodeResult = {
-    NotEncodable(s"CNF conjunction step ${step.id}: conjunction-selection reconstruction is not implemented yet")
+    // Validate the selection and prepare translations and child-variable assumptions.
+    initCnfConjContext(step, parentProofs) match {
+      case Left(reason) => NotEncodable(reason)
+      case Right(ctx) =>
+        // Introduce the child's variables and close with conjunction elimination.
+        Encoded(ctx.assumptions :+ encConjunctSelection(ctx))
+    }
+  }
+
+  /** Validate all source metadata and the selected conjunct, then prepare its variable context. */
+  private def initCnfConjContext(step: ClauseProxy,
+                                 parentProofs: Seq[LpTerm[Level.Obj]]): Either[String, CnfConjContext] = {
+    val parents = step.annotation.parents
+    if (step.annotation.fromRule != CnfConj || parents.size != 1 || parentProofs.size != 1)
+      return Left(s"CNF conjunction step ${step.id}: expected one conjunction parent and one resolved proof")
+    val info = step.furtherInfo.cnfConjInfo match {
+      case Some(value) => value
+      case None => return Left(s"CNF conjunction step ${step.id}: missing conjunction-selection metadata")
+    }
+    if (info.numOfClauses < 2 || info.idxInConj < 0 || info.idxInConj >= info.numOfClauses)
+      return Left(s"CNF conjunction step ${step.id}: invalid index ${info.idxInConj} for ${info.numOfClauses} conjuncts")
+    val parent = parents.head.cl
+    if (parent.typeVars.nonEmpty || step.cl.typeVars.nonEmpty)
+      return Left(s"CNF conjunction step ${step.id}: polymorphic conjunction selection is not encoded")
+    parent.lits match {
+      case Seq(literal) if literal.polarity && !literal.equational => ()
+      case _ => return Left(s"CNF conjunction step ${step.id}: expected one positive non-equational parent literal")
+    }
+
+    // Translate both clauses normally, retaining a shared name for each clause variable.
+    val (variableMap, encoded) = lpClauseInst.apply_to_set(Seq(parent, step.cl))
+    val encParent = encoded.head
+    val encChild = encoded(1)
+
+    // Follow the right-nested conjunction spine using the recorded, pre-deduplication count.
+    var remaining = encParent.term
+    var selected = Option.empty[LpTerm[Level.Obj]]
+    var index = 0
+    while (index < info.numOfClauses - 1) {
+      remaining match {
+        case LogicConst.And(head, tail) =>
+          if (index == info.idxInConj) selected = Some(head)
+          remaining = tail
+        case _ => return Left(s"CNF conjunction step ${step.id}: parent does not have the recorded right-nested conjunction shape")
+      }
+      index += 1
+    }
+    if (LogicConst.And.unapply(remaining).nonEmpty)
+      return Left(s"CNF conjunction step ${step.id}: parent has more conjuncts than recorded")
+    if (info.idxInConj == index) selected = Some(remaining)
+    if (!selected.contains(encChild.term))
+      return Left(s"CNF conjunction step ${step.id}: selected conjunct does not match the child clause")
+
+    Right(CnfConjContext(parent.implicitlyBound, step.cl.implicitlyBound, parentProofs.head,
+      encChild, variableMap, info.idxInConj, info.numOfClauses, encAssumeStep(extractVarNames(encChild))))
+  }
+
+  /** Instantiate the parent and select the child using the central conjunction-elimination theorem. */
+  private def encConjunctSelection(ctx: CnfConjContext): LpProofScript = {
+    // Instantiate disappearing parent variables with witnesses; infer sibling conjuncts from the parent proof.
+    val parentProof = SubstitutionEncoding.instantiateProofTerm(
+      ctx.parentVars, ctx.childVars, Seq.empty, ctx.variableMap, ctx.parentProof)
+    val conjuncts = Seq.fill[LpTerm[Level.Obj]](ctx.clauseCount)(LpTerm.Wildcard[Level.Obj]())
+      .updated(ctx.clauseIndex, ctx.encChild.term)
+    val selection = MetaTheorems.Inst.selectConjunct(conjuncts, ctx.clauseIndex, parentProof)
+    Refine(proofTermAsTacticArg(selection))
   }
 }

@@ -17,6 +17,7 @@ object MetaTheorems {
     private val deleteBotsS = "deleteBots"
     private val transformNS = "transform_n"
     private val permuteS = "permute"
+    private val selectConjunctS = "∧ₑₙ"
 
 
     val allAscii = Seq(deleteBotsS,transformNS,permuteS)
@@ -24,6 +25,7 @@ object MetaTheorems {
     private[MetaTheorems] val deleteBotsS_S: SymRef = SymRef.LP(QName.local(deleteBotsS))
     private[MetaTheorems] val transformNS_S: SymRef = SymRef.LP(QName.local(transformNS))
     private[MetaTheorems] val permuteS_S: SymRef = SymRef.LP(QName.local(permuteS))
+    private[MetaTheorems] val selectConjunctS_S: SymRef = SymRef.LP(QName.local(selectConjunctS))
 
   }
 
@@ -33,11 +35,19 @@ object MetaTheorems {
     private[MetaTheorems] val deleteBots_T = LpTerm.Const[Level.Meta](deleteBotsS_S)
     private[MetaTheorems] val transformNS_T = LpTerm.Const[Level.Obj](transformNS_S)
     private[MetaTheorems] val permute_T = LpTerm.Const[Level.Obj](permuteS_S)
+    private[MetaTheorems] val selectConjunct_T = LpTerm.Const[Level.Obj](selectConjunctS_S)
   }
 
   object Inst {
 
     import MLTerms._
+
+    /** Select a conjunct at a valid zero-based index; the index condition reduces to ⊤. */
+    def selectConjunct(conjuncts: Seq[LpTerm[Level.Obj]], index: Int,
+                       parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App[Level.Obj](selectConjunct_T, Seq(
+        Arg.Explicit(LpInt[Level.Obj](index)), Arg.Explicit(LpList(conjuncts)),
+        Arg.Explicit(topIntro[Level.Obj]), Arg.Explicit(parentProof)))
 
     def deleteBots(postDeletionClause: Seq[lpLiteralInst], botIdxList: Seq[Int]) = {
       deleteBotsTerms(postDeletionClause.map(_.term), botIdxList)
