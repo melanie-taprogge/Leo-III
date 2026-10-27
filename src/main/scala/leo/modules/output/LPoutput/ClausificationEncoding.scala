@@ -115,25 +115,51 @@ object ClausificationEncoding {
     Right(ctx)
   }
 
-  /** Backward reconstruction of one monomorphic term-Skolemization.
-    * 1. Validate and translate the step and prepare clause-variable assumptions.
-    * 2. Recover the predicate, quantified type, and pattern from the parent position.
-    * 3. Unfold every occurrence of the Skolem term using its pointwise definition.
-    * 4. Rewrite the instantiated Skolemization lemma backwards at the selected site.
-    * 5. Refine with the formula-parent proof applied to the available variables.
-    * Unsupported source shapes return an explicit reason.
+  /** encSkolem — Outline of the encoded proof
+    *
+    * Let C[·] be the surrounding formula context, P : a → o the predicate,
+    * and k u the Skolem symbol applied to its dependency parameters.
+    * The formula parent and child have one of these shapes:
+    *
+    *   Existential:        C[∃ P]  → C[P(k u)]
+    *   Negative universal: C[¬∀ P] → C[¬P(k u)]
+    *
+    * The pointwise definition k_def u proves k u = choice, where
+    * choice is ε [a] P or ε [a] (λ x, ¬P x), respectively.
+    * Let Q be the selected quantified subformula and R its choice instance,
+    * with the outer predicate application beta-reduced.
+    *
+    * Abstract proof structure in Lambdapi:
+    *
+    *   assume childVariables;
+    *   repeat rewrite (k_def dependencyArguments);
+    *   have skolemEq : π (Q = R)
+    *     { refine (skolemTheorem a P); };
+    *   rewrite left .[x in C[x]] skolemEq;
+    *   refine (formulaParent parentArguments);
+    *
+    * skolemTheorem is ∃_skolem or ∀_skolem. Dependency and parent arguments
+    * use the available child variables, with witnesses for absent variables.
+    *
+    * @return encoded proof script or an explanatory NotEncodable result
     */
   def encSkolem(step: ClauseProxy,
                 parentProofs: Seq[LpTerm[Level.Obj]],
                 sig: LpSig): EncodeResult = {
     val result = for {
+      // Validate the source step and translate both clauses with shared variable names.
       ctx <- initSkolemContext(step, parentProofs, sig)
+      // Recover the normalized predicate and the pattern selecting its quantified subformula.
       site <- analyseSkolemPosition(ctx)
+      // Generate repeated definition unfolding for every Skolem occurrence in the child goal.
       unfolding <- encSkolemDefinitionRewrite(ctx)
+      // Prove the normalized Skolem equality and rewrite backwards to recover the parent formula.
       folding <- encSkolemQuantifierRewrite(ctx, site)
     } yield {
+      // Apply the formula-parent proof to child variables, supplying witnesses where variables disappeared.
       val parent = SubstitutionEncoding.instantiateProofTerm(
         ctx.parent.implicitlyBound, ctx.step.cl.implicitlyBound, Seq.empty, ctx.variableMap, ctx.parentProof)
+      // Introduce the child's variables, perform both rewrites, and close with the instantiated parent.
       ctx.assumptions ++ unfolding ++ folding ++ Seq(Refine(proofTermAsTacticArg(parent)))
     }
     result match {
