@@ -10,8 +10,7 @@ import leo.modules.{numbersInProof, saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
 import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{lpDne, tempLib, tempLibDeps}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
-import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfConj
-import leo.modules.output.LPoutput.ModularProofEncoding.RwCnfEncoding.encRenameCnf_conj
+import leo.modules.output.LPoutput.ClausificationEncoding.{encCnf, encCnfConj, encSkolem}
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Obj, Wildcard}
@@ -311,27 +310,26 @@ object LPoutput {
           val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps)
 
           rule match {
+            case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
+              val encoding = encCnf(cl, parentProofs, sig)
+              encoding match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+              }
+
+            case leo.modules.calculus.CnfSkolem =>
+              val encoding = encSkolem(cl, parentProofs, sig)
+              encoding match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+              }
+
             case leo.modules.calculus.CnfConj =>
-              val parent = extractParentInfo1_new(cl, stepInfo.identicalSteps.toMap, proofReferences) match {
-                case Left(error) => throw new Exception(error)
-                case Right(value) => value
+              val encoding = encCnfConj(cl, parentProofs, sig)
+              encoding match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
               }
-              val idx = cl.furtherInfo.cnfConjInfo match {
-                case Some(value) => value
-                case None => throw new Exception("Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
-              }
-              val encProof = encCnfConj(cl, parent, idx, sig.orig)
-              (toProofStepOld(cl, encStep, rule.name, encProof, None), outputInfo)
-
-              /*
-            case leo.modules.calculus.RenameCNF =>
-              val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig.orig)
-              val compatibleStep = LpType.Old(encodingCNF._3.pretty(PrettyConfig(!outputSingleFile,!outputSingleFile)))
-              val stepsCNF = toProofStepOld(cl, compatibleStep, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
-              val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,encodingCNF._4)
-              (stepsCNF,outputInfo)
-
-               */
 
             case leo.modules.calculus.PolaritySwitch =>
               val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig.orig) //¿polarity switch always only has one parent, right?
