@@ -1,11 +1,16 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, Literal, Role_Definition, Signature, SkolemStep, Term, isPropSet}
+import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, Literal, Position, QuantExists, QuantUniv, Role_Definition, Signature, SkolemStep, Term, Type, isPropSet}
+import leo.datastructures.Term.:::>
+import leo.modules.HOLSignature.{Exists, Forall, Not}
 import leo.modules.calculus.CnfSkolem
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
+import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, RewritePattern}
-import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpProofScript, LpSig, LpTerm, OlMonoType, SymRef, lpClauseInst}
+import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
+import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
+import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LpProofScript, LpSig, LpTerm, Name, OlMonoType, QName, SymRef, lpClauseInst}
 import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, extractVarNames}
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
 
@@ -139,9 +144,43 @@ object ClausificationEncoding {
   /** Locate the recorded parent quantifier, check its kind against the polarity,
     * and translate its type and predicate in the context's variable map.
     * Construct the surrounding pattern, including negation for a negative universal.
+    *
+    * Assumed invariant of the current clausification implementation: the selected
+    * quantifier is not below an enclosing term abstraction. CoreCNF eliminates
+    * outer quantifiers before processing their bodies and does not descend into
+    * ordinary lambdas or choice bindings. Dependencies on former outer binders
+    * are therefore clause variables or Skolem terms, so translating the complete
+    * predicate with variableMap needs no additional enclosing-binder environment.
     */
-  private def analyseSkolemPosition(ctx: SkolemContext): Either[String, SkolemSite] =
-    Left(s"Skolemization step ${ctx.step.id}: position analysis is not implemented yet")
+  private def analyseSkolemPosition(ctx: SkolemContext): Either[String, SkolemSite] = {
+    // in case of negated universal, the pattern must target the term including the negation
+    //  -> adapt the pattern accordingly
+    val focus = ctx.skolemInfo.polarity match {
+      case QuantExists => ctx.position
+      case QuantUniv =>
+        if (!ctx.position.pos.seq.lastOption.contains(1))
+          return Left(s"Skolemization step ${ctx.step.id}: negative-universal position must end in negation argument 1")
+        ctx.position.copy(pos = Position(ctx.position.pos.seq.dropRight(1)))
+    }
+
+    // Generate the pattern targeting the skolemized term
+    PatternBuilder.prepareClausePositionPattern(focus)
+      .left.map(reason => s"Skolemization step ${ctx.step.id}: $reason")
+      .flatMap { context =>
+        // extract predicate applied to the skolemized quantifier
+        val binder: Either[String, (Type, Term)] = (ctx.skolemInfo.polarity, context.selectedTerm) match {
+          case (QuantExists, Exists(predicate @ (ty :::> _))) => Right((ty, predicate))
+          case (QuantUniv, Not(Forall(predicate @ (ty :::> _)))) => Right((ty, predicate))
+          case _ => Left(s"Skolemization step ${ctx.step.id}: recorded position does not select the expected existential or negated universal with an explicit predicate abstraction")
+        }
+        binder.map { case (ty, predicate) =>
+          val hole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
+          SkolemSite(type2LP(ty),
+            term2LP(predicate, ctx.variableMap, suppressReduction = true),
+            context.plug(RewritePattern(hole, hole)))
+        }
+      }
+  }
 
   /** Apply the pointwise definition to the recorded fVs in order, then generate
     * a repeated forward rewrite to unfold every Skolem occurrence in the goal.
