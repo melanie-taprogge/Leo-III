@@ -183,10 +183,14 @@ object Renderer {
         val ls = termP(l, ro, Prec.Imp, sig)
         val rs = termP(r, ro, Prec.Imp - 1, sig)
         bin(impStr, Prec.Imp, ls, rs, ctx)
-      case LogicConst.Eq(_, l, r) => //todo: add option to print type
-        val ls = termP(l, ro, Prec.Eq + 1, sig)
-        val rs = termP(r, ro, Prec.Eq + 1, sig)
-        bin(eqStr, Prec.Eq, ls, rs, ctx)
+      case LogicConst.Eq(a, l, r) =>
+        if (ro.explicitTypes)
+          typedApplication(eqStr, a, Seq(Arg.Explicit(l), Arg.Explicit(r)), ro, ctx, sig)
+        else {
+          val ls = termP(l, ro, Prec.Eq + 1, sig)
+          val rs = termP(r, ro, Prec.Eq + 1, sig)
+          bin(eqStr, Prec.Eq, ls, rs, ctx)
+        }
 
       // ** Unary connectives
       case LogicConst.Not(x) =>
@@ -194,25 +198,21 @@ object Renderer {
         paren(ctx > Prec.Not, s"$negStr $xs")
 
       // ** TPTP connectives abstracted away in the Lambdapi encoding
-      case LogicConst.InEq(t, l, r) => //todo: add option to print type
+      case LogicConst.InEq(t, l, r) =>
         termP(LogicConst.Not(LogicConst.Eq(t, l, r)),ro, ctx, sig)
 
       // ** Binders
-      case LogicConst.Forall(bind, body) =>
-        val bodyStr = termP(body, ro, Prec.Min, sig)
-        val (n, t0) = bind
-        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
-        s"($forAllStr(λ $bStr, $bodyStr))"
-      case LogicConst.Exists(bind, body) =>
-        val bodyStr = termP(body, ro, Prec.Min, sig)
-        val (n, t0) = bind
-        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
-        s"($exStr(λ $bStr, $bodyStr))"
-      case LogicConst.Choice(bind, body) =>
-        val bodyStr = termP(body, ro, Prec.Min, sig)
-        val (n, t0) = bind
-        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
-        s"($choiceStr(λ $bStr, $bodyStr))"
+      // Prefer a supplied domain to a lambda annotation when both are present.
+      case LpTerm.App(LpTerm.Const(SymRef.Leo(i)), Arg.ExplicitTypeArg(a) +: args)
+        if ro.explicitTypes && leoBinders.contains(i) =>
+        typedApplication(qname(sig.termNames(i), ro), a, args, ro, ctx, sig)
+      case LpTerm.App(LpTerm.Const(SymRef.Leo(i)), Seq(Arg.Explicit(LpTerm.Lam((n, Some(a)), body))))
+        if leoBinders.contains(i) =>
+        binderApplication(qname(sig.termNames(i), ro), (n, a), body, ro, ctx, sig)
+      case LpTerm.App(LpTerm.Const(SymRef.Leo(i)),
+        Seq(Arg.ExplicitTypeArg(_), Arg.Explicit(LpTerm.Lam((n, Some(a)), body))))
+        if leoBinders.contains(i) =>
+        binderApplication(qname(sig.termNames(i), ro), (n, a), body, ro, ctx, sig)
 
       // ** Placeholder
       case Wildcard() => "_"
@@ -245,7 +245,7 @@ object Renderer {
         val ifs = qname(sig.termNames(i), ro)
         val encArgs: Seq[String] = args match {
           case Nil => Seq()
-          // todo
+          // Keep complete predicate applications implicit in the ordinary mode.
           case Seq(Arg.ExplicitTypeArg(_), predicate @ Arg.Explicit(_)) =>
             renderArgs(Seq(predicate), ro, sig)
           case Arg.ExplicitTypeArg(t) +: remArgs => s"[${olTy(t, ro, sig)}]" +: renderArgs(remArgs,ro,sig)
@@ -308,6 +308,25 @@ object Renderer {
     * */
   private def bin(op: String, pOp: Int, lhs: String, rhs: String, ctx: Int) = paren(ctx >= pOp, s"$lhs $op $rhs")
 
+
+  /** Print a logical symbol with its recorded implicit domain supplied explicitly. */
+  private def typedApplication(symbol: String, domain: OlMonoType, args: Seq[Arg[Level.Obj]],
+                               ro: RenderOptions, ctx: Int, sig: LpSig): String = {
+    val arguments = renderArgs(args, ro, sig)
+    val suffix = if (arguments.isEmpty) "" else " " + arguments.mkString(" ")
+    paren(ctx > Prec.App, s"($symbol) [${olTy(domain, ro, sig)}]$suffix")
+  }
+
+  /** Use a lambda's recorded domain when no separate type argument was supplied. */
+  private def binderApplication(symbol: String, binder: (Name, LpType), body: LpTerm[Level.Obj],
+                                ro: RenderOptions, ctx: Int, sig: LpSig): String = binder._2 match {
+    case LpType.El(domain) if ro.explicitTypes =>
+      val predicate = LpTerm.Lam[Level.Obj](binder._1 -> Some(binder._2), body)
+      typedApplication(symbol, domain, Seq(Arg.Explicit(predicate)), ro, ctx, sig)
+    case _ =>
+      val (name, domain) = binder
+      s"($symbol(λ (${name.value} : ${ty(domain, ro, sig)}), ${termP(body, ro, Prec.Min, sig)}))"
+  }
 
   /** Helper for printing an individual argument */
   private def renderArg(arg: Arg[Level.Obj], ro: RenderOptions, sig: LpSig) = {
