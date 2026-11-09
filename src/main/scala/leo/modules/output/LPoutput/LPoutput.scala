@@ -35,6 +35,9 @@ object LPoutput {
 
   val outputSingleFile = false
 
+  // Provisional threshold for explicit typing of steps with many clause variables.
+  private val explicitTypesVariableThreshold = 100
+
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
   val leoSimpTacticFile = "UserTactic"
@@ -76,7 +79,10 @@ object LPoutput {
                                     name: Name,
                                     ty: LpType,
                                     body: LpProofScript.Body,
-                                    comment: LpProofScript.Comment)
+                                    comment: LpProofScript.Comment) {
+    /** Number of clause term variables, excluding binders inside formulas. */
+    def variableCount: Int = source.cl.implicitlyBound.size
+  }
 
   /** Package a legacy script fragment through the common step-result builder.
     * A fragment may itself be an entire legacy `lpProofScript`.
@@ -904,6 +910,7 @@ object LPoutput {
       }
 
       packageSteps.foreach { result =>
+        val stepRo = ro.copy(explicitTypes = result.variableCount >= explicitTypesVariableThreshold)
         val parents = result.source.annotation.parents.map(parent => s"step${parent.id}").mkString(", ")
         val source = LpProofScript.Comment(s"parents: [$parents]")
         proofFileSB.append(Renderer.proof(result.comment, ro, sig)).append("\n")
@@ -919,7 +926,7 @@ object LPoutput {
         else result.body
         val lemma = Stmt.Definition(result.name, Seq.empty, Some(ty),
           Stmt.DefBody.ProofBody(body), modifiers = Seq(Opaque))
-        proofFileSB.append(Renderer.stmt(lemma, sig, ro)).append("\n")
+        proofFileSB.append(Renderer.stmt(lemma, sig, stepRo)).append("\n")
       }
 
       // construct the proof by contradiction relying on dne

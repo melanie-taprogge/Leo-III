@@ -14,7 +14,8 @@ import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures.PrettyCo
 //////////////////////////////////////////
 
 /** Render Options dictating prefixing and level of implicitness of typing (depending on weather the problem is monomorphic) */
-final case class RenderOptions(sigPrefix: Boolean = true, formulaPrefix: Boolean = true, monomorphic: Boolean = true)
+final case class RenderOptions(sigPrefix: Boolean = true, formulaPrefix: Boolean = true, monomorphic: Boolean = true,
+                               explicitTypes: Boolean = false)
 
 object Renderer {
 
