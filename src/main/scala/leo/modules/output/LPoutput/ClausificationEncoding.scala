@@ -12,7 +12,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Have, Refi
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, SymRef, lpClauseInst, lpTermBuilder}
-import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, extractVarNames}
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
 
 /** Reconstruction entry points for standalone clausification steps.
@@ -38,7 +38,7 @@ object ClausificationEncoding {
                                          variableMap: Map[Int, String],
                                          skolemInfo: SkolemStep,
                                          position: ClausePosition,
-                                         assumptions: Seq[LpProofScript])
+                                         variableIntroduction: Seq[LpProofScript])
 
   /** Inputs to the inverse Skolemization lemma, recovered from the parent.
     * The pattern selects the surrounding subformula; for a negative universal
@@ -56,7 +56,7 @@ object ClausificationEncoding {
                                           variableMap: Map[Int, String],
                                           clauseIndex: Int,
                                           clauseCount: Int,
-                                          assumptions: Seq[LpProofScript])
+                                          variableIntroduction: Seq[LpProofScript])
 
   /** Residual clausification for both FullCNF and RenameCNF.
     */
@@ -72,7 +72,8 @@ object ClausificationEncoding {
     */
   private def initSkolemContext(step: ClauseProxy,
                                 parentProofs: Seq[LpTerm[Level.Obj]],
-                                sig: LpSig): Either[String, SkolemContext] = {
+                                sig: LpSig,
+                                useTypedIntroduction: Boolean): Either[String, SkolemContext] = {
     val parents = step.annotation.parents
     if (step.annotation.fromRule != CnfSkolem || parents.size != 2 || parentProofs.size != 2)
       return Left(s"Skolemization step ${step.id}: expected a term-Skolemization with a formula parent, a definition parent, and two resolved proofs")
@@ -116,9 +117,10 @@ object ClausificationEncoding {
 
     val (variableMap, encoded) = lpClauseInst.apply_to_set(
       Seq(parent, step.cl), skolemInfo.fVs, suppressReductionAt = Set(0))
-    val assumptions = encAssumeStep(extractVarNames(encoded(1)))
+    val variableIntroduction = encClauseVariableIntroduction(
+      encoded(1), useLetBasedIntroduction = useTypedIntroduction, sig = sig)
     val ctx = SkolemContext(step, parent, parentProofs.head, parentProofs(1),
-      encoded.head, encoded(1), variableMap, skolemInfo, position, assumptions)
+      encoded.head, encoded(1), variableMap, skolemInfo, position, variableIntroduction)
     Out.lp_debug_info(s"Skolemization step ${step.id}: formula parent ${parents.head.id}, definition parent ${definition.id}, position ${position.pretty}")
     Out.lp_debug_info(s"Skolemization translated parent: ${ctx.encParent.term}")
     Out.lp_debug_info(s"Skolemization translated child: ${ctx.encChild.term}")
@@ -141,7 +143,7 @@ object ClausificationEncoding {
     *
     * Abstract proof structure in Lambdapi:
     *
-    *   assume childVariables;
+    *   introduce childVariables (assume or typed-hole refinement);
     *   repeat rewrite (k_def dependencyArguments);
     *   have skolemEq : π (Q = R)
     *     { refine (skolemTheorem a P); };
@@ -159,7 +161,7 @@ object ClausificationEncoding {
                 useTypedIntroduction: Boolean = false): EncodeResult = {
     val result = for {
       // Validate the source step and translate both clauses with shared variable names.
-      ctx <- initSkolemContext(step, parentProofs, sig)
+      ctx <- initSkolemContext(step, parentProofs, sig, useTypedIntroduction)
       // Recover the normalized predicate and the pattern selecting its quantified subformula.
       site <- analyseSkolemPosition(ctx)
       // Generate repeated definition unfolding for every Skolem occurrence in the child goal.
@@ -171,7 +173,7 @@ object ClausificationEncoding {
       val parent = SubstitutionEncoding.instantiateProofTerm(
         ctx.parent.implicitlyBound, ctx.step.cl.implicitlyBound, Seq.empty, ctx.variableMap, ctx.parentProof)
       // Introduce the child's variables, perform both rewrites, and close with the instantiated parent.
-      ctx.assumptions ++ unfolding ++ folding ++ Seq(Refine(proofTermAsTacticArg(parent)))
+      ctx.variableIntroduction ++ unfolding ++ folding ++ Seq(Refine(proofTermAsTacticArg(parent)))
     }
     result match {
       case Left(reason) => NotEncodable(reason)
@@ -272,7 +274,7 @@ object ClausificationEncoding {
     *
     * From a parent C₀ ∧ (C₁ ∧ ... ∧ Cₙ₋₁), derive the selected clause Cᵢ:
     *
-    *   assume childVariables;
+    *   introduce childVariables (assume or typed-hole refinement);
     *   refine (∧ₑₙ i [_, ..., Cᵢ, ..., _] ⊤ᵢ (parent parentArguments));
     *
     * Variables absent from the child are instantiated with witnesses.
@@ -282,19 +284,21 @@ object ClausificationEncoding {
   def encCnfConj(step: ClauseProxy,
                  parentProofs: Seq[LpTerm[Level.Obj]],
                  sig: LpSig,
-                useTypedIntroduction: Boolean = false): EncodeResult = {
-    // Validate the selection and prepare translations and child-variable assumptions.
-    initCnfConjContext(step, parentProofs) match {
+                 useTypedIntroduction: Boolean = false): EncodeResult = {
+    // Validate the selection and prepare translations and child-variable introduction.
+    initCnfConjContext(step, parentProofs, sig, useTypedIntroduction) match {
       case Left(reason) => NotEncodable(reason)
       case Right(ctx) =>
         // Introduce the child's variables and close with conjunction elimination.
-        Encoded(ctx.assumptions :+ encConjunctSelection(ctx))
+        Encoded(ctx.variableIntroduction :+ encConjunctSelection(ctx))
     }
   }
 
   /** Validate all source metadata and the selected conjunct, then prepare its variable context. */
   private def initCnfConjContext(step: ClauseProxy,
-                                 parentProofs: Seq[LpTerm[Level.Obj]]): Either[String, CnfConjContext] = {
+                                 parentProofs: Seq[LpTerm[Level.Obj]],
+                                 sig: LpSig,
+                                 useTypedIntroduction: Boolean): Either[String, CnfConjContext] = {
     val parents = step.annotation.parents
     if (step.annotation.fromRule != CnfConj || parents.size != 1 || parentProofs.size != 1)
       return Left(s"CNF conjunction step ${step.id}: expected one conjunction parent and one resolved proof")
@@ -336,8 +340,10 @@ object ClausificationEncoding {
     if (!selected.contains(encChild.term))
       return Left(s"CNF conjunction step ${step.id}: selected conjunct does not match the child clause")
 
+    val variableIntroduction = encClauseVariableIntroduction(
+      encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
     Right(CnfConjContext(parent.implicitlyBound, step.cl.implicitlyBound, parentProofs.head,
-      encChild, variableMap, info.idxInConj, info.numOfClauses, encAssumeStep(extractVarNames(encChild))))
+      encChild, variableMap, info.idxInConj, info.numOfClauses, variableIntroduction))
   }
 
   /** Instantiate the parent and select the child using the central conjunction-elimination theorem. */
