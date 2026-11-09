@@ -317,11 +317,16 @@ object LogicConst {
       LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
     }
 
+    def apply(ty: OlMonoType, predicate: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(predicate)))
+
     def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
       case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
         val (n, Some(bty)) = bs
         val typed = (n, bty)
         Some((typed, body))
+      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(_), Arg.Explicit(LpTerm.Lam((n, Some(bty)), body)))) =>
+        Some(((n, bty), body))
       case _ => None
     }
   }
@@ -334,11 +339,16 @@ object LogicConst {
       LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
     }
 
+    def apply(ty: OlMonoType, predicate: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(predicate)))
+
     def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
       case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
         val (n, Some(bty)) = bs
         val typed = (n, bty)
         Some((typed, body))
+      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(_), Arg.Explicit(LpTerm.Lam((n, Some(bty)), body)))) =>
+        Some(((n, bty), body))
       case _ => None
     }
   }
@@ -352,11 +362,16 @@ object LogicConst {
       LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
     }
 
+    def apply(ty: OlMonoType, predicate: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(predicate)))
+
     def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
       case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
         val (n, Some(bty)) = bs
         val typed = (n, bty)
         Some((typed, body))
+      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(_), Arg.Explicit(LpTerm.Lam((n, Some(bty)), body)))) =>
+        Some(((n, bty), body))
       case _ => None
     }
   }

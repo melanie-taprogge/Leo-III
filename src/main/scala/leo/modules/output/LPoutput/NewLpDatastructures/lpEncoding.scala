@@ -159,6 +159,10 @@ object TermEncoding {
       if head == LogicConst.cAll || head == LogicConst.cEx || head == LogicConst.cCh =>
       LpTerm.App(head, Seq(Arg.Explicit(normalizeAfterBeta(argument, preserveLambda = true))))
 
+    case LpTerm.App(head, Seq(typeArgument @ Arg.ExplicitTypeArg(_), Arg.Explicit(argument)))
+      if head == LogicConst.cAll || head == LogicConst.cEx || head == LogicConst.cCh =>
+      LpTerm.App(head, Seq(typeArgument, Arg.Explicit(normalizeAfterBeta(argument, preserveLambda = true))))
+
     case LpTerm.App(head, args) =>
       val reducedHead = normalizeAfterBeta(head)
       val reducedArgs = args.map {
@@ -261,7 +265,8 @@ object TermEncoding {
             }
             LogicConst.Forall(quantifiedVar, encBody)
           case Forall(argument) =>
-            App(LogicConst.cAll, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
+            LogicConst.Forall(type2LP(argument.ty._funDomainType),
+              term2LP(argument, bVars, suppressReduction, replaceUnknownVars))
         }
       case Exists(_) =>
         t match {
@@ -274,7 +279,8 @@ object TermEncoding {
             }
             LogicConst.Exists(quantifiedVar, encBody)
           case Exists(argument) =>
-            App(LogicConst.cEx, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
+            LogicConst.Exists(type2LP(argument.ty._funDomainType),
+              term2LP(argument, bVars, suppressReduction, replaceUnknownVars))
         }
       case Choice(_) | Epsilon(_) =>
         val selector: HOLUnaryConnective = if (Epsilon.unapply(t).isDefined) Epsilon else Choice
@@ -288,7 +294,8 @@ object TermEncoding {
             }
             LogicConst.Choice(quantifiedVar, encBody)
           case selector(argument) =>
-            App(LogicConst.cCh, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
+            LogicConst.Choice(type2LP(argument.ty._funDomainType),
+              term2LP(argument, bVars, suppressReduction, replaceUnknownVars))
         }
       /*
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet ${t.pretty}")

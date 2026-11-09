@@ -74,9 +74,13 @@ object PatternBuilder {
       def descendQuantifier(argument: Term,
                             head: LpTerm[Level.Obj]): Either[String, PositionPatternContext] =
         if (currentPosition == 2) {
-          // Leo's position 1 is the type argument, which Lambdapi infers. The
-          // term argument may be either an explicit lambda or a bare function.
-          descend(argument, pattern => LpTerm.App(head, Seq(Arg.Explicit(pattern))))
+          // Leo's position 1 is the type argument. As in term translation,
+          // retain it for bare predicates; explicit lambdas carry their domain.
+          val typeArguments: Seq[Arg[Level.Obj]] = argument match {
+            case _ :::> _ => Seq.empty
+            case _ => Seq(Arg.ExplicitTypeArg(type2LP(argument.ty._funDomainType)))
+          }
+          descend(argument, pattern => LpTerm.App(head, typeArguments :+ Arg.Explicit(pattern)))
         } else invalidPosition("quantifier argument 2")
 
       term match {

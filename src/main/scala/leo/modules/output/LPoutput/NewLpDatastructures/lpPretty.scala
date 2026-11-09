@@ -245,6 +245,9 @@ object Renderer {
         val ifs = qname(sig.termNames(i), ro)
         val encArgs: Seq[String] = args match {
           case Nil => Seq()
+          // todo
+          case Seq(Arg.ExplicitTypeArg(_), predicate @ Arg.Explicit(_)) =>
+            renderArgs(Seq(predicate), ro, sig)
           case Arg.ExplicitTypeArg(t) +: remArgs => s"[${olTy(t, ro, sig)}]" +: renderArgs(remArgs,ro,sig)
           case _ => renderArgs(args, ro, sig)
         }
