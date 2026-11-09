@@ -240,7 +240,8 @@ object RewriteSimpEncoding {
     *    parent variables disappear from the child, first prove the child under
     *    those variables and then instantiate that local proof with witnesses.
     */
-  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], Int)], parentNameLpEnc: Seq[LpTerm[Level.Obj]], _sig: LpSig): EncodeResult = {
+  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], Int)], parentNameLpEnc: Seq[LpTerm[Level.Obj]], _sig: LpSig,
+                 useTypedIntroduction: Boolean = false): EncodeResult = {
     Out.lp_debug_info("Encoding instance of rewrite simplification")
     assert(parents.length == parentNameLpEnc.length)
 

@@ -155,7 +155,8 @@ object ClausificationEncoding {
     */
   def encSkolem(step: ClauseProxy,
                 parentProofs: Seq[LpTerm[Level.Obj]],
-                sig: LpSig): EncodeResult = {
+                sig: LpSig,
+                useTypedIntroduction: Boolean = false): EncodeResult = {
     val result = for {
       // Validate the source step and translate both clauses with shared variable names.
       ctx <- initSkolemContext(step, parentProofs, sig)
@@ -280,7 +281,8 @@ object ClausificationEncoding {
     */
   def encCnfConj(step: ClauseProxy,
                  parentProofs: Seq[LpTerm[Level.Obj]],
-                 sig: LpSig): EncodeResult = {
+                 sig: LpSig,
+                useTypedIntroduction: Boolean = false): EncodeResult = {
     // Validate the selection and prepare translations and child-variable assumptions.
     initCnfConjContext(step, parentProofs) match {
       case Left(reason) => NotEncodable(reason)

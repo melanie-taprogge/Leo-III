@@ -35,8 +35,11 @@ object LPoutput {
 
   val outputSingleFile = false
 
-  // Provisional threshold for explicit typing of steps with many clause variables.
+  // Provisional threshold shared by explicit printing and typed variable introduction.
   private val explicitTypesVariableThreshold = 100
+
+  private def useLargeContextEncoding(variableCount: Int, gdvMode: Boolean): Boolean =
+    !gdvMode && variableCount >= explicitTypesVariableThreshold
 
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
@@ -291,7 +294,8 @@ object LPoutput {
   }
 
   def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo,
-              proofReferences: ProofReferences = ProofReferences()): (Option[EncodedProofStep], lpProofStepInfo) = {
+              proofReferences: ProofReferences = ProofReferences(),
+              useTypedIntroduction: Boolean = false): (Option[EncodedProofStep], lpProofStepInfo) = {
 
     val stepName = nameStep(cl.id).name
     val rule = cl.annotation.fromRule
@@ -324,14 +328,14 @@ object LPoutput {
               }
 
             case leo.modules.calculus.CnfSkolem =>
-              val encoding = encSkolem(cl, parentProofs, sig)
+              val encoding = encSkolem(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
               encoding match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
               }
 
             case leo.modules.calculus.CnfConj =>
-              val encoding = encCnfConj(cl, parentProofs, sig)
+              val encoding = encCnfConj(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
               encoding match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
@@ -393,7 +397,7 @@ object LPoutput {
                     (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded), outputInfo)
 //                  }
                 }else if (cl.furtherInfo.addInfoSimpRule.get == "detUniInferences") {
-                  val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,parentProofs.head,sig)
+                  val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
                   encProof match {
                     case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "DetUniSimp", Left(scripts), None), outputInfo)
                     case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some(reason)), outputInfo)
@@ -408,14 +412,14 @@ object LPoutput {
               }
 
             case leo.modules.calculus.PreUni =>
-              val encProof = encodePreUni(cl.annotation.parents.head, cl, parentProofs.head, sig)
+              val encProof = encodePreUni(cl.annotation.parents.head, cl, parentProofs.head, sig, useTypedIntroduction = useTypedIntroduction)
               encProof match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "PreUni", Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", Left(Seq.empty), Some(reason)), outputInfo)
               }
 
             case leo.modules.calculus.RewriteSimp =>
-              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentProofs, sig)
+              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
               encodingRewrite match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(Seq.empty), Some(reason)), outputInfo)
@@ -433,7 +437,7 @@ object LPoutput {
               (toProofStepOld(cl, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
 
             case leo.modules.calculus.PatternUni =>
-              val encProof = encodePatternUni(cl.annotation.parents.head,cl,parentProofs.head,sig)
+              val encProof = encodePatternUni(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
               encProof match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None),outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)),outputInfo)
@@ -760,7 +764,9 @@ object LPoutput {
       } else {
         val infoForStep = new lpProofStepInfo(clausifiedSteps.toMap, identicalSteps)
         val references = if (gdv_mode) ProofReferences() else packageReferences
-        val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep, references)
+        val useTypedIntroduction = useLargeContextEncoding(step.cl.implicitlyBound.size, gdv_mode)
+        val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep, references,
+          useTypedIntroduction = useTypedIntroduction)
         clausifiedSteps ++= newInfo.clausifiedSteps
         identicalSteps ++= newInfo.identicalSteps
         additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
@@ -910,7 +916,7 @@ object LPoutput {
       }
 
       packageSteps.foreach { result =>
-        val stepRo = ro.copy(explicitTypes = result.variableCount >= explicitTypesVariableThreshold)
+        val stepRo = ro.copy(explicitTypes = useLargeContextEncoding(result.variableCount, gdvMode = false))
         val parents = result.source.annotation.parents.map(parent => s"step${parent.id}").mkString(", ")
         val source = LpProofScript.Comment(s"parents: [$parents]")
         proofFileSB.append(Renderer.proof(result.comment, ro, sig)).append("\n")
