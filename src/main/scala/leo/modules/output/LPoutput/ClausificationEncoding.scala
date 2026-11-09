@@ -1,7 +1,7 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, Literal, Position, QuantExists, QuantUniv, Role_Definition, Signature, SkolemStep, Term, Type, isPropSet}
+import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, GeneralizationOccurrence, Literal, MoveQuantStep, Position, QuantExists, QuantUniv, Role_Definition, Signature, SkolemStep, Term, Type, isPropSet}
 import leo.datastructures.Term.:::>
 import leo.modules.HOLSignature.{Exists, Forall, Not}
 import leo.modules.calculus.{CnfConj, CnfSkolem}
@@ -58,12 +58,148 @@ object ClausificationEncoding {
                                           clauseCount: Int,
                                           variableIntroduction: Seq[LpProofScript])
 
-  /** Residual clausification for both FullCNF and RenameCNF.
+  /** A generalization with mandatory occurrence evidence and shared translations.
+    * Vacuity refers to the immediate after-clause, not the final CNF child.
+    */
+  private final case class CnfGeneralization(info: MoveQuantStep,
+                                            occurrence: GeneralizationOccurrence,
+                                            before: lpClauseInst,
+                                            after: lpClauseInst,
+                                            vacuous: Boolean)
+
+  /** Stable source inputs and translations for one residual CNF segment.
+    * Generalizations remain in source order; reconstruction visits them backwards.
+    */
+  private final case class CnfContext(step: ClauseProxy,
+                                      parentProof: LpTerm[Level.Obj],
+                                      variableMap: Map[Int, String],
+                                      encParent: lpClauseInst,
+                                      encChild: lpClauseInst,
+                                      generalizations: Seq[CnfGeneralization])
+
+  /** The current obligation is body quantified over pendingVars, in that order.
+    * Introduced ordinary variables are in scope; pending variables stay bound.
+    */
+  private final case class CnfStage(body: LpTerm[Level.Obj],
+                                    introducedVars: Seq[(Int, Type)],
+                                    pendingVars: Seq[(Int, Type)],
+                                    scripts: Seq[LpProofScript])
+
+  /** Validate the selected source path and translate parent, child, and recorded
+    * immediate states once, using a shared variable map. Missing occurrence
+    * evidence is unsupported and must not be classified as a vacuous binder.
+    */
+  private def initCnfContext(step: ClauseProxy,
+                             parentProofs: Seq[LpTerm[Level.Obj]],
+                             sig: LpSig): Either[String, CnfContext] = {
+    Left(s"CNF step ${step.id}: context initialization is not implemented yet")
+  }
+
+  /** encCnf — Outline of the encoded proof
+    *
+    * Let Q(V, F) universally quantify F over the pending variables V.
+    * A residual source segment alternates Boolean blocks L -> R with recorded
+    * generalizations Before -> After(v). Reconstruct its child backwards:
+    *
+    * 1. Reorder the child parameters, then introduce only ordinary parameters.
+    * 2. For each recorded generalization, in reverse source order:
+    *    a. Prove H : π (Q(V, After) = Q(V, current)) by the Boolean tactic;
+    *       refine (=⇒ H) _ to restore its immediate after-state.
+    *    b. For a vacuous binder, restore it by a targeted constant-quantifier
+    *       rewrite. Otherwise prove one gen : π (Q(W, Before) ⇒ Q(W, ∀v. After))
+    *       by forward movement in the antecedent, then refine gen _.
+    * 3. Undo the remaining Boolean block to recover the parent formula.
+    * 4. Refine with the resolved parent proof applied to available parameters.
     */
   def encCnf(step: ClauseProxy,
              parentProofs: Seq[LpTerm[Level.Obj]],
              sig: LpSig): EncodeResult = {
-    NotEncodable(s"CNF step ${step.id}: residual clausification reconstruction is not implemented yet")
+    // Validate and translate the segment, retaining the recorded endpoints.
+    val ctx = initCnfContext(step, parentProofs, sig) match {
+      case Right(value) => value
+      case Left(reason) =>
+        Out.lp_debug_info(reason)
+        return NotEncodable(reason)
+    }
+
+    // Introduce ordinary parameters while keeping generalized variables bound.
+    var stage = encCnfVariablePrefix(ctx) match {
+      case Right(value) => value
+      case Left(reason) =>
+        Out.lp_debug_info(reason)
+        return NotEncodable(reason)
+    }
+
+    // Undo each trailing Boolean block and its preceding generalization.
+    val generalizations = ctx.generalizations.reverseIterator
+    while (generalizations.hasNext) {
+      val generalization = generalizations.next()
+      val afterBoolean = encCnfBooleanBlock(ctx, stage, generalization.after.term) match {
+        case Right(value) => value
+        case Left(reason) =>
+          Out.lp_debug_info(reason)
+          return NotEncodable(reason)
+      }
+      stage = encCnfGeneralization(ctx, afterBoolean, generalization) match {
+        case Right(value) => value
+        case Left(reason) =>
+          Out.lp_debug_info(reason)
+          return NotEncodable(reason)
+      }
+    }
+
+    // Recover the original formula and close with its resolved proof.
+    val parentStage = encCnfBooleanBlock(ctx, stage, ctx.encParent.term) match {
+      case Right(value) => value
+      case Left(reason) =>
+        Out.lp_debug_info(reason)
+        return NotEncodable(reason)
+    }
+    val closing = encCnfParent(ctx, parentStage) match {
+      case Right(value) => value
+      case Left(reason) =>
+        Out.lp_debug_info(reason)
+        return NotEncodable(reason)
+    }
+
+    Encoded(parentStage.scripts ++ closing)
+  }
+
+  /** Reorder the child prefix using a typed callback and introduce only its
+    * ordinary parameters. Return the remaining prefix and initial obligation.
+    */
+  private def encCnfVariablePrefix(ctx: CnfContext): Either[String, CnfStage] = {
+    Left(s"CNF step ${ctx.step.id}: variable-prefix reconstruction is not implemented yet")
+  }
+
+  /** Restore an earlier body under the current pending prefix using one Boolean
+    * equality bridge. Equal endpoints need no bridge; pending variables stay
+    * quantified both in the main obligation and inside the Boolean proof.
+    */
+  private def encCnfBooleanBlock(ctx: CnfContext,
+                                 stage: CnfStage,
+                                 earlierBody: LpTerm[Level.Obj]): Either[String, CnfStage] = {
+    Left(s"CNF step ${ctx.step.id}: Boolean-block reconstruction is not implemented yet")
+  }
+
+  /** Restore one recorded before-state. Use a direct targeted rewrite for a
+    * vacuous binder; otherwise prove one implication bridge by moving the
+    * quantifier outward in its antecedent, with beta-only cleanup between moves.
+    * Update the body; only a non-vacuous event consumes a pending binder.
+    */
+  private def encCnfGeneralization(ctx: CnfContext,
+                                   stage: CnfStage,
+                                   generalization: CnfGeneralization): Either[String, CnfStage] = {
+    Left(s"CNF step ${ctx.step.id}: generalization reconstruction is not implemented yet")
+  }
+
+  /** Check that replay reached the parent with no pending generalized variables,
+    * then apply its resolved proof to the introduced parameters. The returned
+    * closing fragment is appended to the accumulated stage script by encCnf.
+    */
+  private def encCnfParent(ctx: CnfContext,
+                           stage: CnfStage): Either[String, Seq[LpProofScript]] = {
+    Left(s"CNF step ${ctx.step.id}: parent application is not implemented yet")
   }
 
   /** Validate the monomorphic source step and translate its parent and child once.
