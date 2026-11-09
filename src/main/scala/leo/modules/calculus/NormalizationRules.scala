@@ -357,40 +357,61 @@ object CoreCNF {
 
   final case class CnfResolution(clauses: Seq[Clause], steps: Seq[CnfStep])
 
-  final case class NextSkolem(
-                               afterFormula: Term,
-                               remainingFragment: CnfFragment,
-                               data: SkolemData,
-                               binderPath: Position, // Quantifier position within extractNext's before-formula.
-                               addInfo: Option[SkolemStep] = None
-                             )
+  private sealed trait QuantifierAction
+  private final case class Generalize(addInfo: MoveQuantStep) extends QuantifierAction
+  private final case class Skolemize(data: SkolemData, addInfo: Option[SkolemStep]) extends QuantifierAction
+
+  private final case class NextQuantifier(afterFormula: Term,
+                                          remainingFragment: CnfFragment,
+                                          binderPath: Position,
+                                          action: QuantifierAction)
+
+  /** Combine source-ordered metadata consumed within one residual CNF segment. */
+  private def mergeCnfInfo(left: AddInfoCnf, right: AddInfoCnf): AddInfoCnf =
+    AddInfoCnf(rewriteUnderBinder = left.rewriteUnderBinder || right.rewriteUnderBinder,
+      renameHappend = left.renameHappend || right.renameHappend,
+      addInfoQuants = left.addInfoQuants ++ right.addInfoQuants,
+      derivedClauses = left.derivedClauses ++ right.derivedClauses)
 
   final def cnfFragment2Clause(input: Clause, delayedCNF: CnfFragment): CnfResolution = {
-    var currentFragment = delayedCNF
     var currentClause = input
     val steps = mutable.ArrayBuffer.empty[CnfStep]
-    var (beforeFormula, consumedFragment, cnfInfo, next) = extractNext(currentFragment)
+    var (beforeFormula, consumedFragment, cnfInfo, next) = extractNext(delayedCNF)
 
     while (next.nonEmpty) {
       val event = next.get
       val eventBefore = Clause(Literal(beforeFormula, true))
-      if (currentClause != eventBefore) {
-        steps += CnfStep(eventBefore, addInfo = cnfInfo.copy(derivedClauses = Seq(eventBefore)))
-        currentClause = eventBefore
+      val eventAfter = Clause(Literal(event.afterFormula, true))
+
+      event.action match {
+        case Generalize(quantInfo) =>
+          // Record the complete immediate states without adding a proof node.
+          // Subsequent extraction can perform further Boolean clausification.
+          val position = ClausePosition(eventBefore, 0, Literal.leftSide, event.binderPath)
+          val occurrence = GeneralizationOccurrence(position, eventAfter)
+          cnfInfo = cnfInfo.copy(addInfoQuants = cnfInfo.addInfoQuants :+
+            quantInfo.copy(occurrence = Some(occurrence)))
+
+        case Skolemize(data, addInfo) =>
+          // Only Skolemizations and the existing residual CNF segments create
+          // proof boundaries. All preceding generalizations belong to this segment.
+          if (currentClause != eventBefore) {
+            steps += CnfStep(eventBefore, addInfo = cnfInfo.copy(derivedClauses = Seq(eventBefore)))
+            currentClause = eventBefore
+          }
+
+          val position = ClausePosition(currentClause, 0, Literal.leftSide, event.binderPath)
+          val skolemInfo = addInfo.map(_.copy(position = Some(position)))
+          steps += CnfStep(eventAfter, Some((data, position)),
+            AddInfoCnf(addInfoQuants = skolemInfo.toVector, derivedClauses = Seq(eventAfter)))
+          currentClause = eventAfter
+          cnfInfo = AddInfoCnf()
       }
 
-      val eventAfter = Clause(Literal(event.afterFormula, true))
-      val binderPath = ClausePosition(currentClause, 0, Literal.leftSide, event.binderPath)
-      val skolemInfo = event.addInfo.map(_.copy(position = Some(binderPath)))
-      steps += CnfStep(eventAfter, Some((event.data, binderPath)),
-        AddInfoCnf(addInfoQuants = skolemInfo.toVector, derivedClauses = Seq(eventAfter)))
-      currentClause = eventAfter
-      currentFragment = event.remainingFragment
-
-      val extracted = extractNext(currentFragment)
+      val extracted = extractNext(event.remainingFragment)
       beforeFormula = extracted._1
       consumedFragment = extracted._2
-      cnfInfo = extracted._3
+      cnfInfo = mergeCnfInfo(cnfInfo, extracted._3)
       next = extracted._4
     }
 
@@ -405,12 +426,13 @@ object CoreCNF {
     CnfResolution(finalClauses, steps.toVector)
   }
 
-  // The returned fragment has its ordinary CNF metadata markers consumed, up to the next Skolem.
-  private def extractNext(fragment: CnfFragment): (Term, CnfFragment, AddInfoCnf, Option[NextSkolem]) = {
+  // Consume ordinary CNF markers up to the next quantifier event. Complete
+  // before/after contexts and binder paths are assembled on the return path.
+  private def extractNext(fragment: CnfFragment): (Term, CnfFragment, AddInfoCnf, Option[NextQuantifier]) = {
 
     def extractBinary(left: CnfFragment, right: CnfFragment,
                       connective: (Term, Term) => Term,
-                      rebuild: (CnfFragment, CnfFragment) => CnfFragment): (Term, CnfFragment, AddInfoCnf, Option[NextSkolem]) = {
+                      rebuild: (CnfFragment, CnfFragment) => CnfFragment): (Term, CnfFragment, AddInfoCnf, Option[NextQuantifier]) = {
       val (leftFormula, consumedLeft, leftInfo, leftEvent) = extractNext(left)
       leftEvent match {
         case Some(event) =>
@@ -422,9 +444,7 @@ object CoreCNF {
           )))
         case None =>
           val (rightFormula, consumedRight, rightInfo, rightEvent) = extractNext(right)
-          val info = AddInfoCnf(renameHappend = leftInfo.renameHappend || rightInfo.renameHappend,
-            addInfoQuants = leftInfo.addInfoQuants ++ rightInfo.addInfoQuants)
-          (connective(leftFormula, rightFormula), rebuild(consumedLeft, consumedRight), info, rightEvent.map(event => event.copy(
+          (connective(leftFormula, rightFormula), rebuild(consumedLeft, consumedRight), mergeCnfInfo(leftInfo, rightInfo), rightEvent.map(event => event.copy(
             afterFormula = connective(leftFormula, event.afterFormula),
             remainingFragment = rebuild(consumedLeft, event.remainingFragment),
             binderPath = event.binderPath.preprendArgPos(2)
@@ -436,11 +456,18 @@ object CoreCNF {
       case Ready(clauses) => (formulaOf(clauses), fragment, AddInfoCnf(), None)
       case Skolemized(before, after, data, body, lpData) =>
         val binderPath = if (before.polarity) Position.root else Position.root.argPos(1)
-        (Literal.asTerm(before), fragment, AddInfoCnf(), Some(NextSkolem(Literal.asTerm(after), body, data, binderPath, lpData)))
+        (Literal.asTerm(before), fragment, AddInfoCnf(),
+          Some(NextQuantifier(Literal.asTerm(after), body, binderPath, Skolemize(data, lpData))))
       case Renamed(_, after) =>
         val (formula, consumed, info, next) = extractNext(after)
         (formula, consumed, info.copy(renameHappend = true), next)
+      case MovedQuant(before, Some(after), body, Some(quantInfo)) =>
+        val binderPath = if (before.polarity) Position.root else Position.root.argPos(1)
+        (Literal.asTerm(before), fragment, AddInfoCnf(),
+          Some(NextQuantifier(Literal.asTerm(after), body, binderPath, Generalize(quantInfo))))
       case MovedQuant(_, _, body, quantInfo) =>
+        // Without local reconstruction evidence retain the previous consuming
+        // behavior, including any variable metadata that is available.
         val (formula, consumed, info, next) = extractNext(body)
         (formula, consumed, info.copy(addInfoQuants = quantInfo.toVector ++ info.addInfoQuants), next)
       case Append(left, right) => extractBinary(left, right, &, Append.apply)
