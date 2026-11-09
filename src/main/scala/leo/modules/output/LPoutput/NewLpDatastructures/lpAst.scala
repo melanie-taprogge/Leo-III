@@ -96,6 +96,10 @@ object LpTerm {
   final case class Const[L <: Level](sym: SymRef) extends LpTerm[L]
   final case class Lam[L <: Level](binder: (Name, Option[LpType]), body: LpTerm[L]) extends LpTerm[L]
   final case class App[L <: Level](f: LpTerm[L], args: Seq[Arg[L]]) extends LpTerm[L]
+  /** Typed local definition in a Lambdapi meta-level term. */
+  final case class Let(binder: (Name, LpType),
+                       value: LpTerm[Level.Meta],
+                       body: LpTerm[Level.Meta]) extends LpTerm[Level.Meta]
   /** Placeholder in Lambdapi */
   final case class Wildcard[L <: Level]() extends LpTerm[L]
 

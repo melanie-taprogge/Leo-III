@@ -136,6 +136,8 @@ object Renderer {
           case None => n.value
         }
         s"(λ $dec, $bodyStr)"
+      case Let((name, domain), value, body) =>
+        s"(let ${name.value} : ${ty(domain, ro, sig)} ≔ ${renderTerm(value, ro, sig)} in ${renderTerm(body, ro, sig)})"
       case App(f, args) =>
         val (imps, exps) = args.partition(arg => arg.isInstanceOf[Arg.Implicit[_]] || arg.isInstanceOf[Arg.ImplicitTypeArg[_]])
         val is = if (imps.isEmpty) "" else " " + imps.map {

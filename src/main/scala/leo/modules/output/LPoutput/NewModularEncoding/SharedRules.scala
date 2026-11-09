@@ -27,6 +27,30 @@ object AssumeStep {
       (Seq(Assume(varNames)))
     } else (Seq.empty)
   }
+
+  /** Introduce the translated child's variables, optionally fixing the proof hole's type.
+    * The caller selects the mode; local name-only assumptions keep using encAssumeStep.
+    */
+  def encClauseVariableIntroduction(encChild: lpClauseInst,
+                                    useLetBasedIntroduction: Boolean,
+                                    sig: LpSig): Seq[LpProofScript] = {
+    val names = extractVarNames(encChild)
+    if (!useLetBasedIntroduction || names.isEmpty) encAssumeStep(names)
+    else {
+      val binders = encChild.metaVars
+      require(binders.forall(_.ty.isDefined), "Clause-variable introduction requires typed binders")
+      val goal = Prf(encChild.term)
+      val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
+      val bodyName = Name(LpSig.freshIfNeeded("body", signatureNames ++ names.map(_.value)))
+      val hole = LpTerm.Let(bodyName -> goal, LpTerm.Wildcard[Level.Meta](),
+        LpTerm.Var[Level.Meta](bodyName, Some(goal)))
+      val term = binders.foldRight[LpTerm[Level.Meta]](hole) { case (binder, body) =>
+        LpTerm.Lam[Level.Meta](binder.name -> binder.ty, body)
+      }
+      Seq(Refine(term))
+    }
+  }
+
 }
 
 object ProofTermUtil {
