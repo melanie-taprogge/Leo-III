@@ -236,7 +236,10 @@ object CoreCNF {
   final case class Renamed(before: Literal,
                            after: CnfFragment,
                           ) extends CnfFragment
-  final case class MovedQuant(before: Literal, after: CnfFragment, addInfo: MoveQuantStep) extends CnfFragment
+  final case class MovedQuant(before: Literal,
+                              after: Option[Literal],
+                              body: CnfFragment,
+                              addInfo: Option[MoveQuantStep] = None) extends CnfFragment
 
   private[calculus] final def `++_delayed`(left: CnfFragment, right: CnfFragment): CnfFragment =
     (left, right) match {
@@ -289,8 +292,10 @@ object CoreCNF {
             if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
               `++_delayed`(apply0(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, true)), apply0(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, true)))
             } else {
-              val v = vargen.next(ty);
-              MovedQuant(l, apply0(v +: fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true)), MoveQuantStep(v, QuantUniv))
+              val v = vargen.next(ty)
+              val litAfter = Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true)
+              val next = apply0(v +: fvs, tyFVs, vargen, renaming, litAfter)
+              MovedQuant(l, Some(litAfter), next, Some(MoveQuantStep(v, QuantUniv)))
             }
 
           case Forall(a@(ty :::> t)) if !l.polarity =>
@@ -311,8 +316,10 @@ object CoreCNF {
             if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
               `++_delayed`(apply0(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, false)), apply0(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, false)))
             } else {
-              val v = vargen.next(ty);
-              MovedQuant(l, apply0(v +: fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false)), MoveQuantStep(v, QuantExists))
+              val v = vargen.next(ty)
+              val litAfter = Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false)
+              val next = apply0(v +: fvs, tyFVs, vargen, renaming, litAfter)
+              MovedQuant(l, Some(litAfter), next, Some(MoveQuantStep(v, QuantExists)))
             }
           case TyForall(a@TypeLambda(t)) if l.polarity => val ty = vargen.next(); apply0(fvs, ty +: tyFVs, vargen, renaming, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true))
 
@@ -433,9 +440,9 @@ object CoreCNF {
       case Renamed(_, after) =>
         val (formula, consumed, info, next) = extractNext(after)
         (formula, consumed, info.copy(renameHappend = true), next)
-      case MovedQuant(_, after, quantInfo) =>
-        val (formula, consumed, info, next) = extractNext(after)
-        (formula, consumed, info.copy(addInfoQuants = quantInfo +: info.addInfoQuants), next)
+      case MovedQuant(_, _, body, quantInfo) =>
+        val (formula, consumed, info, next) = extractNext(body)
+        (formula, consumed, info.copy(addInfoQuants = quantInfo.toVector ++ info.addInfoQuants), next)
       case Append(left, right) => extractBinary(left, right, &, Append.apply)
       case Product(left, right) => extractBinary(left, right, |||, Product.apply)
     }
@@ -449,7 +456,7 @@ object CoreCNF {
       case Product(left, right) => |||(pendingFormula(left), pendingFormula(right))
       case Skolemized(before, _, _, _, _) => Literal.asTerm(before)
       case Renamed(before, _) => Literal.asTerm(before)
-      case MovedQuant(before, _, _) => Literal.asTerm(before)
+      case MovedQuant(before, _, _, _) => Literal.asTerm(before)
     }
   }
 
@@ -477,7 +484,7 @@ object CoreCNF {
       case Skolemized(_, _, _, _, _) =>
         throw new IllegalStateException("Cannot flatten a CNF fragment with an unconsumed Skolemization marker.")
       case Renamed(_, after) => flatten(after)
-      case MovedQuant(_, after, _) => flatten(after)
+      case MovedQuant(_, _, body, _) => flatten(body)
     }
   }
 }

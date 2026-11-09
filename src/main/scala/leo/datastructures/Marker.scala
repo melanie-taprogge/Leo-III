@@ -181,8 +181,17 @@ final case class SkolemStep(sko: Signature.Key,
                              polarity: QuantPolarity,
                              position: Option[ClausePosition] = None // Eliminated quantifier in the immediate formula parent.
                            ) extends QuantStep
+/** One generalization in its complete intermediate clause context.
+  * position.cl is the clause immediately before the generalization; after is
+  * its immediate result, before further clausification.
+  */
+final case class GeneralizationOccurrence(position: ClausePosition,
+                                           after: Clause)
+
 final case class MoveQuantStep(corrChildVar: (Int, Type),
-                                polarity: QuantPolarity
+                                polarity: QuantPolarity,
+                                // None means occurrence evidence has not been retained.
+                                occurrence: Option[GeneralizationOccurrence] = None
                               ) extends QuantStep
 case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
                       renameHappend: Boolean = false,

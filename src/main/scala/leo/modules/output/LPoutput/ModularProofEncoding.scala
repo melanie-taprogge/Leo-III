@@ -317,7 +317,7 @@ object ModularProofEncoding {
 
       // Else:
       // 1) partition into "new" and "old" variables
-      val newBVars = cnfInfo.addInfoQuants.collect { case MoveQuantStep(v, _) => v }
+      val newBVars = cnfInfo.addInfoQuants.collect { case MoveQuantStep(v, _, _) => v }
       // ensure that all newly added vars are amongst the boundVars of the step
       val allIds = allBvars.map(_._1).toSet
       val newIds = newBVars.map(_._1).toSet
@@ -355,7 +355,7 @@ object ModularProofEncoding {
       // 1. Split the list of steps into the part that contains any prenex (universal) quantifiers and the rest (only skolem steps)
       // the terms to skolemize more deeply lested terms
       val lastUQIdx = cnfInfo.addInfoQuants.lastIndexWhere {
-        case MoveQuantStep(_, _) => true
+        case MoveQuantStep(_, _, _) => true
         case _ => false
       }
       val (prenexQuants, remainingSk) =
