@@ -6,9 +6,9 @@ import leo.datastructures.Term.:::>
 import leo.modules.HOLSignature.{Exists, Forall, Not}
 import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
-import leo.modules.output.LPoutput.LpLibs.{Clausification, LeoTactics, MetaTheorems}
+import leo.modules.output.LPoutput.LpLibs.{Clausification, EqRules, LeoTactics, MetaTheorems}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Repeat, Rewrite, RewritePattern, Side}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Repeat, Rewrite, RewritePattern, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, SymRef, lpClauseInst, lpTermBuilder}
@@ -371,14 +371,25 @@ object ClausificationEncoding {
                                    stage: CnfStage,
                                    generalization: CnfGeneralization,
                                    sig: LpSig): Either[String, CnfStage] = {
-    // Validate that the current body is the recorded after-state and that a
-    // non-vacuous event owns the innermost pending variable.
-    // For a vacuous event, obtain the fragment from encCnfVacuousBinder.
-    // Otherwise call planCnfQuantifierLifting, then pass its ordered moves to
-    // encCnfGeneralizationBridge together with sig for fresh proof names.
-    // Append the fragment and restore the recorded before-body. Consume the
-    // innermost pending variable only for a non-vacuous event.
-    Left(s"CNF step ${ctx.step.id}: generalization reconstruction is not implemented yet")
+    // The preceding Boolean block must have recovered this event's exact after-state.
+    if (stage.body != generalization.after.term)
+      return Left(s"CNF step ${ctx.step.id}: current body does not match the recorded generalization after-state")
+
+    if (!generalization.vacuous) {
+      // Non-vacuous reconstruction will validate the innermost pending variable,
+      // plan its lifting, and emit the whole-event implication bridge.
+      Left(s"CNF step ${ctx.step.id}: generalization reconstruction is not implemented yet")
+    } else {
+      val scripts = encCnfVacuousBinder(ctx, stage, generalization) match {
+        case Right(value) => value
+        case Left(reason) => return Left(reason)
+      }
+      // A vacuous variable never enters the pending prefix. Restore only the
+      // formula body, retaining both variable lists and the accumulated proof.
+      Out.lp_debug_info(s"CNF step ${ctx.step.id}: restored vacuous binder ${generalization.info.corrChildVar._1}, pending variables ${stage.pendingVars.map(_._1)}")
+      Out.lp_debug_info(s"CNF vacuous binder script:\n${scripts.map(Renderer.proof(_, RenderOptions(), sig)).mkString("\n")}")
+      Right(stage.copy(body = generalization.before.term, scripts = stage.scripts ++ scripts))
+    }
   }
 
   /** Restore a vacuous binder at its recorded occurrence without introducing
@@ -387,12 +398,38 @@ object ClausificationEncoding {
   private def encCnfVacuousBinder(ctx: CnfContext,
                                  stage: CnfStage,
                                  generalization: CnfGeneralization): Either[String, Seq[LpProofScript]] = {
-    // Use prepareClausePositionPattern to select and validate the original
-    // quantifier, retaining a surrounding negation for a negative existential.
-    // Wrap the selector beneath all pending variables, then reverse the
-    // appropriate constant-quantifier rule at that occurrence.
-    // Return the targeted rewrite and beta-only cleanup as a proof fragment.
-    Left(s"CNF step ${ctx.step.id}: vacuous-binder reconstruction is not implemented yet")
+    if (!generalization.vacuous)
+      return Left(s"CNF step ${ctx.step.id}: constant-quantifier reconstruction requires a vacuous event")
+
+    // Replace the whole recorded binder by a hole. Its surrounding context
+    // also selects the unquantified body in the current after-state; for a
+    // negative existential, the negation stays in that surrounding context.
+    val context = PatternBuilder.prepareClausePositionPattern(generalization.occurrence.position) match {
+      case Right(value) => value
+      case Left(reason) => return Left(s"CNF step ${ctx.step.id}: $reason")
+    }
+    val (ty, universal) = (generalization.info.polarity, context.selectedTerm) match {
+      case (QuantUniv, Forall(typ :::> _)) => (typ, true)
+      case (QuantExists, Exists(typ :::> _)) => (typ, false)
+      case _ => return Left(s"CNF step ${ctx.step.id}: vacuous position does not select the expected quantifier with an explicit predicate abstraction")
+    }
+    if (ty != generalization.info.corrChildVar._2)
+      return Left(s"CNF step ${ctx.step.id}: vacuous quantifier type does not match the recorded variable type")
+
+    // Retain every pending binder around the occurrence, without opening any
+    // variables or searching for other occurrences of the selected body.
+    val hole = lpTermBuilder.localObj(Name("x"))
+    val bodyPattern = context.plug(RewritePattern(hole, hole))
+    val prefixedPattern = stage.pendingVars.foldRight(bodyPattern.LpTerm) { case ((id, typ), body) =>
+      LogicConst.Forall(Name(ctx.variableMap(id)) -> LpType.El(type2LP(typ)), body)
+    }
+    val pattern = bodyPattern.copy(LpTerm = prefixedPattern)
+
+    // Match the constant proposition in the goal, supplying only its binder
+    // type. Reverse the equality to restore the binder, then clean up beta-redexes.
+    val rule = if (universal) EqRules.AsTerms.mkForallConst(type2LP(ty))
+      else EqRules.AsTerms.mkExistsConst(type2LP(ty))
+    Right(Seq(Rewrite(Some(pattern), rule, Side.Left), Try(Simplify(onlyBeta = true))))
   }
 
   /** Plan forward lifting from the recorded quantifier to the formula root,
