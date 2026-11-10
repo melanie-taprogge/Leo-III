@@ -3,7 +3,7 @@ package leo.modules.output.LPoutput
 import leo.Out
 import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, GeneralizationOccurrence, Literal, MoveQuantStep, Position, QuantExists, QuantUniv, Role_Definition, Signature, SkolemStep, Term, Type, isPropSet}
 import leo.datastructures.Term.:::>
-import leo.modules.HOLSignature.{Exists, Forall, Not}
+import leo.modules.HOLSignature.{&, Exists, Forall, Not, |||}
 import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpLibs.{Clausification, EqRules, LeoTactics, MetaTheorems}
@@ -376,8 +376,16 @@ object ClausificationEncoding {
       return Left(s"CNF step ${ctx.step.id}: current body does not match the recorded generalization after-state")
 
     if (!generalization.vacuous) {
-      // Non-vacuous reconstruction will validate the innermost pending variable,
-      // plan its lifting, and emit the whole-event implication bridge.
+      val moves = planCnfQuantifierLifting(ctx, generalization) match {
+        case Right(value) => value
+        case Left(reason) => return Left(reason)
+      }
+      Out.lp_debug_info(s"CNF step ${ctx.step.id}: planned ${moves.size} quantifier move(s) for variable ${generalization.info.corrChildVar._1}")
+      moves.foreach { move =>
+        Out.lp_debug_info(s"CNF lifting move (body-relative): ${Renderer.proof(Rewrite(Some(move.pattern), move.rule), RenderOptions(), sig)}")
+      }
+      // Bridge emission will wrap these selectors beneath the remaining prefix
+      // and inside the implication antecedent, then consume the innermost variable.
       Left(s"CNF step ${ctx.step.id}: generalization reconstruction is not implemented yet")
     } else {
       val scripts = encCnfVacuousBinder(ctx, stage, generalization) match {
@@ -437,18 +445,83 @@ object ClausificationEncoding {
     */
   private def planCnfQuantifierLifting(ctx: CnfContext,
                                       generalization: CnfGeneralization): Either[String, Vector[CnfQuantifierMove]] = {
-    // Obtain the literal-side root and clause wrapper through
-    // prepareClausePositionPattern, then follow the recorded term position
-    // while carrying a one-hole context through conjunctions and disjunctions.
-    // At the selected binder validate kind and type. A negative existential
-    // first contributes the duality rewrite at the whole negated existential.
-    // On recursion unwind append the law for each crossed connective/branch;
-    // target the whole connective, not only the quantifier. A root binder
-    // needs no distribution moves, so an empty plan is valid.
+    // The recorded position selects the quantifier itself. Negative
+    // existentials need the whole negated existential as their initial focus.
+    val position = generalization.occurrence.position
+    val focus = generalization.info.polarity match {
+      case QuantUniv => position
+      case QuantExists =>
+        if (!position.pos.seq.lastOption.contains(1))
+          return Left(s"CNF step ${ctx.step.id}: negative-existential position must end in negation argument 1")
+        position.copy(pos = Position(position.pos.seq.dropRight(1)))
+    }
+
+    // Recorded occurrences contain the complete before-formula as one positive
+    // literal, even when the original input clause contained several literals.
+    val before = position.cl
+    if (before.lits.size != 1 || position.litIdx != 0 || position.side != Literal.leftSide ||
+        !before.lits.head.polarity || before.lits.head.equational)
+      return Left(s"CNF step ${ctx.step.id}: quantifier lifting requires a recorded single positive formula literal")
+
     // Assumed current producer invariant: clausification visits outer logical
     // binders first and does not descend through ordinary term abstractions
     // or choice predicates. This is not a restriction of Lambdapi rewriting.
-    Left(s"CNF step ${ctx.step.id}: quantifier-lifting planning is not implemented yet")
+    // We also assume the recorded path crosses only conjunctions/disjunctions,
+    // apart from the immediate negation of a generalized existential, as this
+    // is a direct consequence of the implementation.
+    type PatternContext = LpTerm[Level.Obj] => LpTerm[Level.Obj]
+    val hole = lpTermBuilder.localObj(Name("x"))
+
+    def visit(currentTerm: Term,
+              remainingPath: Position,
+              outerContext: PatternContext): Either[String, Vector[CnfQuantifierMove]] = {
+      val pattern = RewritePattern(outerContext(hole), hole)
+      if (remainingPath == Position.root) {
+        // Validate at the endpoint of this single traversal. Negative
+        // existentials first become universals at the whole negated site.
+        val quantifiedType = (generalization.info.polarity, currentTerm) match {
+          case (QuantUniv, Forall(typ :::> _)) => typ
+          case (QuantExists, Not(Exists(typ :::> _))) => typ
+          case _ => return Left(s"CNF step ${ctx.step.id}: lifting position does not select the expected universal or negated existential with an explicit predicate abstraction")
+        }
+        if (quantifiedType != generalization.info.corrChildVar._2)
+          return Left(s"CNF step ${ctx.step.id}: lifting quantifier type does not match the recorded variable type")
+
+        return Right(generalization.info.polarity match {
+          case QuantUniv => Vector.empty
+          case QuantExists => Vector(CnfQuantifierMove(Clausification.Terms.notExistsForallNot[Level.Meta], pattern))
+        })
+      }
+
+      // Extend the selector only along the recorded branch. The lifting law
+      // chosen here will later move the universal across this whole connective.
+      val (child, childContext, rule): (Term, PatternContext, LpTerm[Level.Meta]) =
+        (currentTerm, remainingPath.posHead) match {
+          case (left & right, 1) =>
+            (left, h => outerContext(LogicConst.And(h, LpTerm.Wildcard[Level.Obj]())),
+              Clausification.Terms.forallAndDistLeft[Level.Meta])
+          case (left & right, 2) =>
+            (right, h => outerContext(LogicConst.And(LpTerm.Wildcard[Level.Obj](), h)),
+              Clausification.Terms.forallAndDistRight[Level.Meta])
+          case (left ||| right, 1) =>
+            (left, h => outerContext(LogicConst.Or(h, LpTerm.Wildcard[Level.Obj]())),
+              Clausification.Terms.forallOrDistLeft[Level.Meta])
+          case (left ||| right, 2) =>
+            (right, h => outerContext(LogicConst.Or(LpTerm.Wildcard[Level.Obj](), h)),
+              Clausification.Terms.forallOrDistRight[Level.Meta])
+          case _ => return Left(s"CNF step ${ctx.step.id}: unexpected connective or path component ${remainingPath.posHead} while planning quantifier lifting")
+        }
+
+      val innerMoves = visit(child, remainingPath.tail, childContext) match {
+        case Right(value) => value
+        case Left(reason) => return Left(reason)
+      }
+      // Inner moves bring the quantifier to the child's root. Append this
+      // connective crossing afterwards, so the complete plan runs inside out.
+      Right(innerMoves :+ CnfQuantifierMove(rule, pattern))
+    }
+
+    visit(before.lits.head.left, focus.pos, h => h)
   }
 
   /** Prove and apply one implication bridge for a whole non-vacuous
