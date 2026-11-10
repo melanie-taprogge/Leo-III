@@ -11,6 +11,8 @@ import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Have, Refine, Repeat, Rewrite, RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, SymRef, lpClauseInst, lpTermBuilder}
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, encClauseVariableIntroduction}
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
 
 /** Reconstruction entry points for standalone clausification steps.
@@ -230,12 +232,70 @@ object ClausificationEncoding {
   }
 
   /** Ensure that the variables in the child occur in the right order:
+    * First, all "ordinary" variables, i.e. the ones that are not generalized in this CNF step occur.
     * They are followed by the variables to be generalized (the "pending" variables) in the order their generalisation
     * is tracked.
     *
+    * If necessary, the variables are reordered using a refine tactic call with a targeted lambda-term, followed by
+    * the assumption of the ordinary variables.
     */
-  private def encCnfVariablePrefix(ctx: CnfContext): Either[String, CnfStage] = {
-    Left(s"CNF step ${ctx.step.id}: variable-prefix reconstruction is not implemented yet")
+  private def encCnfVariablePrefix(ctx: CnfContext,
+                                   sig: LpSig): Either[String, CnfStage] = {
+    // Given order in the child
+    val givenVars = ctx.step.cl.implicitlyBound
+    // pending variables in order of generalisation (vacuous variables disappear in the child)
+    val pending = ctx.generalizations.filterNot(_.vacuous).map(_.info.corrChildVar)
+
+    // Validate: Only allowed variables occur in the child (and only the expected ones)
+    if (pending.exists(variable => !givenVars.contains(variable)))
+      return Left(s"CNF step ${ctx.step.id}: non-vacuous generalized variable is absent from the child")
+    if (ctx.generalizations.exists(g => g.vacuous && givenVars.exists(_._1 == g.info.corrChildVar._1)))
+      return Left(s"CNF step ${ctx.step.id}: vacuous generalized variable occurs in the child")
+    if (ctx.encChild.vars.exists(_.isRight) || ctx.encChild.vars.size != givenVars.size ||
+      ctx.encChild.metaVars.exists(_.ty.isEmpty))
+      return Left(s"CNF step ${ctx.step.id}: expected typed monomorphic child binders")
+
+    // Construct the list of variables in the desired order:
+    // Keep ordinary parameters in their existing relative order, placing the
+    // whole ordinary block outside the pending generalized variables.
+    val pendingIds = pending.map(_._1).toSet
+    val ordinary = givenVars.filterNot(variable => pendingIds.contains(variable._1))
+    val desired = ordinary ++ pending
+
+    // Compare with given order and permute if necessary
+    val givenBinders = ctx.encChild.metaVars
+    val bindersById = givenVars.map(_._1).zip(givenBinders).toMap
+    val permutation: Seq[LpProofScript] = if (givenVars == desired) Seq.empty else {
+      Out.lp_debug_info(s"CNF step ${ctx.step.id}: child variable order ${givenVars.map(_._1)}, desired order ${desired.map(_._1)}")
+      // The callback accepts a proof of the same child formula with the desired prefix.
+      val desiredBinders = desired.map(variable => bindersById(variable._1))
+      val orderedType = LpType.Pi(desiredBinders, LpType.Prf(ctx.encChild.term))
+      //  Its name must avoid both signature symbols and local variables.
+      val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
+      val orderedName = Name(LpSig.freshIfNeeded("ordered", sig.reserved ++ signatureNames ++ ctx.variableMap.values))
+      val ordered = LpTerm.Var[Level.Meta](orderedName, Some(orderedType))
+      val application = LpTerm.App[Level.Meta](ordered, desiredBinders.map(binder => Arg.Explicit[Level.Meta](binder)))
+      // Abstract in the declaration's given order, applying the callback in
+      // desired order. Its remaining proof hole therefore has the desired type.
+      val body = givenBinders.foldRight[LpTerm[Level.Meta]](application) { case (binder, rest) =>
+        LpTerm.Lam[Level.Meta](binder.name -> binder.ty, rest)
+      }
+      // Applying the wrapper to a hole leaves that reordered proof obligation
+      // for the following tactics to establish.
+      val callback = LpTerm.Lam[Level.Meta](orderedName -> Some(orderedType), body)
+      Seq(Refine(LpTerm.App[Level.Meta](callback,
+        Seq(Arg.Explicit[Level.Meta](LpTerm.Wildcard[Level.Meta]())))))
+    }
+
+    // Open only the ordinary block; the pending prefix remains part of the goal.
+    // The stage records that split alongside the unchanged formula body.
+    val introductions = encAssumeStep(ordinary.map(variable => Name(ctx.variableMap(variable._1))))
+    val stage = CnfStage(ctx.encChild.term, ordinary, pending, permutation ++ introductions)
+    Out.lp_debug_info(s"CNF introduced variables: ${ordinary.map(_._1)}, pending variables: ${pending.map(_._1)}")
+    stage.scripts.foreach { script =>
+      Out.lp_debug_info(s"CNF prefix script: ${Renderer.proof(script, RenderOptions(), sig)}")
+    }
+    Right(stage)
   }
 
   /** Restore an earlier body under the current pending prefix using one Boolean
