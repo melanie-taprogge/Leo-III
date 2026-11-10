@@ -11,8 +11,6 @@ import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Have, Refine, Repeat, Rewrite, RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
-import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, SymRef, lpClauseInst, lpTermBuilder}
-import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
 
 /** Reconstruction entry points for standalone clausification steps.
@@ -189,7 +187,7 @@ object ClausificationEncoding {
     }
 
     // Introduce ordinary parameters while keeping generalized variables bound.
-    var stage = encCnfVariablePrefix(ctx) match {
+    var stage = encCnfVariablePrefix(ctx, sig) match {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
@@ -231,8 +229,10 @@ object ClausificationEncoding {
     Encoded(parentStage.scripts ++ closing)
   }
 
-  /** Reorder the child prefix using a typed callback and introduce only its
-    * ordinary parameters. Return the remaining prefix and initial obligation.
+  /** Ensure that the variables in the child occur in the right order:
+    * They are followed by the variables to be generalized (the "pending" variables) in the order their generalisation
+    * is tracked.
+    *
     */
   private def encCnfVariablePrefix(ctx: CnfContext): Either[String, CnfStage] = {
     Left(s"CNF step ${ctx.step.id}: variable-prefix reconstruction is not implemented yet")
