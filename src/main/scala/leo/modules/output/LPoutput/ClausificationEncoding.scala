@@ -67,6 +67,12 @@ object ClausificationEncoding {
                                             after: lpClauseInst,
                                             vacuous: Boolean)
 
+  /** One forward quantifier rewrite, with a selector relative to the formula body.
+    * The bridge emitter adds the remaining pending prefix and antecedent context.
+    */
+  private final case class CnfQuantifierMove(rule: LpTerm[Level.Meta],
+                                            pattern: RewritePattern)
+
   /** Stable source inputs and translations for one residual CNF segment.
     * Generalizations remain in source order; reconstruction visits them backwards.
     */
@@ -206,7 +212,7 @@ object ClausificationEncoding {
           Out.lp_debug_info(reason)
           return NotEncodable(reason)
       }
-      stage = encCnfGeneralization(ctx, afterBoolean, generalization) match {
+      stage = encCnfGeneralization(ctx, afterBoolean, generalization, sig) match {
         case Right(value) => value
         case Left(reason) =>
           Out.lp_debug_info(reason)
@@ -363,8 +369,67 @@ object ClausificationEncoding {
     */
   private def encCnfGeneralization(ctx: CnfContext,
                                    stage: CnfStage,
-                                   generalization: CnfGeneralization): Either[String, CnfStage] = {
+                                   generalization: CnfGeneralization,
+                                   sig: LpSig): Either[String, CnfStage] = {
+    // Validate that the current body is the recorded after-state and that a
+    // non-vacuous event owns the innermost pending variable.
+    // For a vacuous event, obtain the fragment from encCnfVacuousBinder.
+    // Otherwise call planCnfQuantifierLifting, then pass its ordered moves to
+    // encCnfGeneralizationBridge together with sig for fresh proof names.
+    // Append the fragment and restore the recorded before-body. Consume the
+    // innermost pending variable only for a non-vacuous event.
     Left(s"CNF step ${ctx.step.id}: generalization reconstruction is not implemented yet")
+  }
+
+  /** Restore a vacuous binder at its recorded occurrence without introducing
+    * an outer variable or an implication bridge.
+    */
+  private def encCnfVacuousBinder(ctx: CnfContext,
+                                 stage: CnfStage,
+                                 generalization: CnfGeneralization): Either[String, Seq[LpProofScript]] = {
+    // Use prepareClausePositionPattern to select and validate the original
+    // quantifier, retaining a surrounding negation for a negative existential.
+    // Wrap the selector beneath all pending variables, then reverse the
+    // appropriate constant-quantifier rule at that occurrence.
+    // Return the targeted rewrite and beta-only cleanup as a proof fragment.
+    Left(s"CNF step ${ctx.step.id}: vacuous-binder reconstruction is not implemented yet")
+  }
+
+  /** Plan forward lifting from the recorded quantifier to the formula root,
+    * with one body-relative selector per rewrite, in innermost-first order.
+    */
+  private def planCnfQuantifierLifting(ctx: CnfContext,
+                                      generalization: CnfGeneralization): Either[String, Vector[CnfQuantifierMove]] = {
+    // Obtain the literal-side root and clause wrapper through
+    // prepareClausePositionPattern, then follow the recorded term position
+    // while carrying a one-hole context through conjunctions and disjunctions.
+    // At the selected binder validate kind and type. A negative existential
+    // first contributes the duality rewrite at the whole negated existential.
+    // On recursion unwind append the law for each crossed connective/branch;
+    // target the whole connective, not only the quantifier. A root binder
+    // needs no distribution moves, so an empty plan is valid.
+    // Assumed current producer invariant: clausification visits outer logical
+    // binders first and does not descend through ordinary term abstractions
+    // or choice predicates. This is not a restriction of Lambdapi rewriting.
+    Left(s"CNF step ${ctx.step.id}: quantifier-lifting planning is not implemented yet")
+  }
+
+  /** Prove and apply one implication bridge for a whole non-vacuous
+    * generalization, keeping the remaining generalized variables bound.
+    */
+  private def encCnfGeneralizationBridge(ctx: CnfContext,
+                                         stage: CnfStage,
+                                         generalization: CnfGeneralization,
+                                         moves: Vector[CnfQuantifierMove],
+                                         sig: LpSig): Either[String, Seq[LpProofScript]] = {
+    // Build Q(W, Before) => Q(W, forall v. After(v)), where W excludes the
+    // innermost pending variable v, and choose fresh bridge/hypothesis names.
+    // Wrap each body-relative selector beneath W and use embedPatternInImp
+    // to target only the antecedent. Emit the bare theorem reference followed
+    // by beta-only cleanup, preserving the planner's innermost-first order.
+    // Close the bridge by identity, which checks the recorded endpoint, and
+    // return its Have plus the Refine that leaves Q(W, Before) as the goal.
+    Left(s"CNF step ${ctx.step.id}: generalization bridge reconstruction is not implemented yet")
   }
 
   /** Check that replay reached the parent with no pending generalized variables,
