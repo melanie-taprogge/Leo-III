@@ -4,7 +4,7 @@ import leo.Out
 import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, GeneralizationOccurrence, Literal, MoveQuantStep, Position, QuantExists, QuantUniv, Role_Definition, Signature, SkolemStep, Term, Type, isPropSet}
 import leo.datastructures.Term.:::>
 import leo.modules.HOLSignature.{Exists, Forall, Not}
-import leo.modules.calculus.{CnfConj, CnfSkolem}
+import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpLibs.{Clausification, MetaTheorems}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
@@ -92,7 +92,73 @@ object ClausificationEncoding {
   private def initCnfContext(step: ClauseProxy,
                              parentProofs: Seq[LpTerm[Level.Obj]],
                              sig: LpSig): Either[String, CnfContext] = {
-    Left(s"CNF step ${step.id}: context initialization is not implemented yet")
+    val parents = step.annotation.parents
+    if ((step.annotation.fromRule != FullCNF && step.annotation.fromRule != RenameCNF) ||
+        parents.size != 1 || parentProofs.size != 1)
+      return Left(s"CNF step ${step.id}: expected a FullCNF or RenameCNF segment with one parent and one resolved proof")
+
+    val info = step.furtherInfo.cnfInfo
+
+    // checks ensuring that step can be encoded
+    if (info.renameHappend)
+      return Left(s"CNF step ${step.id}: formula renaming is not encoded")
+    val moves = info.addInfoQuants.collect { case move: MoveQuantStep => move }
+    if (moves.size != info.addInfoQuants.size)
+      return Left(s"CNF step ${step.id}: residual segment contains a non-generalization quantifier record")
+    if (moves.exists(_.occurrence.isEmpty))
+      return Left(s"CNF step ${step.id}: missing generalization occurrence metadata")
+
+    // Flatten before/after pairs in source order. Their literal indices refer
+    // to these reconstructed clauses, not to the original parent's literals.
+    val occurrences = moves.flatMap(_.occurrence)
+    val clauses = Vector(parents.head.cl, step.cl) ++ occurrences.flatMap { occurrence =>
+      Vector(occurrence.position.cl, occurrence.after)
+    }
+    val variables = moves.map(_.corrChildVar)
+
+    // further checks
+    if (clauses.exists(_.typeVars.nonEmpty) || variables.exists(_._2.isPolyType))
+      return Left(s"CNF step ${step.id}: polymorphic clausification is not encoded")
+    if (variables.exists(_._1 <= 0) || variables.map(_._1).distinct.size != variables.size)
+      return Left(s"CNF step ${step.id}: expected distinct positive generalized-variable identifiers")
+    val allVariables = clauses.flatMap(_.implicitlyBound) ++ variables
+    if (allVariables.groupBy(_._1).exists { case (_, entries) => entries.map(_._2).distinct.size != 1 })
+      return Left(s"CNF step ${step.id}: inconsistent types for a shared clause variable")
+    if (occurrences.exists { occurrence =>
+      val position = occurrence.position
+      !position.cl.lits.isDefinedAt(position.litIdx) ||
+        (!position.cl.lits(position.litIdx).equational && position.side == Literal.rightSide)
+    })
+      return Left(s"CNF step ${step.id}: generalization position does not address a literal side of its before-clause")
+    if (moves.zip(occurrences).exists { case (move, occurrence) =>
+      occurrence.position.cl.implicitlyBound.exists(_._1 == move.corrChildVar._1)
+    })
+      return Left(s"CNF step ${step.id}: generalized variable already occurs in its before-clause")
+
+    // Actual encodings
+    // Include recorded variables even when vacuous, so every retained identity
+    // has one name. Translation does not turn them into outer proof binders.
+    val (variableMap, encoded) = lpClauseInst.apply_to_set(clauses, variables)
+    // split the encoded clauses into the original parent and child, and all the intermediate steps
+    val (encParent, encChild) = (encoded.head, encoded(1))
+    val encSteps = encoded.tail.tail
+    val generalizations = moves.zip(occurrences).zipWithIndex.map { case ((move, occurrence), index) =>
+      CnfGeneralization(move, occurrence, encSteps(2 * index), encSteps(1 + 2 * index),
+        vacuous = !occurrence.after.implicitlyBound.contains(move.corrChildVar))
+    }
+    val ctx = CnfContext(step, parentProofs.head, variableMap, encParent, encChild, generalizations)
+    Out.lp_debug_info(s"CNF step ${step.id}: parent ${parents.head.id} as ${ctx.parentProof}, ${generalizations.size} generalization(s)")
+    Out.lp_debug_info(s"CNF shared variable map: ${ctx.variableMap.toSeq.sortBy(_._1)}")
+    Out.lp_debug_info(s"CNF translated parent: ${ctx.encParent.term}")
+    Out.lp_debug_info(s"CNF translated child: ${ctx.encChild.term}")
+    /*
+    generalizations.foreach { generalization =>
+      Out.lp_debug_info(s"CNF generalization variable ${generalization.info.corrChildVar._1}: position ${generalization.occurrence.position.pretty}, vacuous=${generalization.vacuous}")
+      Out.lp_debug_info(s"CNF translated before-state: ${generalization.before.term}")
+      Out.lp_debug_info(s"CNF translated after-state: ${generalization.after.term}")
+    }
+     */
+    Right(ctx)
   }
 
   /** encCnf — Outline of the encoded proof
