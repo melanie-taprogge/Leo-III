@@ -12,7 +12,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Ha
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, vars2Lp}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, SymRef, lpClauseInst, lpTermBuilder}
-import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, encClauseVariableIntroduction}
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
 
 /** Reconstruction entry points for standalone clausification steps.
@@ -186,7 +186,8 @@ object ClausificationEncoding {
     */
   def encCnf(step: ClauseProxy,
              parentProofs: Seq[LpTerm[Level.Obj]],
-             sig: LpSig): EncodeResult = {
+             sig: LpSig,
+             useTypedIntroduction: Boolean = false): EncodeResult = {
     // Validate and translate the segment, retaining the recorded endpoints.
     val ctx = initCnfContext(step, parentProofs, sig) match {
       case Right(value) => value
@@ -196,7 +197,7 @@ object ClausificationEncoding {
     }
 
     // Introduce ordinary parameters while keeping generalized variables bound.
-    var stage = encCnfVariablePrefix(ctx, sig) match {
+    var stage = encCnfVariablePrefix(ctx, sig, useTypedIntroduction) match {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
@@ -244,10 +245,11 @@ object ClausificationEncoding {
     * is tracked.
     *
     * If necessary, the variables are reordered using a refine tactic call with a targeted lambda-term, followed by
-    * the assumption of the ordinary variables.
+    * the introduction of the ordinary variables (assume or typed-hole refinement).
     */
   private def encCnfVariablePrefix(ctx: CnfContext,
-                                   sig: LpSig): Either[String, CnfStage] = {
+                                   sig: LpSig,
+                                   useTypedIntroduction: Boolean): Either[String, CnfStage] = {
     // Given order in the child
     val givenVars = ctx.step.cl.implicitlyBound
     // pending variables in order of generalisation (vacuous variables disappear in the child)
@@ -295,8 +297,11 @@ object ClausificationEncoding {
     }
 
     // Open only the ordinary block; the pending prefix remains part of the goal.
-    // The stage records that split alongside the unchanged formula body.
-    val introductions = encAssumeStep(ordinary.map(variable => Name(ctx.variableMap(variable._1))))
+    // Fix the whole remaining obligation when using the typed-hole introduction.
+    val ordinaryBinders = ordinary.map(variable => bindersById(variable._1))
+    val remainingGoal = lpTermBuilder.forall(vars2Lp(pending, ctx.variableMap), ctx.encChild.term)
+    val introductions = encClauseVariableIntroduction(
+      ordinaryBinders, remainingGoal, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
     val stage = CnfStage(ctx.encChild.term, ordinary, pending, permutation ++ introductions)
     Out.lp_debug_info(s"CNF introduced variables: ${ordinary.map(_._1)}, pending variables: ${pending.map(_._1)}")
     stage.scripts.foreach { script =>

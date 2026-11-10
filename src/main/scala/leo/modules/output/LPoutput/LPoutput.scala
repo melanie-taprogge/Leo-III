@@ -321,7 +321,7 @@ object LPoutput {
 
           rule match {
             case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
-              val encoding = encCnf(cl, parentProofs, sig)
+              val encoding = encCnf(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
               encoding match {
                 case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)

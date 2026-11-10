@@ -36,10 +36,21 @@ object AssumeStep {
                                     sig: LpSig): Seq[LpProofScript] = {
     val names = extractVarNames(encChild)
     if (!useLetBasedIntroduction || names.isEmpty) encAssumeStep(names)
+    else encClauseVariableIntroduction(encChild.metaVars, encChild.term, useLetBasedIntroduction, sig)
+  }
+
+  /** Introduce only the supplied prefix, leaving remainingGoal (including any
+    * pending object-level quantifiers) as the explicitly typed proof obligation.
+    */
+  def encClauseVariableIntroduction(binders: Seq[LpTerm.Var[Level.Meta]],
+                                    remainingGoal: LpTerm[Level.Obj],
+                                    useLetBasedIntroduction: Boolean,
+                                    sig: LpSig): Seq[LpProofScript] = {
+    val names = binders.map(_.name)
+    if (!useLetBasedIntroduction || names.isEmpty) encAssumeStep(names)
     else {
-      val binders = encChild.metaVars
       require(binders.forall(_.ty.isDefined), "Clause-variable introduction requires typed binders")
-      val goal = Prf(encChild.term)
+      val goal = Prf(remainingGoal)
       val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
       val bodyName = Name(LpSig.freshIfNeeded("body", signatureNames ++ names.map(_.value)))
       val hole = LpTerm.Let(bodyName -> goal, LpTerm.Wildcard[Level.Meta](),
