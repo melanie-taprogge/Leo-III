@@ -178,8 +178,9 @@ object ClausificationEncoding {
     *    a. Prove H : π (Q(V, After) ⇒ Q(V, current)) by normalizing both bodies
     *       under their pending prefixes; refine H _ restores the after-state.
     *    b. For a vacuous binder, restore it by a targeted constant-quantifier
-    *       rewrite. Otherwise prove one gen : π (Q(W, Before) ⇒ Q(W, ∀v. After))
-    *       by forward movement in the antecedent, then refine gen _.
+    *       rewrite. A root universal needs only a stage update; otherwise prove
+    *       gen : π (Q(W, Before) ⇒ Q(W, ∀v. After)) by forward movement in the
+    *       antecedent, then refine gen _.
     * 3. Undo the remaining Boolean block to recover the parent formula.
     * 4. Refine with the resolved parent proof applied to available parameters.
     */
@@ -363,8 +364,9 @@ object ClausificationEncoding {
   }
 
   /** Restore one recorded before-state. Use a direct targeted rewrite for a
-    * vacuous binder; otherwise prove one implication bridge by moving the
-    * quantifier outward in its antecedent, with beta-only cleanup between moves.
+    * vacuous binder; a root universal needs no tactics. Otherwise prove one
+    * implication bridge by moving the quantifier outward in its antecedent,
+    * with beta-only cleanup between moves.
     * Update the body; only a non-vacuous event consumes a pending binder.
     */
   private def encCnfGeneralization(ctx: CnfContext,
@@ -376,6 +378,11 @@ object ClausificationEncoding {
       return Left(s"CNF step ${ctx.step.id}: current body does not match the recorded generalization after-state")
 
     if (!generalization.vacuous) {
+      // Validate the prefix before either emitting a bridge or taking the
+      // empty-plan shortcut, since both consume the innermost pending variable.
+      if (!stage.pendingVars.lastOption.contains(generalization.info.corrChildVar))
+        return Left(s"CNF step ${ctx.step.id}: generalization requires the recorded non-vacuous variable innermost in the pending prefix")
+
       val moves = planCnfQuantifierLifting(ctx, generalization) match {
         case Right(value) => value
         case Left(reason) => return Left(reason)
@@ -384,12 +391,19 @@ object ClausificationEncoding {
       moves.foreach { move =>
         Out.lp_debug_info(s"CNF lifting move (body-relative): ${Renderer.proof(Rewrite(Some(move.pattern), move.rule), RenderOptions(), sig)}")
       }
-      val scripts = encCnfGeneralizationBridge(ctx, stage, generalization, moves, sig) match {
-        case Right(value) => value
-        case Left(reason) => return Left(reason)
+      val scripts: Seq[LpProofScript] = if (moves.isEmpty) {
+        // A root universal is already in the goal's pending prefix. Restoring
+        // its original binder changes only the stage representation.
+        Out.lp_debug_info(s"CNF step ${ctx.step.id}: root universal needs no generalization bridge")
+        Seq.empty
+      } else {
+        encCnfGeneralizationBridge(ctx, stage, generalization, moves, sig) match {
+          case Right(value) => value
+          case Left(reason) => return Left(reason)
+        }
       }
-      // Applying the bridge restores the before-body and consumes just the
-      // generalized variable; all other pending variables remain bound.
+      // Restore the before-body and consume just the generalized variable;
+      // all other pending variables remain bound in either case.
       val pending = stage.pendingVars.dropRight(1)
       Out.lp_debug_info(s"CNF step ${ctx.step.id}: restored generalization ${generalization.info.corrChildVar._1}, pending variables ${pending.map(_._1)}")
       Right(stage.copy(body = generalization.before.term, pendingVars = pending,
@@ -505,16 +519,16 @@ object ClausificationEncoding {
       val (child, childContext, rule): (Term, PatternContext, LpTerm[Level.Meta]) =
         (currentTerm, remainingPath.posHead) match {
           case (left & right, 1) =>
-            (left, h => outerContext(LogicConst.And(h, LpTerm.Wildcard[Level.Obj]())),
+            (left, (h: LpTerm[Level.Obj]) => outerContext(LogicConst.And(h, LpTerm.Wildcard[Level.Obj]())),
               Clausification.Terms.forallAndDistLeft[Level.Meta])
           case (left & right, 2) =>
-            (right, h => outerContext(LogicConst.And(LpTerm.Wildcard[Level.Obj](), h)),
+            (right, (h: LpTerm[Level.Obj]) => outerContext(LogicConst.And(LpTerm.Wildcard[Level.Obj](), h)),
               Clausification.Terms.forallAndDistRight[Level.Meta])
           case (left ||| right, 1) =>
-            (left, h => outerContext(LogicConst.Or(h, LpTerm.Wildcard[Level.Obj]())),
+            (left, (h: LpTerm[Level.Obj]) => outerContext(LogicConst.Or(h, LpTerm.Wildcard[Level.Obj]())),
               Clausification.Terms.forallOrDistLeft[Level.Meta])
           case (left ||| right, 2) =>
-            (right, h => outerContext(LogicConst.Or(LpTerm.Wildcard[Level.Obj](), h)),
+            (right, (h: LpTerm[Level.Obj]) => outerContext(LogicConst.Or(LpTerm.Wildcard[Level.Obj](), h)),
               Clausification.Terms.forallOrDistRight[Level.Meta])
           case _ => return Left(s"CNF step ${ctx.step.id}: unexpected connective or path component ${remainingPath.posHead} while planning quantifier lifting")
         }
@@ -539,9 +553,7 @@ object ClausificationEncoding {
                                          generalization: CnfGeneralization,
                                          moves: Vector[CnfQuantifierMove],
                                          sig: LpSig): Either[String, Seq[LpProofScript]] = {
-    if (generalization.vacuous || !stage.pendingVars.lastOption.contains(generalization.info.corrChildVar))
-      return Left(s"CNF step ${ctx.step.id}: generalization bridge requires the recorded non-vacuous variable innermost in the pending prefix")
-
+    // The orchestrator has validated the non-vacuous innermost variable.
     val remaining = stage.pendingVars.dropRight(1)
     val remainingBinders = vars2Lp(remaining, ctx.variableMap)
     val pendingBinders = vars2Lp(stage.pendingVars, ctx.variableMap)
@@ -566,8 +578,7 @@ object ClausificationEncoding {
       val pattern = PatternBuilder.embedPatternInImp(prefixedPattern, Side.Left)
       Seq(Rewrite(Some(pattern), move.rule), Try(Simplify(onlyBeta = true)))
     }
-    // Identity closes only when the lifted antecedent agrees with the recorded
-    // consequent, including the valid case of a quantifier already at the root.
+    // Identity closes only when the lifted antecedent agrees with the recorded consequent.
     val bridgeBody = rewrites ++ Seq(Assume(Seq(hypothesisName)),
       Refine(proofTermAsTacticArg(lpTermBuilder.localObj(hypothesisName))))
     val bridge = Have(bridgeName, LpType.Prf(LogicConst.Imp(antecedent, consequent)),
