@@ -6,9 +6,9 @@ import leo.datastructures.Term.:::>
 import leo.modules.HOLSignature.{Exists, Forall, Not}
 import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
-import leo.modules.output.LPoutput.LpLibs.{Clausification, MetaTheorems}
+import leo.modules.output.LPoutput.LpLibs.{Clausification, LeoTactics, MetaTheorems}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Have, Refine, Repeat, Rewrite, RewritePattern, Side}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Repeat, Rewrite, RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.term2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, SymRef, lpClauseInst, lpTermBuilder}
@@ -169,8 +169,8 @@ object ClausificationEncoding {
     *
     * 1. Reorder the child parameters, then introduce only ordinary parameters.
     * 2. For each recorded generalization, in reverse source order:
-    *    a. Prove H : π (Q(V, After) = Q(V, current)) by the Boolean tactic;
-    *       refine (=⇒ H) _ to restore its immediate after-state.
+    *    a. Prove H : π (Q(V, After) ⇒ Q(V, current)) by normalizing both bodies
+    *       under their pending prefixes; refine H _ restores the after-state.
     *    b. For a vacuous binder, restore it by a targeted constant-quantifier
     *       rewrite. Otherwise prove one gen : π (Q(W, Before) ⇒ Q(W, ∀v. After))
     *       by forward movement in the antecedent, then refine gen _.
@@ -200,7 +200,7 @@ object ClausificationEncoding {
     val generalizations = ctx.generalizations.reverseIterator
     while (generalizations.hasNext) {
       val generalization = generalizations.next()
-      val afterBoolean = encCnfBooleanBlock(ctx, stage, generalization.after.term) match {
+      val afterBoolean = encCnfBooleanBlock(ctx, stage, generalization.after.term, sig) match {
         case Right(value) => value
         case Left(reason) =>
           Out.lp_debug_info(reason)
@@ -215,7 +215,7 @@ object ClausificationEncoding {
     }
 
     // Recover the original formula and close with its resolved proof.
-    val parentStage = encCnfBooleanBlock(ctx, stage, ctx.encParent.term) match {
+    val parentStage = encCnfBooleanBlock(ctx, stage, ctx.encParent.term, sig) match {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
@@ -298,14 +298,62 @@ object ClausificationEncoding {
     Right(stage)
   }
 
-  /** Restore an earlier body under the current pending prefix using one Boolean
-    * equality bridge. Equal endpoints need no bridge; pending variables stay
-    * quantified both in the main obligation and inside the Boolean proof.
+  /** Restore an earlier body through a Boolean implication bridge, normalizing
+    * both sides beneath the pending prefix while keeping its variables bound.
+    * Followed by a refinement reducing the current goal to the state after
+    * application of the boolean identities.
     */
   private def encCnfBooleanBlock(ctx: CnfContext,
                                  stage: CnfStage,
-                                 earlierBody: LpTerm[Level.Obj]): Either[String, CnfStage] = {
-    Left(s"CNF step ${ctx.step.id}: Boolean-block reconstruction is not implemented yet")
+                                 earlierBody: LpTerm[Level.Obj],
+                                 sig: LpSig): Either[String, CnfStage] = {
+    // if no boolean identities were applied in between generalisations, skip this step
+    if (earlierBody == stage.body) {
+      Out.lp_debug_info(s"CNF step ${ctx.step.id}: Boolean block has identical endpoints; no bridge needed")
+      return Right(stage)
+    }
+
+    // Wrap the terms presenting the before and after, as well as the selector hole in exactly the same
+    // variable context (the currently still pending vars).
+    // the former will be used to construct the type of the bridge, the latter will be used to construct the patterns.
+    val hole = lpTermBuilder.localObj(Name("x"))
+    val (before, after, prefixedHole) =
+      stage.pendingVars.foldRight((earlierBody, stage.body, hole)) {
+        case ((id, typ), (left, right, pattern)) =>
+          val binder = Name(ctx.variableMap(id)) -> LpType.El(type2LP(typ))
+          (LogicConst.Forall(binder, left), LogicConst.Forall(binder, right),
+            LogicConst.Forall(binder, pattern))
+      }
+    // Search inside the selected body on each side. (The enclosing implication
+    // and pending quantifiers are not targets of the Boolean rule applications.)
+    val bodyPattern = RewritePattern(prefixedHole, hole, searchInside = true)
+    val leftPattern = PatternBuilder.embedPatternInImp(bodyPattern, Side.Left)
+    val rightPattern = PatternBuilder.embedPatternInImp(bodyPattern, Side.Right)
+
+    // Several blocks may occur in one lemma; keep each bridge name distinct
+    // from earlier proof bindings, signature symbols, and clause variables.
+    val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
+    val proofNames = stage.scripts.collect { case Have(name, _, _) => name.value }
+    val taken = sig.reserved ++ signatureNames ++ ctx.variableMap.values ++ proofNames
+    val bridgeName = Name(LpSig.freshIfNeeded(s"boolean_${ctx.step.id}", taken))
+    val hypothesisName = Name(LpSig.freshIfNeeded("h", taken + bridgeName.value))
+
+    // After normalizing both bodies, the bridge is F ⇒ F. Introduce its proof
+    // hypothesis only, close by identity
+    val bridge = Have(bridgeName, LpType.Prf(LogicConst.Imp(before, after)), Seq(
+      Left(LeoTactics.EvalApp.repeatBoolIdsAt(leftPattern)),
+      Left(LeoTactics.EvalApp.repeatBoolIdsAt(rightPattern)),
+      Left(Assume(Seq(hypothesisName))),
+      Left(Refine(proofTermAsTacticArg(lpTermBuilder.localObj(hypothesisName))))))
+
+    // Use the bridge backwards in the main proof to leave the earlier formula as the next obligation.
+    val refinement = Refine(LpTerm.App[Level.Meta](
+      proofTermAsTacticArg(lpTermBuilder.localObj(bridgeName)),
+      Seq(Arg.Explicit[Level.Meta](LpTerm.Wildcard[Level.Meta]()))))
+    val scripts = Seq(bridge, refinement)
+    Out.lp_debug_info(s"CNF step ${ctx.step.id}: Boolean bridge ${bridgeName.value}, pending variables ${stage.pendingVars.map(_._1)}")
+    Out.lp_debug_info(s"CNF Boolean block script:\n${scripts.map(Renderer.proof(_, RenderOptions(), sig)).mkString("\n")}")
+    Right(stage.copy(body = earlierBody, scripts = stage.scripts ++ scripts))
   }
 
   /** Restore one recorded before-state. Use a direct targeted rewrite for a

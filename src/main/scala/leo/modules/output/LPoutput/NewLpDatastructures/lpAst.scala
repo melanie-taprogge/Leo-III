@@ -187,7 +187,10 @@ object LpProofScript {
   /** Direction to apply the rewrite tactic */
   sealed trait Side
   object Side { case object Left extends Side; case object Right extends Side}
-  final case class RewritePattern(LpTerm: LpTerm[Level.Obj], hole: LpTerm[Level.Obj] = Const[Level.Obj](SymRef.LP(QName.local("x")))) extends LpTerm[Level.Meta]
+  /** Select the hole itself, or search recursively inside it with `in x in`. */
+  final case class RewritePattern(LpTerm: LpTerm[Level.Obj],
+                                   hole: LpTerm[Level.Obj] = Const[Level.Obj](SymRef.LP(QName.local("x"))),
+                                   searchInside: Boolean = false) extends LpTerm[Level.Meta]
 }
 
 

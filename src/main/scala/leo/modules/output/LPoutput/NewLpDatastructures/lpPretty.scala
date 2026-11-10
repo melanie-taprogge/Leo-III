@@ -98,7 +98,10 @@ object Renderer {
         case Side.Left => " left ";
         case Side.Right => " "
       }
-      val pat = pattern.fold("") { p => s".[${termP(p.hole, ro, 0, sig)} in ${termP(p.LpTerm, ro, 0, sig)}] " }
+      val pat = pattern.fold("") { p =>
+        val inside = if (p.searchInside) "in " else ""
+        s".[$inside${termP(p.hole, ro, 0, sig)} in ${termP(p.LpTerm, ro, 0, sig)}] "
+      }
       s"rewrite$sside$pat${renderTerm(rule, ro, sig)};"
     case Reflexivity => "reflexivity;"
     case Simplify(ns,onlyBeta) =>
@@ -155,7 +158,9 @@ object Renderer {
       case TptpInt(n) => qname(QName.in(Prefix.Sig, nameInt(n)), ro)
       case LpString(t) => s"\"${renderTerm(t,  ro, sig)}\""
       case LpInt(n) => n.toString()
-      case RewritePattern(pattern, hole) => s".[${termP(hole, ro, Prec.Atom, sig)} in ${termP(pattern, ro, Prec.Atom, sig)}]"
+      case RewritePattern(pattern, hole, searchInside) =>
+        val inside = if (searchInside) "in " else ""
+        s".[$inside${termP(hole, ro, Prec.Atom, sig)} in ${termP(pattern, ro, Prec.Atom, sig)}]"
       case LpList(els) => if (els.isEmpty) "□" else s"(${els.map(renderTerm(_, ro, sig)).mkString(" ⸬ ")} ⸬ □)"
     }
   }

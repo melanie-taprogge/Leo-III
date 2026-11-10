@@ -20,7 +20,7 @@ object PatternBuilder {
   final case class ClausePositionPatternContext(selectedTerm: Term,
                                                 plugTerm: LpTerm[Level.Obj] => LpTerm[Level.Obj]) {
     def plug(targetPattern: RewritePattern): RewritePattern =
-      RewritePattern(plugTerm(targetPattern.LpTerm), targetPattern.hole)
+      targetPattern.copy(LpTerm = plugTerm(targetPattern.LpTerm))
   }
 
   /** The surrounding pattern of one term position, before its target is supplied. */
@@ -288,6 +288,11 @@ object PatternBuilder {
     embedPatternInBinaryConnective(pat, side, LogicConst.Eq(HolBaseTypes.O, _, _))
   }
 
+  /** Enclose a pattern in the antecedent or consequent of an implication. */
+  def embedPatternInImp(pat: RewritePattern, side: Side): RewritePattern = {
+    embedPatternInBinaryConnective(pat, side, LogicConst.Imp(_, _))
+  }
+
   /** Enclose a rewrite pattern on one selected side of a binary connective. */
   def embedPatternInBinaryConnective(pat: RewritePattern,
                                      side: Side,
@@ -296,7 +301,7 @@ object PatternBuilder {
       case Side.Left => connective(pat.LpTerm, Wildcard[Level.Obj]())
       case Side.Right => connective(Wildcard[Level.Obj](), pat.LpTerm)
     }
-    RewritePattern(embeddedTerm, pat.hole)
+    pat.copy(LpTerm = embeddedTerm)
   }
 
   /**
