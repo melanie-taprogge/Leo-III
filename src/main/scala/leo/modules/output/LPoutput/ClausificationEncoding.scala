@@ -83,13 +83,22 @@ object ClausificationEncoding {
                                       encChild: lpClauseInst,
                                       generalizations: Seq[CnfGeneralization])
 
-  /** The current obligation is body quantified over pendingVars, in that order.
+  private sealed trait CnfReplayStep
+  private final case class CnfTactic(script: LpProofScript) extends CnfReplayStep
+
+  /** An implication proof and the ordinary binders it needs outside the main proof. */
+  private final case class CnfBridge(name: Name,
+                                     implication: LpTerm[Level.Obj],
+                                     proof: LpProofScript.Body,
+                                     ordinaryParameters: Seq[LpTerm.Var[Level.Meta]]) extends CnfReplayStep
+
+  /** The current obligation is the clause body quantified over pendingVars, in that order.
     * Introduced ordinary variables are in scope; pending variables stay bound.
     */
-  private final case class CnfStage(body: LpTerm[Level.Obj],
+  private final case class CnfStage(clause: lpClauseInst,
                                     introducedVars: Seq[(Int, Type)],
                                     pendingVars: Seq[(Int, Type)],
-                                    scripts: Seq[LpProofScript])
+                                    replay: Vector[CnfReplayStep])
 
   /** Validate the selected source path and translate parent, child, and recorded
     * immediate states once, using a shared variable map. Missing occurrence
@@ -208,7 +217,7 @@ object ClausificationEncoding {
     val generalizations = ctx.generalizations.reverseIterator
     while (generalizations.hasNext) {
       val generalization = generalizations.next()
-      val afterBoolean = encCnfBooleanBlock(ctx, stage, generalization.after.term, sig) match {
+      val afterBoolean = encCnfBooleanBlock(ctx, stage, generalization.after, sig) match {
         case Right(value) => value
         case Left(reason) =>
           Out.lp_debug_info(reason)
@@ -223,7 +232,7 @@ object ClausificationEncoding {
     }
 
     // Recover the original formula and close with its resolved proof.
-    val parentStage = encCnfBooleanBlock(ctx, stage, ctx.encParent.term, sig) match {
+    val parentStage = encCnfBooleanBlock(ctx, stage, ctx.encParent, sig) match {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
@@ -236,7 +245,11 @@ object ClausificationEncoding {
         return NotEncodable(reason)
     }
 
-    Encoded(parentStage.scripts ++ closing)
+    val scripts = parentStage.replay.flatMap {
+      case CnfTactic(script) => Seq(script)
+      case bridge: CnfBridge => localCnfBridgeScripts(bridge)
+    }
+    Encoded(scripts ++ closing)
   }
 
   /** Ensure that the variables in the child occur in the right order:
@@ -302,12 +315,38 @@ object ClausificationEncoding {
     val remainingGoal = lpTermBuilder.forall(vars2Lp(pending, ctx.variableMap), ctx.encChild.term)
     val introductions = encClauseVariableIntroduction(
       ordinaryBinders, remainingGoal, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
-    val stage = CnfStage(ctx.encChild.term, ordinary, pending, permutation ++ introductions)
+    val scripts = permutation ++ introductions
+    val stage = CnfStage(ctx.encChild, ordinary, pending, scripts.iterator.map(CnfTactic).toVector)
     Out.lp_debug_info(s"CNF introduced variables: ${ordinary.map(_._1)}, pending variables: ${pending.map(_._1)}")
-    stage.scripts.foreach { script =>
+    scripts.foreach { script =>
       Out.lp_debug_info(s"CNF prefix script: ${Renderer.proof(script, RenderOptions(), sig)}")
     }
     Right(stage)
+  }
+
+  /** Allocate a bridge name and its identity-proof hypothesis in the current replay. */
+  private def cnfBridgeNames(ctx: CnfContext, stage: CnfStage, kind: String, sig: LpSig): (Name, Name) = {
+    val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
+    val proofNames = stage.replay.collect { case bridge: CnfBridge => bridge.name.value }
+    val taken = sig.reserved ++ signatureNames ++ ctx.variableMap.values ++ proofNames
+    val name = Name(LpSig.freshIfNeeded(s"${kind}_${ctx.step.id}", taken))
+    (name, Name(LpSig.freshIfNeeded("h", taken + name.value)))
+  }
+
+  /** Retain the endpoints' ordinary variables in their introduction order. */
+  private def cnfBridgeParameters(ctx: CnfContext, stage: CnfStage,
+                                  before: lpClauseInst, after: lpClauseInst): Seq[LpTerm.Var[Level.Meta]] = {
+    val endpointBinders = (before.metaVars ++ after.metaVars).map(binder => binder.name -> binder).toMap
+    stage.introducedVars.flatMap { case (id, _) => endpointBinders.get(Name(ctx.variableMap(id))) }
+  }
+
+  /** Prove the bridge locally and apply it backwards to recover its antecedent. */
+  private def localCnfBridgeScripts(bridge: CnfBridge): Seq[LpProofScript] = {
+    val have = Have(bridge.name, LpType.Prf(bridge.implication), bridge.proof)
+    val refinement = Refine(LpTerm.App[Level.Meta](
+      proofTermAsTacticArg(lpTermBuilder.localObj(bridge.name)),
+      Seq(Arg.Explicit[Level.Meta](LpTerm.Wildcard[Level.Meta]()))))
+    Seq(have, refinement)
   }
 
   /** Restore an earlier body through a Boolean implication bridge, normalizing
@@ -317,12 +356,11 @@ object ClausificationEncoding {
     */
   private def encCnfBooleanBlock(ctx: CnfContext,
                                  stage: CnfStage,
-                                 earlierBody: LpTerm[Level.Obj],
+                                 earlierClause: lpClauseInst,
                                  sig: LpSig): Either[String, CnfStage] = {
-    // if no boolean identities were applied in between generalisations, skip this step
-    if (earlierBody == stage.body) {
+    if (earlierClause.term == stage.clause.term) {
       Out.lp_debug_info(s"CNF step ${ctx.step.id}: Boolean block has identical endpoints; no bridge needed")
-      return Right(stage)
+      return Right(stage.copy(clause = earlierClause))
     }
 
     // Wrap the terms presenting the before and after, as well as the selector hole in exactly the same
@@ -330,7 +368,7 @@ object ClausificationEncoding {
     // the former will be used to construct the type of the bridge, the latter will be used to construct the patterns.
     val hole = lpTermBuilder.localObj(Name("x"))
     val (before, after, prefixedHole) =
-      stage.pendingVars.foldRight((earlierBody, stage.body, hole)) {
+      stage.pendingVars.foldRight((earlierClause.term, stage.clause.term, hole)) {
         case ((id, typ), (left, right, pattern)) =>
           val binder = Name(ctx.variableMap(id)) -> LpType.El(type2LP(typ))
           (LogicConst.Forall(binder, left), LogicConst.Forall(binder, right),
@@ -342,30 +380,18 @@ object ClausificationEncoding {
     val leftPattern = PatternBuilder.embedPatternInImp(bodyPattern, Side.Left)
     val rightPattern = PatternBuilder.embedPatternInImp(bodyPattern, Side.Right)
 
-    // Several blocks may occur in one lemma; keep each bridge name distinct
-    // from earlier proof bindings, signature symbols, and clause variables.
-    val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
-    val proofNames = stage.scripts.collect { case Have(name, _, _) => name.value }
-    val taken = sig.reserved ++ signatureNames ++ ctx.variableMap.values ++ proofNames
-    val bridgeName = Name(LpSig.freshIfNeeded(s"boolean_${ctx.step.id}", taken))
-    val hypothesisName = Name(LpSig.freshIfNeeded("h", taken + bridgeName.value))
-
-    // After normalizing both bodies, the bridge is F ⇒ F. Introduce its proof
-    // hypothesis only, close by identity
-    val bridge = Have(bridgeName, LpType.Prf(LogicConst.Imp(before, after)), Seq(
+    val (bridgeName, hypothesisName) = cnfBridgeNames(ctx, stage, "boolean", sig)
+    // Normalizing both sides gives F ⇒ F, which closes by identity.
+    val proof: LpProofScript.Body = Seq(
       Left(LeoTactics.EvalApp.repeatBoolIdsAt(leftPattern)),
       Left(LeoTactics.EvalApp.repeatBoolIdsAt(rightPattern)),
       Left(Assume(Seq(hypothesisName))),
-      Left(Refine(proofTermAsTacticArg(lpTermBuilder.localObj(hypothesisName))))))
-
-    // Use the bridge backwards in the main proof to leave the earlier formula as the next obligation.
-    val refinement = Refine(LpTerm.App[Level.Meta](
-      proofTermAsTacticArg(lpTermBuilder.localObj(bridgeName)),
-      Seq(Arg.Explicit[Level.Meta](LpTerm.Wildcard[Level.Meta]()))))
-    val scripts = Seq(bridge, refinement)
+      Left(Refine(proofTermAsTacticArg(lpTermBuilder.localObj(hypothesisName)))))
+    val bridge = CnfBridge(bridgeName, LogicConst.Imp(before, after), proof,
+      cnfBridgeParameters(ctx, stage, earlierClause, stage.clause))
     Out.lp_debug_info(s"CNF step ${ctx.step.id}: Boolean bridge ${bridgeName.value}, pending variables ${stage.pendingVars.map(_._1)}")
-    Out.lp_debug_info(s"CNF Boolean block script:\n${scripts.map(Renderer.proof(_, RenderOptions(), sig)).mkString("\n")}")
-    Right(stage.copy(body = earlierBody, scripts = stage.scripts ++ scripts))
+    Out.lp_debug_info(s"CNF Boolean block script:\n${localCnfBridgeScripts(bridge).map(Renderer.proof(_, RenderOptions(), sig)).mkString("\n")}")
+    Right(stage.copy(clause = earlierClause, replay = stage.replay :+ bridge))
   }
 
   /** Restore one recorded before-state. Use a direct targeted rewrite for a
@@ -379,7 +405,7 @@ object ClausificationEncoding {
                                    generalization: CnfGeneralization,
                                    sig: LpSig): Either[String, CnfStage] = {
     // The preceding Boolean block must have recovered this event's exact after-state.
-    if (stage.body != generalization.after.term)
+    if (stage.clause.term != generalization.after.term)
       return Left(s"CNF step ${ctx.step.id}: current body does not match the recorded generalization after-state")
 
     if (!generalization.vacuous) {
@@ -396,23 +422,20 @@ object ClausificationEncoding {
       moves.foreach { move =>
         Out.lp_debug_info(s"CNF lifting move (body-relative): ${Renderer.proof(Rewrite(Some(move.pattern), move.rule), RenderOptions(), sig)}")
       }
-      val scripts: Seq[LpProofScript] = if (moves.isEmpty) {
+      val bridge = if (moves.isEmpty) {
         // A root universal is already in the goal's pending prefix. Restoring
         // its original binder changes only the stage representation.
         Out.lp_debug_info(s"CNF step ${ctx.step.id}: root universal needs no generalization bridge")
-        Seq.empty
+        None
       } else {
-        encCnfGeneralizationBridge(ctx, stage, generalization, moves, sig) match {
-          case Right(value) => value
-          case Left(reason) => return Left(reason)
-        }
+        Some(encCnfGeneralizationBridge(ctx, stage, generalization, moves, sig))
       }
       // Restore the before-body and consume just the generalized variable;
       // all other pending variables remain bound in either case.
       val pending = stage.pendingVars.dropRight(1)
       Out.lp_debug_info(s"CNF step ${ctx.step.id}: restored generalization ${generalization.info.corrChildVar._1}, pending variables ${pending.map(_._1)}")
-      Right(stage.copy(body = generalization.before.term, pendingVars = pending,
-        scripts = stage.scripts ++ scripts))
+      Right(stage.copy(clause = generalization.before, pendingVars = pending,
+        replay = stage.replay ++ bridge))
     } else {
       val scripts = encCnfVacuousBinder(ctx, stage, generalization) match {
         case Right(value) => value
@@ -422,7 +445,7 @@ object ClausificationEncoding {
       // formula body, retaining both variable lists and the accumulated proof.
       Out.lp_debug_info(s"CNF step ${ctx.step.id}: restored vacuous binder ${generalization.info.corrChildVar._1}, pending variables ${stage.pendingVars.map(_._1)}")
       Out.lp_debug_info(s"CNF vacuous binder script:\n${scripts.map(Renderer.proof(_, RenderOptions(), sig)).mkString("\n")}")
-      Right(stage.copy(body = generalization.before.term, scripts = stage.scripts ++ scripts))
+      Right(stage.copy(clause = generalization.before, replay = stage.replay ++ scripts.map(CnfTactic)))
     }
   }
 
@@ -550,14 +573,14 @@ object ClausificationEncoding {
     visit(before.lits.head.left, focus.pos, h => h)
   }
 
-  /** Prove and apply one implication bridge for a whole non-vacuous
-    * generalization, keeping the remaining generalized variables bound.
+  /** Record the implication bridge for a whole non-vacuous generalization,
+    * keeping the remaining generalized variables bound.
     */
   private def encCnfGeneralizationBridge(ctx: CnfContext,
                                          stage: CnfStage,
                                          generalization: CnfGeneralization,
                                          moves: Vector[CnfQuantifierMove],
-                                         sig: LpSig): Either[String, Seq[LpProofScript]] = {
+                                         sig: LpSig): CnfBridge = {
     // The orchestrator has validated the non-vacuous innermost variable.
     val remaining = stage.pendingVars.dropRight(1)
     val remainingBinders = vars2Lp(remaining, ctx.variableMap)
@@ -568,13 +591,7 @@ object ClausificationEncoding {
     val antecedent = lpTermBuilder.forall(remainingBinders, generalization.before.term)
     val consequent = lpTermBuilder.forall(pendingBinders, generalization.after.term)
 
-    // Each whole-event bridge needs a fresh name within this proof. Reuse the
-    // Boolean bridge's naming scope, including all earlier local Have bindings.
-    val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
-    val proofNames = stage.scripts.collect { case Have(name, _, _) => name.value }
-    val taken = sig.reserved ++ signatureNames ++ ctx.variableMap.values ++ proofNames
-    val bridgeName = Name(LpSig.freshIfNeeded(s"generalization_${ctx.step.id}", taken))
-    val hypothesisName = Name(LpSig.freshIfNeeded("h", taken + bridgeName.value))
+    val (bridgeName, hypothesisName) = cnfBridgeNames(ctx, stage, "generalization", sig)
 
     // Lift only inside the antecedent, keeping the other pending variables
     // bound. Preserve the planner's exact selectors and inside-out move order.
@@ -586,15 +603,11 @@ object ClausificationEncoding {
     // Identity closes only when the lifted antecedent agrees with the recorded consequent.
     val bridgeBody = rewrites ++ Seq(Assume(Seq(hypothesisName)),
       Refine(proofTermAsTacticArg(lpTermBuilder.localObj(hypothesisName))))
-    val bridge = Have(bridgeName, LpType.Prf(LogicConst.Imp(antecedent, consequent)),
-      bridgeBody.map(script => Left(script)))
-    val refinement = Refine(LpTerm.App[Level.Meta](
-      proofTermAsTacticArg(lpTermBuilder.localObj(bridgeName)),
-      Seq(Arg.Explicit[Level.Meta](LpTerm.Wildcard[Level.Meta]()))))
-    val scripts = Seq(bridge, refinement)
+    val bridge = CnfBridge(bridgeName, LogicConst.Imp(antecedent, consequent), bridgeBody.map(Left(_)),
+      cnfBridgeParameters(ctx, stage, generalization.before, generalization.after))
     Out.lp_debug_info(s"CNF step ${ctx.step.id}: generalization bridge ${bridgeName.value}, remaining pending variables ${remaining.map(_._1)}")
-    Out.lp_debug_info(s"CNF generalization bridge script:\n${scripts.map(Renderer.proof(_, RenderOptions(), sig)).mkString("\n")}")
-    Right(scripts)
+    Out.lp_debug_info(s"CNF generalization bridge script:\n${localCnfBridgeScripts(bridge).map(Renderer.proof(_, RenderOptions(), sig)).mkString("\n")}")
+    bridge
   }
 
   /** Check that replay reached the parent with no pending generalized variables,
@@ -605,7 +618,7 @@ object ClausificationEncoding {
                            stage: CnfStage): Either[String, Seq[LpProofScript]] = {
     if (stage.pendingVars.nonEmpty)
       return Left(s"CNF step ${ctx.step.id}: generalized variables remain pending at parent application")
-    if (stage.body != ctx.encParent.term)
+    if (stage.clause.term != ctx.encParent.term)
       return Left(s"CNF step ${ctx.step.id}: reconstruction has not reached the parent body")
 
     // Only ordinary variables have been introduced. Instantiate the resolved
