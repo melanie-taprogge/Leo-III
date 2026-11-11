@@ -620,7 +620,56 @@ object ClausificationEncoding {
     * and collect the connectives and siblings needed for pointwise lifting.
     */
   private def planCnfPointwiseGeneralization(ctx: CnfContext,
-                                             generalization: CnfGeneralization): Either[String, CnfPointwisePlan] = ???
+                                             generalization: CnfGeneralization): Either[String, CnfPointwisePlan] = {
+    val position = generalization.occurrence.position
+    val before = position.cl
+    if (before.lits.size != 1 || position.litIdx != 0 || position.side != Literal.leftSide ||
+        !before.lits.head.polarity || before.lits.head.equational)
+      return Left(s"CNF step ${ctx.step.id}: pointwise lifting requires a recorded single positive formula literal")
+
+    val polarity = generalization.info.polarity
+    val path = polarity match {
+      case QuantUniv => position.pos.seq
+      case QuantExists =>
+        // The transformation starts at the whole negated existential.
+        if (!position.pos.seq.lastOption.contains(1))
+          return Left(s"CNF step ${ctx.step.id}: negative-existential position must end in negation argument 1")
+        position.pos.seq.dropRight(1)
+    }
+
+    // Prepend each crossing so the proof builder can lift from the leaf outward.
+    var current = before.lits.head.left
+    var crossings = List.empty[CnfPointwiseCrossing]
+    val components = path.iterator
+    while (components.hasNext) {
+      val component = components.next()
+      val (child, crossing) = (current, component) match {
+        case (left & right, 1) =>
+          (left, CnfPointwiseCrossing(CnfPointwiseAnd, Side.Left, right))
+        case (left & right, 2) =>
+          (right, CnfPointwiseCrossing(CnfPointwiseAnd, Side.Right, left))
+        case (left ||| right, 1) =>
+          (left, CnfPointwiseCrossing(CnfPointwiseOr, Side.Left, right))
+        case (left ||| right, 2) =>
+          (right, CnfPointwiseCrossing(CnfPointwiseOr, Side.Right, left))
+        case _ =>
+          return Left(s"CNF step ${ctx.step.id}: unexpected connective or path component $component while planning pointwise lifting")
+      }
+      crossings = crossing :: crossings
+      current = child
+    }
+
+    val (quantifiedType, predicate) = (polarity, current) match {
+      case (QuantUniv, Forall(predicate @ (typ :::> _))) => (typ, predicate)
+      case (QuantExists, Not(Exists(predicate @ (typ :::> _)))) => (typ, predicate)
+      case _ =>
+        return Left(s"CNF step ${ctx.step.id}: pointwise lifting position does not select the expected universal or negated existential with an explicit predicate abstraction")
+    }
+    if (quantifiedType != generalization.info.corrChildVar._2)
+      return Left(s"CNF step ${ctx.step.id}: pointwise lifting quantifier type does not match the recorded variable type")
+
+    Right(CnfPointwisePlan(CnfPointwiseLeaf(polarity, quantifiedType, predicate), crossings.toVector))
+  }
 
   /** Instantiate the quantified leaf at the generalized variable and compose
     * its proof transformation through the enclosing connectives. Rebuild both
