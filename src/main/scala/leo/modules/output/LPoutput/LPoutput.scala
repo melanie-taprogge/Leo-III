@@ -36,7 +36,7 @@ object LPoutput {
   val outputSingleFile = false
 
   // Provisional threshold shared by explicit printing and typed variable introduction.
-  private val explicitTypesVariableThreshold = 100
+  private val explicitTypesVariableThreshold = 50
 
   private def useLargeContextEncoding(variableCount: Int, gdvMode: Boolean): Boolean =
     !gdvMode && variableCount >= explicitTypesVariableThreshold
