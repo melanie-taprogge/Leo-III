@@ -1,7 +1,7 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, GeneralizationOccurrence, Literal, MoveQuantStep, Position, QuantExists, QuantUniv, Role_Definition, Signature, SkolemStep, Term, Type, isPropSet}
+import leo.datastructures.{Clause, ClauseAnnotation, ClausePosition, ClauseProxy, GeneralizationOccurrence, Literal, MoveQuantStep, Position, QuantExists, QuantPolarity, QuantUniv, Role_Definition, Signature, SkolemStep, Term, Type, isPropSet}
 import leo.datastructures.Term.:::>
 import leo.modules.HOLSignature.{&, Exists, Forall, Not, |||}
 import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
@@ -72,6 +72,24 @@ object ClausificationEncoding {
     */
   private final case class CnfQuantifierMove(rule: LpTerm[Level.Meta],
                                             pattern: RewritePattern)
+
+  /** The quantified site and the enclosing connectives, ordered inside out. */
+  private final case class CnfPointwisePlan(leaf: CnfPointwiseLeaf,
+                                            crossings: Vector[CnfPointwiseCrossing])
+
+  /** The explicit predicate abstraction at the recorded quantifier. */
+  private final case class CnfPointwiseLeaf(polarity: QuantPolarity,
+                                            quantifiedType: Type,
+                                            predicate: Term)
+
+  private sealed trait CnfPointwiseConnective
+  private case object CnfPointwiseAnd extends CnfPointwiseConnective
+  private case object CnfPointwiseOr extends CnfPointwiseConnective
+
+  /** One enclosing connective, with the selected side and its unchanged sibling. */
+  private final case class CnfPointwiseCrossing(connective: CnfPointwiseConnective,
+                                                side: Side,
+                                                sibling: Term)
 
   /** Stable source inputs and translations for one residual CNF segment.
     * Generalizations remain in source order; reconstruction visits them backwards.
@@ -597,6 +615,22 @@ object ClausificationEncoding {
 
     visit(before.lits.head.left, focus.pos, h => h)
   }
+
+  /** Follow the recorded path in the before-formula. Validate the quantifier
+    * and collect the connectives and siblings needed for pointwise lifting.
+    */
+  private def planCnfPointwiseGeneralization(ctx: CnfContext,
+                                             generalization: CnfGeneralization): Either[String, CnfPointwisePlan] = ???
+
+  /** Instantiate the quantified leaf at the generalized variable and compose
+    * its proof transformation through the enclosing connectives. Rebuild both
+    * subformulas during the fold so each lifting lemma has explicit arguments.
+    * Apply the result to the premise proof instantiated at the earlier variables.
+    */
+  private def buildCnfPointwiseProof(plan: CnfPointwisePlan,
+                                     generalizedVariable: LpTerm[Level.Obj],
+                                     premiseProof: LpTerm[Level.Meta],
+                                     variableMap: Map[Int, String]): LpTerm[Level.Meta] = ???
 
   /** Record the implication bridge for a whole non-vacuous generalization,
     * keeping the remaining generalized variables bound.

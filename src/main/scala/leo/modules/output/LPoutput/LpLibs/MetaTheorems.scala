@@ -27,6 +27,13 @@ object MetaTheorems {
     private[MetaTheorems] val permuteS_S: SymRef = SymRef.LP(QName.local(permuteS))
     private[MetaTheorems] val selectConjunctS_S: SymRef = SymRef.LP(QName.local(selectConjunctS))
 
+    private[MetaTheorems] val mapAndLeftSym: SymRef = SymRef.LP(QName.local("mapAndLeft"))
+    private[MetaTheorems] val mapAndRightSym: SymRef = SymRef.LP(QName.local("mapAndRight"))
+    private[MetaTheorems] val mapOrLeftSym: SymRef = SymRef.LP(QName.local("mapOrLeft"))
+    private[MetaTheorems] val mapOrRightSym: SymRef = SymRef.LP(QName.local("mapOrRight"))
+    private[MetaTheorems] val conjTransformSym: SymRef = SymRef.LP(QName.local("conj_transform"))
+    private[MetaTheorems] val disjTransformSym: SymRef = SymRef.LP(QName.local("transform"))
+
   }
 
   object MLTerms {
@@ -36,6 +43,13 @@ object MetaTheorems {
     private[MetaTheorems] val transformNS_T = LpTerm.Const[Level.Obj](transformNS_S)
     private[MetaTheorems] val permute_T = LpTerm.Const[Level.Obj](permuteS_S)
     private[MetaTheorems] val selectConjunct_T = LpTerm.Const[Level.Obj](selectConjunctS_S)
+
+    val mapAndLeft: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](mapAndLeftSym)
+    val mapAndRight: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](mapAndRightSym)
+    val mapOrLeft: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](mapOrLeftSym)
+    val mapOrRight: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](mapOrRightSym)
+    val conjTransform: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](conjTransformSym)
+    val disjTransform: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](disjTransformSym)
   }
 
   object Inst {
