@@ -11,7 +11,7 @@ import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Repeat, Rewrite, RewritePattern, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, vars2Lp}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
-import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, SymRef, lpClauseInst, lpTermBuilder}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, Stmt, SymRef, lpClauseInst, lpTermBuilder}
 import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
 
@@ -91,6 +91,8 @@ object ClausificationEncoding {
                                      implication: LpTerm[Level.Obj],
                                      proof: LpProofScript.Body,
                                      ordinaryParameters: Seq[LpTerm.Var[Level.Meta]]) extends CnfReplayStep
+
+  final case class CnfEncoding(scripts: Seq[LpProofScript], auxiliaryLemmas: Seq[Stmt.Definition])
 
   /** The current obligation is the clause body quantified over pendingVars, in that order.
     * Introduced ordinary variables are in scope; pending variables stay bound.
@@ -196,13 +198,14 @@ object ClausificationEncoding {
   def encCnf(step: ClauseProxy,
              parentProofs: Seq[LpTerm[Level.Obj]],
              sig: LpSig,
-             useTypedIntroduction: Boolean = false): EncodeResult = {
+             useTypedIntroduction: Boolean = false,
+             standaloneSubproofThreshold: Option[Int] = None): Either[String, CnfEncoding] = {
     // Validate and translate the segment, retaining the recorded endpoints.
     val ctx = initCnfContext(step, parentProofs, sig) match {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
-        return NotEncodable(reason)
+        return Left(reason)
     }
 
     // Introduce ordinary parameters while keeping generalized variables bound.
@@ -210,7 +213,7 @@ object ClausificationEncoding {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
-        return NotEncodable(reason)
+        return Left(reason)
     }
 
     // Undo each trailing Boolean block and its preceding generalization.
@@ -221,13 +224,13 @@ object ClausificationEncoding {
         case Right(value) => value
         case Left(reason) =>
           Out.lp_debug_info(reason)
-          return NotEncodable(reason)
+          return Left(reason)
       }
       stage = encCnfGeneralization(ctx, afterBoolean, generalization, sig) match {
         case Right(value) => value
         case Left(reason) =>
           Out.lp_debug_info(reason)
-          return NotEncodable(reason)
+          return Left(reason)
       }
     }
 
@@ -236,20 +239,28 @@ object ClausificationEncoding {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
-        return NotEncodable(reason)
+        return Left(reason)
     }
     val closing = encCnfParent(ctx, parentStage) match {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
-        return NotEncodable(reason)
+        return Left(reason)
     }
 
+    // Count the bridges that survived replay, including both kinds of bridge.
+    val standalone = standaloneSubproofThreshold.exists { threshold =>
+      parentStage.replay.count(_.isInstanceOf[CnfBridge]) >= threshold
+    }
+    val auxiliaryLemmas = Vector.newBuilder[Stmt.Definition]
     val scripts = parentStage.replay.flatMap {
       case CnfTactic(script) => Seq(script)
+      case bridge: CnfBridge if standalone =>
+        auxiliaryLemmas += standaloneCnfBridge(bridge, useTypedIntroduction, sig)
+        Seq(cnfBridgeRefinement(bridge.name, bridge.ordinaryParameters))
       case bridge: CnfBridge => localCnfBridgeScripts(bridge)
     }
-    Encoded(scripts ++ closing)
+    Right(CnfEncoding(scripts ++ closing, auxiliaryLemmas.result()))
   }
 
   /** Ensure that the variables in the child occur in the right order:
@@ -340,13 +351,27 @@ object ClausificationEncoding {
     stage.introducedVars.flatMap { case (id, _) => endpointBinders.get(Name(ctx.variableMap(id))) }
   }
 
-  /** Prove the bridge locally and apply it backwards to recover its antecedent. */
-  private def localCnfBridgeScripts(bridge: CnfBridge): Seq[LpProofScript] = {
-    val have = Have(bridge.name, LpType.Prf(bridge.implication), bridge.proof)
-    val refinement = Refine(LpTerm.App[Level.Meta](
-      proofTermAsTacticArg(lpTermBuilder.localObj(bridge.name)),
-      Seq(Arg.Explicit[Level.Meta](LpTerm.Wildcard[Level.Meta]()))))
-    Seq(have, refinement)
+  /** Apply the bridge backwards, leaving its antecedent as the next goal. */
+  private def cnfBridgeRefinement(name: Name, parameters: Seq[LpTerm.Var[Level.Meta]]): Refine = {
+    val arguments = parameters.map(Arg.Explicit[Level.Meta](_)) :+
+      Arg.Explicit[Level.Meta](LpTerm.Wildcard[Level.Meta]())
+    Refine(LpTerm.App[Level.Meta](proofTermAsTacticArg(lpTermBuilder.localObj(name)), arguments))
+  }
+
+  private def localCnfBridgeScripts(bridge: CnfBridge): Seq[LpProofScript] =
+    Seq(Have(bridge.name, LpType.Prf(bridge.implication), bridge.proof),
+      cnfBridgeRefinement(bridge.name, Seq.empty))
+
+  /** Close a bridge over its ordinary parameters. The pending prefix is part of its implication. */
+  private def standaloneCnfBridge(bridge: CnfBridge, useTypedIntroduction: Boolean,
+                                  sig: LpSig): Stmt.Definition = {
+    val parameters = bridge.ordinaryParameters
+    val conclusion = LpType.Prf(bridge.implication)
+    val ty = if (parameters.isEmpty) conclusion else LpType.Pi(parameters, conclusion)
+    val introduction = encClauseVariableIntroduction(parameters, bridge.implication, useTypedIntroduction, sig)
+    val body = introduction.map(Left(_)) ++ bridge.proof
+    Stmt.Definition(bridge.name, Seq.empty, Some(ty), Stmt.DefBody.ProofBody(body),
+      modifiers = Seq(Stmt.Opaque))
   }
 
   /** Restore an earlier body through a Boolean implication bridge, normalizing

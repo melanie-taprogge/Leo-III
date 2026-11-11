@@ -37,6 +37,7 @@ object LPoutput {
 
   // Provisional threshold shared by explicit printing and typed variable introduction.
   private val explicitTypesVariableThreshold = 50
+  private val defaultStandaloneSubproofThreshold = 15
 
   private def useLargeContextEncoding(variableCount: Int, gdvMode: Boolean): Boolean =
     !gdvMode && variableCount >= explicitTypesVariableThreshold
@@ -82,7 +83,8 @@ object LPoutput {
                                     name: Name,
                                     ty: LpType,
                                     body: LpProofScript.Body,
-                                    comment: LpProofScript.Comment) {
+                                    comment: LpProofScript.Comment,
+                                    auxiliaryLemmas: Seq[Stmt.Definition] = Seq.empty) {
     /** Number of clause term variables, excluding binders inside formulas. */
     def variableCount: Int = source.cl.implicitlyBound.size
   }
@@ -295,7 +297,8 @@ object LPoutput {
 
   def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo,
               proofReferences: ProofReferences = ProofReferences(),
-              useTypedIntroduction: Boolean = false): (Option[EncodedProofStep], lpProofStepInfo) = {
+              useTypedIntroduction: Boolean = false,
+              standaloneSubproofThreshold: Option[Int] = None): (Option[EncodedProofStep], lpProofStepInfo) = {
 
     val stepName = nameStep(cl.id).name
     val rule = cl.annotation.fromRule
@@ -321,10 +324,12 @@ object LPoutput {
 
           rule match {
             case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
-              val encoding = encCnf(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
-              encoding match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+              encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold) match {
+                case Right(encoding) =>
+                  val result = toProofStepOld(cl, encStep, rule.name, Left(encoding.scripts), None)
+                  (result.map(_.copy(auxiliaryLemmas = encoding.auxiliaryLemmas)), outputInfo)
+                case Left(reason) =>
+                  (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
               }
 
             case leo.modules.calculus.CnfSkolem =>
@@ -668,7 +673,8 @@ object LPoutput {
     (typeDecSB, skDecsSB, defSB, tacticSB)
   }
 
-  def extractNecessaryFormulas(state: LocalState, gdv_mode: Boolean, gdvProofParam: Option[String] = None)  = {
+  def extractNecessaryFormulas(state: LocalState, gdv_mode: Boolean, gdvProofParam: Option[String] = None,
+                               standaloneSubproofThreshold: Option[Int] = Some(defaultStandaloneSubproofThreshold)) = {
 
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
@@ -766,7 +772,8 @@ object LPoutput {
         val references = if (gdv_mode) ProofReferences() else packageReferences
         val useTypedIntroduction = useLargeContextEncoding(step.cl.implicitlyBound.size, gdv_mode)
         val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep, references,
-          useTypedIntroduction = useTypedIntroduction)
+          useTypedIntroduction = useTypedIntroduction,
+          standaloneSubproofThreshold = if (gdv_mode) None else standaloneSubproofThreshold)
         clausifiedSteps ++= newInfo.clausifiedSteps
         identicalSteps ++= newInfo.identicalSteps
         additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
@@ -917,6 +924,10 @@ object LPoutput {
 
       packageSteps.foreach { result =>
         val stepRo = ro.copy(explicitTypes = useLargeContextEncoding(result.variableCount, gdvMode = false))
+        // Auxiliary proofs carry their own parameters and are in scope for this step.
+        result.auxiliaryLemmas.foreach { lemma =>
+          proofFileSB.append(Renderer.stmt(lemma, sig, stepRo)).append("\n")
+        }
         val parents = result.source.annotation.parents.map(parent => s"step${parent.id}").mkString(", ")
         val source = LpProofScript.Comment(s"parents: [$parents]")
         proofFileSB.append(Renderer.proof(result.comment, ro, sig)).append("\n")
