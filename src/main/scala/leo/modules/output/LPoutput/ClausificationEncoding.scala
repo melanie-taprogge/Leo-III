@@ -6,12 +6,12 @@ import leo.datastructures.Term.:::>
 import leo.modules.HOLSignature.{&, Exists, Forall, Not, |||}
 import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
-import leo.modules.output.LPoutput.LpLibs.{Clausification, EqRules, LeoTactics, MetaTheorems}
+import leo.modules.output.LPoutput.LpLibs.{Clausification, EqRules, LeoTactics, MetaTheorems, ND}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Repeat, Rewrite, RewritePattern, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, vars2Lp}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
-import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, Stmt, SymRef, lpClauseInst, lpTermBuilder}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, Stmt, SymRef, lpClauseInst, lpTermBuilder, nAry}
 import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
 
@@ -671,15 +671,103 @@ object ClausificationEncoding {
     Right(CnfPointwisePlan(CnfPointwiseLeaf(polarity, quantifiedType, predicate), crossings.toVector))
   }
 
-  /** Instantiate the quantified leaf at the generalized variable and compose
-    * its proof transformation through the enclosing connectives. Rebuild both
-    * subformulas during the fold so each lifting lemma has explicit arguments.
-    * Apply the result to the premise proof instantiated at the earlier variables.
+  /** Lift the leaf proof through its enclosing connectives, grouping
+    * right-associated runs, and apply it to the instantiated premise.
     */
   private def buildCnfPointwiseProof(plan: CnfPointwisePlan,
                                      generalizedVariable: LpTerm[Level.Obj],
                                      premiseProof: LpTerm[Level.Meta],
-                                     variableMap: Map[Int, String]): LpTerm[Level.Meta] = ???
+                                     variableMap: Map[Int, String],
+                                     leafHypothesisName: Name): LpTerm[Level.Meta] = {
+    val leaf = plan.leaf
+    val quantifier = leaf.polarity match {
+      case QuantUniv => Forall(leaf.predicate)
+      case QuantExists => Exists(leaf.predicate)
+    }
+    // Quantifier translation preserves the outer predicate lambda and uses
+    // the normal reductions inside its body.
+    val quantified = term2LP(quantifier, variableMap)
+    val predicate = quantified match {
+      case LpTerm.App(_, Seq(Arg.Explicit(abstraction @ LpTerm.Lam(_, _)))) => abstraction
+      case _ => throw new IllegalStateException("Expected an encoded CNF quantifier with a predicate abstraction")
+    }
+    // the "after" state needed to instantiate the lifting lemmas
+    val atX = lpTermBuilder.betaApply(predicate, Seq(Arg.Explicit(generalizedVariable)))
+
+    // Construct the proof showing that the quantified term proofs the instance with the generalized variable, and the before and
+    //  after versions of the leaf
+    val variableArg = Arg.Explicit(LpTerm.Obj(generalizedVariable))
+    // hypothesis is the given reference to the name of the variable used in the abstraction over the leaf representing the
+    //  quantifier being generalised.
+    val hypothesis = LpTerm.Var[Level.Meta](leafHypothesisName, None)
+    val (leafBefore, leafAfter, leafProof) = leaf.polarity match {
+      case QuantUniv =>
+        (quantified, atX, LpTerm.App[Level.Meta](hypothesis, Seq(variableArg)))
+      case QuantExists =>
+        val proof = LpTerm.App[Level.Meta](ND.Terms.notExists[Level.Meta],
+          Seq(Arg.ImplicitTypeArg(type2LP(leaf.quantifiedType)), Arg.Explicit(LpTerm.Obj(predicate)),
+            Arg.Explicit(hypothesis), variableArg))
+        (LogicConst.Not(quantified), LogicConst.Not(atX), proof)
+    }
+    var before = leafBefore
+    var after = leafAfter
+    // proof of the implication of instance from the quantified leaf
+    var transform: LpTerm[Level.Meta] =
+      LpTerm.Lam(leafHypothesisName -> Some(LpType.Prf(leafBefore)), leafProof)
+
+    // traversal of individual crossings
+    val crossings = plan.crossings.iterator.buffered
+    while (crossings.hasNext) {
+      val next = crossings.next()
+      val sibling = term2LP(next.sibling, variableMap)
+      val (initialOperands, initialIndex) = next.side match {
+        case Side.Left => (List(before, sibling), 0)
+        case Side.Right => (List(sibling, before), 1)
+      }
+      // Use n-ary meta theorems to pull quantifiers out of more deeply nested conjunctions/ disjunctions
+      // Each additional right crossing prepends a sibling while keeping the
+      // formula's bracketing and the selected operand's identity.
+      var operands = initialOperands
+      var index = initialIndex
+      while (crossings.hasNext && crossings.head.connective == next.connective && crossings.head.side == Side.Right) {
+        operands = term2LP(crossings.next().sibling, variableMap) :: operands
+        index += 1
+      }
+      val group = operands.toVector
+
+      import MetaTheorems.MLTerms._
+      if (group.size == 2) {
+        // use plain stepwise versions for isolated steps
+        val lemma = (next.connective, next.side) match {
+          case (CnfPointwiseAnd, Side.Left) => mapAndLeft
+          case (CnfPointwiseAnd, Side.Right) => mapAndRight
+          case (CnfPointwiseOr, Side.Left) => mapOrLeft
+          case (CnfPointwiseOr, Side.Right) => mapOrRight
+        }
+        transform = LpTerm.App[Level.Meta](lemma,
+          Seq(Arg.Implicit(LpTerm.Obj(sibling)), Arg.Implicit(LpTerm.Obj(before)),
+            Arg.Implicit(LpTerm.Obj(after)), Arg.Explicit(transform)))
+      } else {
+        // use n-ary versions for larger groups
+        val lemma = next.connective match {
+          case CnfPointwiseAnd => conjTransform
+          case CnfPointwiseOr => disjTransform
+        }
+        transform = LpTerm.App[Level.Meta](lemma,
+          Seq(Arg.Implicit(LpTerm.Obj(after)), Arg.Explicit(LpTerm.Obj(LpTerm.LpList(group))),
+            Arg.Explicit(LpTerm.LpInt[Level.Meta](index)), Arg.Explicit(transform)))
+      }
+
+      val rebuild: Seq[LpTerm[Level.Obj]] => LpTerm[Level.Obj] = next.connective match {
+        case CnfPointwiseAnd => nAry.conjunction
+        case CnfPointwiseOr => nAry.disjunction
+      }
+      before = rebuild(group)
+      after = rebuild(group.updated(index, after))
+    }
+
+    LpTerm.App[Level.Meta](transform, Seq(Arg.Explicit(premiseProof)))
+  }
 
   /** Record the implication bridge for a whole non-vacuous generalization,
     * keeping the remaining generalized variables bound.

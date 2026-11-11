@@ -36,6 +36,7 @@ object ND {
 
     // symmetry of equality
     private[ND] val eqSymS: SymRef = SymRef.LP(QName.local(eqSymStr))
+    private[ND] val notExistsS: SymRef = SymRef.LP(QName.local("¬∃"))
 
   }
 
@@ -48,6 +49,9 @@ object ND {
       LpTerm.Const[L](lpWitnessConS)
     def eqSym[L <: Level]: LpTerm.Const[L] =
       LpTerm.Const[L](eqSymS)
+
+    def notExists[L <: Level]: LpTerm.Const[L] =
+      LpTerm.Const[L](notExistsS)
 
     def topIntro[L <: Level]: LpTerm.Const[L] =
       LpTerm.Const[L](lpTopIntro)
