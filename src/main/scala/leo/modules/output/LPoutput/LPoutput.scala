@@ -302,10 +302,12 @@ object LPoutput {
   def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo,
               proofReferences: ProofReferences = ProofReferences(),
               useTypedIntroduction: Boolean = false,
-              standaloneSubproofThreshold: Option[Int] = None): (Option[EncodedProofStep], lpProofStepInfo) = {
+              standaloneSubproofThreshold: Option[Int] = None,
+              enclosingNames: Set[String] = Set.empty): (Option[EncodedProofStep], lpProofStepInfo) = {
 
     val stepName = nameStep(cl.id).name
     val rule = cl.annotation.fromRule
+    val namesInScope = enclosingNames ++ proofReferences.negConjRef.map(_._2.value)
     // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
     val parentInLpEncID_new = cl.annotation.parents.map(parent => stepInfo.identicalSteps.getOrElse(parent.id, nameStep_new(parent.id)))
 
@@ -328,7 +330,8 @@ object LPoutput {
 
           rule match {
             case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
-              encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold) match {
+              encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold,
+                namesInScope) match {
                 case Right(encoding) =>
                   val result = toProofStepOld(cl, encStep, rule.name, Left(encoding.scripts), None)
                   (result.map(_.copy(auxiliaryLemmas = encoding.auxiliaryLemmas)), outputInfo)
@@ -733,6 +736,8 @@ object LPoutput {
     val ncName = Name(LpSig.freshIfNeeded("NC", occupiedNames))
     val hypothesisName = Name(LpSig.freshIfNeeded("h", occupiedNames + ncName.value))
     var packageReferences = ProofReferences(packageRoot.map(_ => conjName -> hypothesisName))
+    // The GDV wrapper introduces these proof binders before the step scripts.
+    val enclosingNames = if (gdv_mode) Set(conjName.local.value) ++ gdvProofParam else Set.empty[String]
     // Default conjecture to bot; update if the traversal finds the root (if the proof is not just showing that axioms are contradictory).
     var conjecture: LpTerm[Level.Obj] = LogicConst.Bot
 
@@ -779,7 +784,8 @@ object LPoutput {
         val useTypedIntroduction = useLargeContextEncoding(step.cl.implicitlyBound.size, gdv_mode)
         val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep, references,
           useTypedIntroduction = useTypedIntroduction,
-          standaloneSubproofThreshold = if (gdv_mode) None else standaloneSubproofThreshold)
+          standaloneSubproofThreshold = if (gdv_mode) None else standaloneSubproofThreshold,
+          enclosingNames = enclosingNames)
         clausifiedSteps ++= newInfo.clausifiedSteps
         identicalSteps ++= newInfo.identicalSteps
         additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols

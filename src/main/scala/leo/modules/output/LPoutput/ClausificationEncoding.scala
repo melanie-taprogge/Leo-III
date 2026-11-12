@@ -115,7 +115,8 @@ object ClausificationEncoding {
                                       variableMap: Map[Int, String],
                                       encParent: lpClauseInst,
                                       encChild: lpClauseInst,
-                                      generalizations: Seq[CnfGeneralization])
+                                      generalizations: Seq[CnfGeneralization],
+                                      occupiedNames: Set[String])
 
   private sealed trait CnfReplayStep
   private final case class CnfTactic(script: LpProofScript) extends CnfReplayStep
@@ -142,7 +143,8 @@ object ClausificationEncoding {
     */
   private def initCnfContext(step: ClauseProxy,
                              parentProofs: Seq[LpTerm[Level.Obj]],
-                             sig: LpSig): Either[String, CnfContext] = {
+                             sig: LpSig,
+                             enclosingNames: Set[String]): Either[String, CnfContext] = {
     val parents = step.annotation.parents
     if ((step.annotation.fromRule != FullCNF && step.annotation.fromRule != RenameCNF) ||
         parents.size != 1 || parentProofs.size != 1)
@@ -197,7 +199,9 @@ object ClausificationEncoding {
       CnfGeneralization(move, occurrence, encSteps(2 * index), encSteps(1 + 2 * index),
         vacuous = !occurrence.after.implicitlyBound.contains(move.corrChildVar))
     }
-    val ctx = CnfContext(step, parentProofs.head, variableMap, encParent, encChild, generalizations)
+    val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value)
+    val occupiedNames = sig.reserved ++ signatureNames ++ variableMap.values ++ enclosingNames
+    val ctx = CnfContext(step, parentProofs.head, variableMap, encParent, encChild, generalizations, occupiedNames)
     Out.lp_debug_info(s"CNF step ${step.id}: parent ${parents.head.id} as ${ctx.parentProof}, ${generalizations.size} generalization(s)")
     Out.lp_debug_info(s"CNF shared variable map: ${ctx.variableMap.toSeq.sortBy(_._1)}")
     Out.lp_debug_info(s"CNF translated parent: ${ctx.encParent.term}")
@@ -233,9 +237,10 @@ object ClausificationEncoding {
              parentProofs: Seq[LpTerm[Level.Obj]],
              sig: LpSig,
              useTypedIntroduction: Boolean = false,
-             standaloneSubproofThreshold: Option[Int] = None): Either[String, CnfEncoding] = {
+             standaloneSubproofThreshold: Option[Int] = None,
+             enclosingNames: Set[String] = Set.empty): Either[String, CnfEncoding] = {
     // Validate and translate the segment, retaining the recorded endpoints.
-    val ctx = initCnfContext(step, parentProofs, sig) match {
+    val ctx = initCnfContext(step, parentProofs, sig, enclosingNames) match {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
@@ -361,9 +366,7 @@ object ClausificationEncoding {
       // The callback accepts a proof of the same child formula with the desired prefix.
       val desiredBinders = desired.map(variable => bindersById(variable._1))
       val orderedType = LpType.Pi(desiredBinders, LpType.Prf(ctx.encChild.term))
-      //  Its name must avoid both signature symbols and local variables.
-      val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
-      val orderedName = Name(LpSig.freshIfNeeded("ordered", sig.reserved ++ signatureNames ++ ctx.variableMap.values))
+      val orderedName = Name(LpSig.freshIfNeeded("ordered", ctx.occupiedNames))
       val ordered = LpTerm.Var[Level.Meta](orderedName, Some(orderedType))
       val application = LpTerm.App[Level.Meta](ordered, desiredBinders.map(binder => Arg.Explicit[Level.Meta](binder)))
       // Abstract in the declaration's given order, applying the callback in
@@ -393,11 +396,8 @@ object ClausificationEncoding {
     Right(stage)
   }
 
-  private def cnfBridgeTakenNames(ctx: CnfContext, stage: CnfStage, sig: LpSig): Set[String] = {
-    val signatureNames = (sig.termNames.valuesIterator ++ sig.typeNames.valuesIterator).map(_.local.value).toSet
-    val proofNames = stage.replay.collect { case bridge: CnfBridge => bridge.name.value }
-    sig.reserved ++ signatureNames ++ ctx.variableMap.values ++ proofNames
-  }
+  private def cnfBridgeTakenNames(ctx: CnfContext, stage: CnfStage): Set[String] =
+    ctx.occupiedNames ++ stage.replay.iterator.collect { case bridge: CnfBridge => bridge.name.value }
 
   /** Allocate a bridge name and its premise hypothesis in the current replay. */
   private def cnfBridgeNames(ctx: CnfContext, kind: String, taken: Set[String]): (Name, Name) = {
@@ -449,7 +449,7 @@ object ClausificationEncoding {
     val pendingBinders = vars2Lp(stage.pendingVars, ctx.variableMap)
     val before = lpTermBuilder.forall(pendingBinders, earlierClause.term)
     val after = lpTermBuilder.forall(pendingBinders, stage.clause.term)
-    val (bridgeName, hypothesisName) = cnfBridgeNames(ctx, "boolean", cnfBridgeTakenNames(ctx, stage, sig))
+    val (bridgeName, hypothesisName) = cnfBridgeNames(ctx, "boolean", cnfBridgeTakenNames(ctx, stage))
     val hypothesis = lpTermBuilder.localObj(hypothesisName)
     val proofSteps: Seq[LpProofScript] = if (useReflectiveCnfBooleanBridges) {
       // construct the proof using reflexivity
@@ -843,7 +843,7 @@ object ClausificationEncoding {
     val antecedent = lpTermBuilder.forall(remainingBinders, generalization.before.term)
     val consequent = lpTermBuilder.forall(pendingBinders, generalization.after.term)
 
-    val taken = cnfBridgeTakenNames(ctx, stage, sig)
+    val taken = cnfBridgeTakenNames(ctx, stage)
     val (bridgeName, hypothesisName) = cnfBridgeNames(ctx, "generalization", taken)
     val hypothesis = lpTermBuilder.localObj(hypothesisName)
     val assumeHypothesis = Assume(Seq(hypothesisName))
