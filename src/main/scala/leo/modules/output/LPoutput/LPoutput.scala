@@ -48,6 +48,7 @@ object LPoutput {
   val tptpArithmeticFile = "TptpArithmatic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
+  private val nameAuxiliaryFile = "Auxiliary"
   val nameSignatureFile = "Signature"
   val abbreviationSignatureFileNoDot = "S"
   val abbreviationSignatureFile = if (outputSingleFile) "" else abbreviationSignatureFileNoDot + "."
@@ -677,12 +678,14 @@ object LPoutput {
   }
 
   def extractNecessaryFormulas(state: LocalState, gdv_mode: Boolean, gdvProofParam: Option[String] = None,
-                               standaloneSubproofThreshold: Option[Int] = Some(defaultStandaloneSubproofThreshold)) = {
+                               standaloneSubproofThreshold: Option[Int] = Some(defaultStandaloneSubproofThreshold),
+                               splitAuxiliaryLemmas: Boolean = false) = {
 
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
     val signatureFileSB: mutable.StringBuilder = new StringBuilder()
     val formulaeFileSB: mutable.StringBuilder = new StringBuilder()
+    val auxiliaryFileSB = new mutable.StringBuilder()
     var proofSteps: Seq[LpProofScript] = Seq.empty
     var gdvParentProofSteps: Seq[LpProofScript] = Seq.empty
     val packageSteps = mutable.ArrayBuffer.empty[EncodedProofStep] // collect encoded steps
@@ -796,11 +799,15 @@ object LPoutput {
 
     val (typeDecSB, skDecSB, defSB, tacticSB) = generateObjectDeclaartions(proof, sig)
 
-    // set necessary flags
-    if (flagSt.etaExpFlag) proofFileSB.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n\n")
+    val splitAuxiliary = splitAuxiliaryLemmas && !gdv_mode &&
+      packageSteps.exists(_.auxiliaryLemmas.nonEmpty)
+    val auxiliaryDeclarations = if (splitAuxiliary) auxiliaryFileSB else proofFileSB
 
-    if (setBuiltins) proofFileSB.append("// BUILTINS /////////////////////////////////\n\nbuiltin \"arr\" ≔ ⤳;\nbuiltin \"funExt\" ≔ funExt;\n")
-
+    val proofPrelude = new mutable.StringBuilder()
+    if (flagSt.etaExpFlag) proofPrelude.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n\n")
+    if (setBuiltins) proofPrelude.append("// BUILTINS /////////////////////////////////\n\nbuiltin \"arr\" ≔ ⤳;\nbuiltin \"funExt\" ≔ funExt;\n")
+    proofFileSB.append(proofPrelude)
+    if (splitAuxiliary) auxiliaryFileSB.append(proofPrelude)
 
     // Generate declarations of symbols that are implicit in TPTP but not mapped to a Lambdapi encoding
     /*
@@ -834,9 +841,11 @@ object LPoutput {
     }
 
     if (skDecSB.length != 0) {
-      proofFileSB.append("\n\n// SKOLEM TERMS ///////////////////////////////////\n\n")
-      proofFileSB.append(skDecSB)
+      auxiliaryDeclarations.append("\n\n// SKOLEM TERMS ///////////////////////////////////\n\n")
+      auxiliaryDeclarations.append(skDecSB)
     }
+
+    if (splitAuxiliary) auxiliaryFileSB.append("\n\n// AUXILIARY LEMMAS /////////////////////////////////\n\n")
 
     if (tacticSB.nonEmpty) {
       proofFileSB.append("\n\n// TACTIC TERMS ///////////////////////////////////\n\n")
@@ -929,7 +938,7 @@ object LPoutput {
         val stepRo = ro.copy(explicitTypes = useLargeContextEncoding(result.variableCount, gdvMode = false))
         // Auxiliary proofs carry their own parameters and are in scope for this step.
         result.auxiliaryLemmas.foreach { lemma =>
-          proofFileSB.append(Renderer.stmt(lemma, sig, stepRo)).append("\n")
+          auxiliaryDeclarations.append(Renderer.stmt(lemma, sig, stepRo)).append("\n")
         }
         val parents = result.source.annotation.parents.map(parent => s"step${parent.id}").mkString(", ")
         val source = LpProofScript.Comment(s"parents: [$parents]")
@@ -970,13 +979,14 @@ object LPoutput {
       proofFileSB.append(Renderer.stmt(completeProof, sig, ro))
     }
 
-    (proofFileSB,signatureFileSB,formulaeFileSB)
+    (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB)
   }
 
   def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String):Unit={
 
     val lpOutputPath = if (outputSingleFile) Paths.get(lpOutputPath0) else Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)
-    val (proofFileSB,signatureFileSB,formulaeFileSB) = extractNecessaryFormulas(state, false)
+    val (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB) =
+      extractNecessaryFormulas(state, false, splitAuxiliaryLemmas = !outputSingleFile)
 
     val tempLibStr: String = if (customUserTacFile) s"${nameLpOutputFolder}.${nameTempFile}" else s"${nameLeoIIILPlib}.${leoSimpTacticFile}"
 
@@ -1032,7 +1042,20 @@ object LPoutput {
       singleProof.append(formulaeFileSB)
     }
 
-    val proofImports = reqString + additions + cnfReflectionImport
+    val commonProofImports = reqString + additions + cnfReflectionImport
+    var proofImports = commonProofImports
+    if (!outputSingleFile) {
+      val auxiliaryPath = lpOutputPath.resolve(s"$nameAuxiliaryFile.lp")
+      if (auxiliaryFileSB.nonEmpty) {
+        auxiliaryFileSB.insert(0, commonProofImports + "\n\n")
+        Files.write(auxiliaryPath, auxiliaryFileSB.toString.getBytes(StandardCharsets.UTF_8))
+        proofImports += s"require open $nameLpOutputFolder.$nameAuxiliaryFile;\n"
+      } else {
+        // Re-exporting into an existing package can leave an unused generated module.
+        Files.deleteIfExists(auxiliaryPath)
+        Files.deleteIfExists(lpOutputPath.resolve(s"$nameAuxiliaryFile.lpo"))
+      }
+    }
     val proofFilePath = if (!outputSingleFile) lpOutputPath.resolve(s"$nameProofFile.lp") else lpOutputPath.resolve(s"$nameLpOutputFolder.lp")
     if (!outputSingleFile){
       proofFileSB.insert(0, proofImports + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
@@ -1053,7 +1076,7 @@ object LPoutput {
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
     val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.String Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tptpArithmeticLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
-    val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
+    val (proofFileSB, _, _, _) = extractNecessaryFormulas(state, true)
     proofFileSB.insert(0, cnfReflectionImport + reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
     val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile" + conjName), Seq.empty,lpConstantTerm(nameProofFile))
@@ -1063,7 +1086,7 @@ object LPoutput {
   }
   def proof2GDVLP(state: LocalState): String = {
     val targetFormulaName = gdvTargetNameFromState(state)
-    val (proofFileSB,_,_) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
+    val (proofFileSB, _, _, _) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
     proofFileSB.insert(0, s"$gdvRequireOpenLine\n$cnfReflectionImport")
 
     val sig = LpSig.fromLeo(state.signature)
