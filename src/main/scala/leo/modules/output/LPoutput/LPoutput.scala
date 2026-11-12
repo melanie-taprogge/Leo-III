@@ -20,6 +20,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.nameGeneration.nameInt
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 import scala.collection.mutable
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, DefEncoding, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef, TermEncoding, TypeEncoding, tptpConstMappings}
 import leo.modules.output.LPoutput.UnificationEncoding.encodePatternUni
@@ -997,13 +998,16 @@ object LPoutput {
                     problemFileName: String, runtimeMs: Long): Unit = {
 
     val lpOutputPath = if (outputSingleFile) Paths.get(lpOutputPath0) else Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)
+    val generationStartNanos = System.nanoTime()
     val (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts) =
       extractNecessaryFormulas(state, false, splitAuxiliaryLemmas = !outputSingleFile)
+    val generationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - generationStartNanos)
     val problemName = problemFileName.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
     val proofHeader = Seq(
       s"// problem: $problemName",
       s"// leo_version: ${Configuration.VERSION}",
       s"// runtime_ms: $runtimeMs",
+      s"// lp_generation_ms: $generationMs",
       s"// proof_steps: ${stepCounts.total}",
       s"// admitted_steps: ${stepCounts.admitted}"
     ).mkString("", "\n", "\n\n")
