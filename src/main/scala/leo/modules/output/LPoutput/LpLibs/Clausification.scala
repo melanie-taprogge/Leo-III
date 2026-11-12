@@ -2,9 +2,11 @@ package leo.modules.output.LPoutput.LpLibs
 
 import leo.modules.output.LPoutput.NewLpDatastructures._
 
-/** References to the clausification equalities provided by CNFeq.lp. */
+/** References to the clausification lemmas provided by CNFeq.lp and CNF.lp. */
 object Clausification {
   object Names {
+    private[Clausification] val boolBridge: SymRef = SymRef.LP(QName.local("bool_bridge"))
+
     private val skolemExistsStr = "∃_skolem"
     private val skolemNotForallStr = "∀_skolem"
     private val notExistsForallNotStr = "¬∃=∀¬"
@@ -23,6 +25,7 @@ object Clausification {
   }
 
   object Terms {
+    def boolBridge[L <: Level]: LpTerm.Const[L] = LpTerm.Const[L](Names.boolBridge)
     def skolemExists[L <: Level]: LpTerm.Const[L] = LpTerm.Const[L](Names.skolemExists)
     def skolemNotForall[L <: Level]: LpTerm.Const[L] = LpTerm.Const[L](Names.skolemNotForall)
     def notExistsForallNot[L <: Level]: LpTerm.Const[L] = LpTerm.Const[L](Names.notExistsForallNot)

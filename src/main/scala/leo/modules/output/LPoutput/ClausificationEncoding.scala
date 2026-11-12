@@ -8,7 +8,7 @@ import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpLibs.{Clausification, EqRules, LeoTactics, MetaTheorems, ND}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Repeat, Rewrite, RewritePattern, Side, Simplify, Try}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Reflexivity, Repeat, Rewrite, RewritePattern, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, vars2Lp}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, Lifting, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, Stmt, SymRef, lpClauseInst, lpTermBuilder, nAry}
@@ -75,6 +75,9 @@ object ClausificationEncoding {
 
   // Keep the rewrite backend available for checking-time comparisons.
   private val usePointwiseCnfGeneralization = true
+  private[LPoutput] val useReflectiveCnfBooleanBridges = true
+
+  private val standaloneCnfBridgeNodeThreshold = 1500
 
   private sealed trait CnfGeneralizationPlan {
     def needsBridge: Boolean
@@ -251,7 +254,7 @@ object ClausificationEncoding {
     val generalizations = ctx.generalizations.reverseIterator
     while (generalizations.hasNext) {
       val generalization = generalizations.next()
-      val afterBoolean = encCnfBooleanBlock(ctx, stage, generalization.after, sig) match {
+      val afterBoolean = encCnfBooleanBlock(ctx, stage, generalization.after, sig, useTypedIntroduction) match {
         case Right(value) => value
         case Left(reason) =>
           Out.lp_debug_info(reason)
@@ -266,7 +269,7 @@ object ClausificationEncoding {
     }
 
     // Recover the original formula and close with its resolved proof.
-    val parentStage = encCnfBooleanBlock(ctx, stage, ctx.encParent, sig) match {
+    val parentStage = encCnfBooleanBlock(ctx, stage, ctx.encParent, sig, useTypedIntroduction) match {
       case Right(value) => value
       case Left(reason) =>
         Out.lp_debug_info(reason)
@@ -279,9 +282,11 @@ object ClausificationEncoding {
         return Left(reason)
     }
 
-    // Count the bridges that survived replay, including both kinds of bridge.
+    // Large bridge statements can make a local context expensive even when
+    // few bridges survived replay.
     val standalone = standaloneSubproofThreshold.exists { threshold =>
-      parentStage.replay.count(_.isInstanceOf[CnfBridge]) >= threshold
+      val bridges = parentStage.replay.collect { case bridge: CnfBridge => bridge }
+      bridges.size >= threshold || cnfBridgeNodeThresholdReached(bridges)
     }
     val auxiliaryLemmas = Vector.newBuilder[Stmt.Definition]
     val scripts = parentStage.replay.flatMap {
@@ -292,6 +297,28 @@ object ClausificationEncoding {
       case bridge: CnfBridge => localCnfBridgeScripts(bridge)
     }
     Right(CnfEncoding(scripts ++ closing, auxiliaryLemmas.result()))
+  }
+
+  /** Count the bridge implications together, stopping once the budget is met. */
+  private def cnfBridgeNodeThresholdReached(bridges: Seq[CnfBridge]): Boolean = {
+    val terms = scala.collection.mutable.ArrayDeque.from(bridges.iterator.map(_.implication))
+    var nodeCount = 0
+    while (nodeCount < standaloneCnfBridgeNodeThreshold && terms.nonEmpty) {
+      nodeCount += 1
+      terms.removeLast() match {
+        case LpTerm.App(head, arguments) =>
+          terms.append(head)
+          arguments.foreach {
+            case Arg.Explicit(term) => terms.append(term)
+            case Arg.Implicit(term) => terms.append(term)
+            case Arg.ExplicitTypeArg(_) | Arg.ImplicitTypeArg(_) => nodeCount += 1
+          }
+        case LpTerm.Lam(_, body) => terms.append(body)
+        case LpTerm.LpList(elements) => terms ++= elements
+        case _ => // Leaves were counted when removed from the queue.
+      }
+    }
+    nodeCount >= standaloneCnfBridgeNodeThreshold
   }
 
   /** Ensure that the variables in the child occur in the right order:
@@ -408,44 +435,48 @@ object ClausificationEncoding {
       modifiers = Seq(Stmt.Opaque))
   }
 
-  /** Restore an earlier body through a Boolean implication bridge, normalizing
-    * both sides beneath the pending prefix while keeping its variables bound.
-    * Followed by a refinement reducing the current goal to the state after
-    * application of the boolean identities.
-    */
+  /** Restore an earlier body through a Boolean implication bridge under the shared pending prefix. */
   private def encCnfBooleanBlock(ctx: CnfContext,
                                  stage: CnfStage,
                                  earlierClause: lpClauseInst,
-                                 sig: LpSig): Either[String, CnfStage] = {
+                                 sig: LpSig,
+                                 useTypedIntroduction: Boolean): Either[String, CnfStage] = {
     if (earlierClause.term == stage.clause.term) {
       Out.lp_debug_info(s"CNF step ${ctx.step.id}: Boolean block has identical endpoints; no bridge needed")
       return Right(stage.copy(clause = earlierClause))
     }
 
-    // Wrap the terms presenting the before and after, as well as the selector hole in exactly the same
-    // variable context (the currently still pending vars).
-    // the former will be used to construct the type of the bridge, the latter will be used to construct the patterns.
-    val hole = lpTermBuilder.localObj(Name("x"))
-    val (before, after, prefixedHole) =
-      stage.pendingVars.foldRight((earlierClause.term, stage.clause.term, hole)) {
-        case ((id, typ), (left, right, pattern)) =>
-          val binder = Name(ctx.variableMap(id)) -> LpType.El(type2LP(typ))
-          (LogicConst.Forall(binder, left), LogicConst.Forall(binder, right),
-            LogicConst.Forall(binder, pattern))
-      }
-    // Search inside the selected body on each side. (The enclosing implication
-    // and pending quantifiers are not targets of the Boolean rule applications.)
-    val bodyPattern = RewritePattern(prefixedHole, hole, searchInside = true)
-    val leftPattern = PatternBuilder.embedPatternInImp(bodyPattern, Side.Left)
-    val rightPattern = PatternBuilder.embedPatternInImp(bodyPattern, Side.Right)
-
+    val pendingBinders = vars2Lp(stage.pendingVars, ctx.variableMap)
+    val before = lpTermBuilder.forall(pendingBinders, earlierClause.term)
+    val after = lpTermBuilder.forall(pendingBinders, stage.clause.term)
     val (bridgeName, hypothesisName) = cnfBridgeNames(ctx, "boolean", cnfBridgeTakenNames(ctx, stage, sig))
-    // Normalizing both sides gives F ⇒ F, which closes by identity.
-    val proof: LpProofScript.Body = Seq(
-      Left(LeoTactics.EvalApp.repeatBoolIdsAt(leftPattern)),
-      Left(LeoTactics.EvalApp.repeatBoolIdsAt(rightPattern)),
-      Left(Assume(Seq(hypothesisName))),
-      Left(Refine(proofTermAsTacticArg(lpTermBuilder.localObj(hypothesisName)))))
+    val hypothesis = lpTermBuilder.localObj(hypothesisName)
+    val proofSteps: Seq[LpProofScript] = if (useReflectiveCnfBooleanBridges) {
+      // construct the proof using reflexivity
+      val bridgeArgs = Seq.fill(3)(Arg.Explicit[Level.Meta](LpTerm.Wildcard[Level.Meta]()))
+      if (pendingBinders.isEmpty) {
+        Seq(Refine(LpTerm.App(Clausification.Terms.boolBridge[Level.Meta], bridgeArgs)), Reflexivity)
+      } else {
+        // if necessary, introduce pending variables and refine with them
+        val introduction = encClauseVariableIntroduction(pendingBinders.map(Lifting.OlVarM(_)),
+          stage.clause.term, useTypedIntroduction, sig)
+        val premise = applyProofToVars(hypothesis, pendingBinders.map(_.name))
+        val bridge = LpTerm.App(Clausification.Terms.boolBridge[Level.Meta],
+          bridgeArgs :+ Arg.Explicit(proofTermAsTacticArg(premise)))
+        Seq(Assume(Seq(hypothesisName))) ++ introduction ++ Seq(Refine(bridge), Reflexivity)
+      }
+    } else {
+      // Alternatively construct a proof relying on tactic applications
+      // build the pattern for the tactic applications
+      val hole = lpTermBuilder.localObj(Name("x"))
+      val bodyPattern = RewritePattern(lpTermBuilder.forall(pendingBinders, hole), hole, searchInside = true)
+      val leftPattern = PatternBuilder.embedPatternInImp(bodyPattern, Side.Left)
+      val rightPattern = PatternBuilder.embedPatternInImp(bodyPattern, Side.Right)
+      // generate the actual tactic applications
+      Seq(LeoTactics.EvalApp.repeatBoolIdsAt(leftPattern), LeoTactics.EvalApp.repeatBoolIdsAt(rightPattern),
+        Assume(Seq(hypothesisName)), Refine(proofTermAsTacticArg(hypothesis)))
+    }
+    val proof: LpProofScript.Body = proofSteps.map(Left(_))
     val bridge = CnfBridge(bridgeName, LogicConst.Imp(before, after), proof,
       cnfBridgeParameters(ctx, stage, earlierClause, stage.clause))
     Out.lp_debug_info(s"CNF step ${ctx.step.id}: Boolean bridge ${bridgeName.value}, pending variables ${stage.pendingVars.map(_._1)}")

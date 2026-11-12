@@ -10,7 +10,7 @@ import leo.modules.{numbersInProof, saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
 import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{lpDne, tempLib, tempLibDeps}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
-import leo.modules.output.LPoutput.ClausificationEncoding.{encCnf, encCnfConj, encSkolem}
+import leo.modules.output.LPoutput.ClausificationEncoding.{encCnf, encCnfConj, encSkolem, useReflectiveCnfBooleanBridges}
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Obj, Wildcard}
@@ -66,6 +66,9 @@ object LPoutput {
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
   val tptpArithmeticLibStr = f"${nameLeoIIILPlib}.${tptpArithmeticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
+  private def cnfReflectionImport: String =
+    if (useReflectiveCnfBooleanBridges) s"require open $nameLeoIIILPlib.CNF;\n" else ""
+
   val gdvRequireOpenLine: String =
     s"require open $calcRuleLibStr $permLibStr $simpTacLibStr $tptpArithmeticLibStr Stdlib.Epsilon Stdlib.Disj Stdlib.Conj Stdlib.String;"
 
@@ -1029,13 +1032,14 @@ object LPoutput {
       singleProof.append(formulaeFileSB)
     }
 
+    val proofImports = reqString + additions + cnfReflectionImport
     val proofFilePath = if (!outputSingleFile) lpOutputPath.resolve(s"$nameProofFile.lp") else lpOutputPath.resolve(s"$nameLpOutputFolder.lp")
     if (!outputSingleFile){
-      proofFileSB.insert(0, reqString + additions + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      proofFileSB.insert(0, proofImports + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
     } else {
       val wholeProof = singleProof.append(proofFileSB)
-      wholeProof.insert(0, reqString + additions + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      wholeProof.insert(0, proofImports + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
       Files.write(proofFilePath, wholeProof.toString.getBytes(StandardCharsets.UTF_8))
     }
 
@@ -1050,7 +1054,7 @@ object LPoutput {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
     val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.String Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tptpArithmeticLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
     val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
-    proofFileSB.insert(0, reqString)
+    proofFileSB.insert(0, cnfReflectionImport + reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
     val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile" + conjName), Seq.empty,lpConstantTerm(nameProofFile))
     proofFileSB.append("\n")
@@ -1060,7 +1064,7 @@ object LPoutput {
   def proof2GDVLP(state: LocalState): String = {
     val targetFormulaName = gdvTargetNameFromState(state)
     val (proofFileSB,_,_) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
-    proofFileSB.insert(0, s"$gdvRequireOpenLine\n")
+    proofFileSB.insert(0, s"$gdvRequireOpenLine\n$cnfReflectionImport")
 
     val sig = LpSig.fromLeo(state.signature)
     val proofParam = LpTerm.Var[Level.Meta](Name(gdvNegatedConjectureProofName), None)
