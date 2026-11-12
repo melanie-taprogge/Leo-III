@@ -515,7 +515,7 @@ object SeqLoop {
 
       print(s"saving Lambdapi output files to ${lpOutputPath}${lpFolderName}_$problemFileNameWithoutExtension\n")
 
-      outputLPFiles(state,lpOutputPath,s"${lpFolderName}_$problemFileNameWithoutExtension")
+      outputLPFiles(state, lpOutputPath, s"${lpFolderName}_$problemFileNameWithoutExtension", problemFileName, time)
     }
   }
 

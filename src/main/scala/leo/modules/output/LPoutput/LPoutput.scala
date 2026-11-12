@@ -1,6 +1,6 @@
 package leo.modules.output.LPoutput
 
-import leo.{Out, modules}
+import leo.{Configuration, Out, modules}
 import leo.datastructures.Term.Integer
 import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Term, isPropSet}
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
@@ -88,10 +88,13 @@ object LPoutput {
                                     ty: LpType,
                                     body: LpProofScript.Body,
                                     comment: LpProofScript.Comment,
+                                    admittedWholesale: Boolean,
                                     auxiliaryLemmas: Seq[Stmt.Definition] = Seq.empty) {
     /** Number of clause term variables, excluding binders inside formulas. */
     def variableCount: Int = source.cl.implicitlyBound.size
   }
+
+  final case class ProofStepCounts(total: Int, admitted: Int)
 
   /** Package a legacy script fragment through the common step-result builder.
     * A fragment may itself be an entire legacy `lpProofScript`.
@@ -126,7 +129,8 @@ object LPoutput {
         (scripts, LpProofScript.Comment(ruleName))
     }
     // Assembly later chooses a local Have for GDV or a standalone package lemma.
-    Some(EncodedProofStep(step, nameStep_new(step.id).local, encStep, body, comment))
+    Some(EncodedProofStep(step, nameStep_new(step.id).local, encStep, body, comment,
+      admittedWholesale = notEncoded.isDefined))
   }
 
   /** Legacy-script overload of `toProofStep`, sharing the same diagnostics and
@@ -985,14 +989,24 @@ object LPoutput {
       proofFileSB.append(Renderer.stmt(completeProof, sig, ro))
     }
 
-    (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB)
+    val stepCounts = ProofStepCounts(packageSteps.size, packageSteps.count(_.admittedWholesale))
+    (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts)
   }
 
-  def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String):Unit={
+  def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String,
+                    problemFileName: String, runtimeMs: Long): Unit = {
 
     val lpOutputPath = if (outputSingleFile) Paths.get(lpOutputPath0) else Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)
-    val (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB) =
+    val (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts) =
       extractNecessaryFormulas(state, false, splitAuxiliaryLemmas = !outputSingleFile)
+    val problemName = problemFileName.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
+    val proofHeader = Seq(
+      s"// problem: $problemName",
+      s"// leo_version: ${Configuration.VERSION}",
+      s"// runtime_ms: $runtimeMs",
+      s"// proof_steps: ${stepCounts.total}",
+      s"// admitted_steps: ${stepCounts.admitted}"
+    ).mkString("", "\n", "\n\n")
 
     val tempLibStr: String = if (customUserTacFile) s"${nameLpOutputFolder}.${nameTempFile}" else s"${nameLeoIIILPlib}.${leoSimpTacticFile}"
 
@@ -1063,12 +1077,13 @@ object LPoutput {
       }
     }
     val proofFilePath = if (!outputSingleFile) lpOutputPath.resolve(s"$nameProofFile.lp") else lpOutputPath.resolve(s"$nameLpOutputFolder.lp")
+    val proofPreamble = proofHeader + proofImports + "\n\n"
     if (!outputSingleFile){
-      proofFileSB.insert(0, proofImports + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      proofFileSB.insert(0, proofPreamble)
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
     } else {
       val wholeProof = singleProof.append(proofFileSB)
-      wholeProof.insert(0, proofImports + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      wholeProof.insert(0, proofPreamble)
       Files.write(proofFilePath, wholeProof.toString.getBytes(StandardCharsets.UTF_8))
     }
 
@@ -1082,7 +1097,7 @@ object LPoutput {
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
     val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.String Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tptpArithmeticLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
-    val (proofFileSB, _, _, _) = extractNecessaryFormulas(state, true)
+    val (proofFileSB, _, _, _, _) = extractNecessaryFormulas(state, true)
     proofFileSB.insert(0, cnfReflectionImport + reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
     val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile" + conjName), Seq.empty,lpConstantTerm(nameProofFile))
@@ -1092,7 +1107,7 @@ object LPoutput {
   }
   def proof2GDVLP(state: LocalState): String = {
     val targetFormulaName = gdvTargetNameFromState(state)
-    val (proofFileSB, _, _, _) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
+    val (proofFileSB, _, _, _, _) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
     proofFileSB.insert(0, s"$gdvRequireOpenLine\n$cnfReflectionImport")
 
     val sig = LpSig.fromLeo(state.signature)
