@@ -3,6 +3,7 @@ package leo.modules.output.LPoutput
 import leo.{Configuration, Out, modules}
 import leo.datastructures.Term.Integer
 import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Term, isPropSet}
+import leo.modules.HOLSignature.TyForall
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
 import leo.modules.prover.LocalState
@@ -622,13 +623,24 @@ object LPoutput {
   private def gdvTargetNameFromState(state: LocalState): String =
     lpEscapeName(tptpFormulaNameFromAnnotation(state.conjecture.annotation), state.signature, false)
 
-  def generateObjectDeclaartions(proof: modules.Proof, sig: LpSig): (StringBuilder, StringBuilder, StringBuilder, StringBuilder) = {
-
-    // add symbols of the user defined TPTP problem signature if necessary
-    val proofSymbols = symbolsInProof(proof)
+  private def exportedSignatureSymbols(proofSymbols: Set[Signature.Key], sig: Signature): Set[Signature.Key] = {
     val builtinSymbols = tptpConstMappings.leoBaseTy.keySet ++ tptpConstMappings.LeoConstants.keySet
-    val signatureSymbols = saturatedUserSignature(proofSymbols)(sig.orig).diff(builtinSymbols)
+    saturatedUserSignature(proofSymbols)(sig).diff(builtinSymbols)
+  }
 
+  private def needsPolymorphism(proofSymbols: Set[Signature.Key],
+                                signatureSymbols: Set[Signature.Key], sig: Signature): Boolean =
+    proofSymbols.contains(TyForall.key) || signatureSymbols.exists { key =>
+      val symbol = sig(key)
+      (symbol.hasType && symbol._ty.isPolyType) ||
+        (symbol.hasDefn && symbol._defn.symbols.contains(TyForall.key))
+    }
+
+  def generateObjectDeclaartions(proof: modules.Proof, sig: LpSig): (StringBuilder, StringBuilder, StringBuilder, StringBuilder) =
+    renderObjectDeclarations(proof, sig, exportedSignatureSymbols(symbolsInProof(proof), sig.orig))
+
+  private def renderObjectDeclarations(proof: modules.Proof, sig: LpSig,
+                                       signatureSymbols: Set[Signature.Key]): (StringBuilder, StringBuilder, StringBuilder, StringBuilder) = {
     val numbers = numbersInProof(proof)
 
     val typeDecSB: mutable.StringBuilder = new StringBuilder()
@@ -702,10 +714,11 @@ object LPoutput {
     val sig0 = state.signature
     val sig = LpSig.fromLeo(sig0)
     val proof = state.proof
+    val proofSymbols = symbolsInProof(proof)
 
     var tptpDefinedSymbols: Set[QName] = Set.empty
     var additionalSymbols: Set[Signature.Key] = Set.empty
-    if ((sig.orig.allUserConstants intersect symbolsInProof(proof)).filter(key => !isPropSet(Signature.PropSkolemConstant, sig.orig(key).flag)).map(sig.orig.apply(_).hasDefn).contains(true)) flagSt.defRuleDefined = true
+    if ((sig.orig.allUserConstants intersect proofSymbols).filter(key => !isPropSet(Signature.PropSkolemConstant, sig.orig(key).flag)).map(sig.orig.apply(_).hasDefn).contains(true)) flagSt.defRuleDefined = true
 
 
     // encode the clauses representing the steps
@@ -805,7 +818,9 @@ object LPoutput {
       }
     }
 
-    val (typeDecSB, skDecSB, defSB, tacticSB) = generateObjectDeclaartions(proof, sig)
+    val signatureSymbols = exportedSignatureSymbols(proofSymbols, sig.orig)
+    val requiresPolymorphism = needsPolymorphism(proofSymbols, signatureSymbols, sig.orig)
+    val (typeDecSB, skDecSB, defSB, tacticSB) = renderObjectDeclarations(proof, sig, signatureSymbols)
 
     val splitAuxiliary = splitAuxiliaryLemmas && !gdv_mode &&
       packageSteps.exists(_.auxiliaryLemmas.nonEmpty)
@@ -988,7 +1003,7 @@ object LPoutput {
     }
 
     val stepCounts = ProofStepCounts(packageSteps.size, packageSteps.count(_.admittedWholesale))
-    (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts)
+    (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts, requiresPolymorphism)
   }
 
   def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String,
@@ -996,7 +1011,7 @@ object LPoutput {
 
     val lpOutputPath = if (outputSingleFile) Paths.get(lpOutputPath0) else Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)
     val generationStartNanos = System.nanoTime()
-    val (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts) =
+    val (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts, requiresPolymorphism) =
       extractNecessaryFormulas(state, false, splitAuxiliaryLemmas = !outputSingleFile)
     val generationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - generationStartNanos)
     val problemName = problemFileName.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
@@ -1028,7 +1043,8 @@ object LPoutput {
 
     // todo: only require what we need
     lazy val reqList = Seq("Stdlib.Set","Stdlib.Prop","Stdlib.Classic","Stdlib.FOL","Stdlib.HOL","Stdlib.Eq","Stdlib.Impred","Stdlib.FunExt","Stdlib.PropExt","Stdlib.Nat","Stdlib.Bool","Stdlib.List","Stdlib.String","Stdlib.Epsilon","Stdlib.Disj","Stdlib.Conj",calcRuleLibStr,permLibStr,tptpArithmeticLibStr)
-    lazy val reqString = reqList.map(s => s"require open $s;\n").mkString("")
+    lazy val reqString = (reqList ++ Option.when(requiresPolymorphism)("Stdlib.Polymorphism"))
+      .map(s => s"require open $s;\n").mkString("")
     var additions = ""
     val singleProof: mutable.StringBuilder = new StringBuilder()
 
@@ -1098,7 +1114,7 @@ object LPoutput {
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
     val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.String Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tptpArithmeticLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
-    val (proofFileSB, _, _, _, _) = extractNecessaryFormulas(state, true)
+    val (proofFileSB, _, _, _, _, _) = extractNecessaryFormulas(state, true)
     proofFileSB.insert(0, cnfReflectionImport + reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
     val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile" + conjName), Seq.empty,lpConstantTerm(nameProofFile))
@@ -1108,7 +1124,7 @@ object LPoutput {
   }
   def proof2GDVLP(state: LocalState): String = {
     val targetFormulaName = gdvTargetNameFromState(state)
-    val (proofFileSB, _, _, _, _) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
+    val (proofFileSB, _, _, _, _, _) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
     proofFileSB.insert(0, s"$gdvRequireOpenLine\n$cnfReflectionImport")
 
     val sig = LpSig.fromLeo(state.signature)
