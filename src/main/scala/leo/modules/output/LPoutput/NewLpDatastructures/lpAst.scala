@@ -251,6 +251,7 @@ object LogicConst {
   val cImp:LpTerm.Const[Level.Obj] = LpTerm.Const[Level.Obj](impN)
   val cEq:LpTerm.Const[Level.Obj]  = LpTerm.Const[Level.Obj](eqN)
   val cAll:LpTerm.Const[Level.Obj] = LpTerm.Const[Level.Obj](allN)
+  val cTypeForall: LpTerm.Const[Level.Obj] = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("∀ₚ")))
   val cEx:LpTerm.Const[Level.Obj]  = LpTerm.Const[Level.Obj](exN)
   val cCh:LpTerm.Const[Level.Obj]  = LpTerm.Const[Level.Obj](chN)
 
@@ -338,6 +339,12 @@ object LogicConst {
         Some(((n, bty), body))
       case _ => None
     }
+  }
+
+  /** Universal quantification over a type. */
+  object TypeForall {
+    def apply(name: Name, body: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App(cTypeForall, Seq(E(LpTerm.Lam(name -> Some(LpType.LpSet), body))))
   }
 
   /** Existential quantification */
