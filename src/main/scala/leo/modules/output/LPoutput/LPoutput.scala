@@ -2,8 +2,9 @@ package leo.modules.output.LPoutput
 
 import leo.{Configuration, Out, modules}
 import leo.datastructures.Term.Integer
-import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Term, isPropSet}
+import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Subst, Term, isPropSet}
 import leo.modules.HOLSignature.TyForall
+import leo.modules.calculus.CalculusRule
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
 import leo.modules.prover.LocalState
@@ -40,6 +41,9 @@ object LPoutput {
   // Provisional threshold shared by explicit printing and typed variable introduction.
   private val explicitTypesVariableThreshold = 50
   private val defaultStandaloneSubproofThreshold = 15
+
+  // Add a rule here once its encoder handles polymorphic occurrences.
+  private val polymorphicReplayRules: Set[CalculusRule] = Set.empty
 
   private def useLargeContextEncoding(variableCount: Int, gdvMode: Boolean): Boolean =
     !gdvMode && variableCount >= explicitTypesVariableThreshold
@@ -178,33 +182,21 @@ object LPoutput {
     (encodeStep, identicalSteps)
   }
 
-  def identifySteps_new(cl: ClauseProxy, identicalSteps: mutable.HashMap[Long, QName], encStep: NewLpDatastructures.lpClauseInst): (Boolean, mutable.HashMap[Long, QName]) = {
-    var encodeStep = false
-    val childId = cl.id
-    cl.annotation.parents foreach { parent => // todo: save them rather than translating over and over again
-      val encParent = NewLpDatastructures.ClauseEncoding.clause2LP(parent.cl)
-      if (encParent.termEq(encStep)) { // case: any potential differences are abstracted away by rendering -> need not prove
-        if (identicalSteps.contains(childId)) {
-          if (identicalSteps(childId) != nameStep(parent.id)) {
-            throw new Exception(s"step $childId ($encStep) is equivalent to two parents: ${childId}, ${parent.id} ")
-          }
-        }
-        if (identicalSteps.contains(parent.id)) {
-          // in this case we already have the parent as a key and want to map the new child to the parents parent
-          val exVal = identicalSteps(parent.id)
-          Out.lp_debug_info(s"identical steps for parent ${parent.id} (maps to ${exVal})")
-          identicalSteps.update(childId, exVal)
-        } else {
-          // in this case we just want to link the child to the parent
-          val exVal = nameStep_new(parent.id)
-          identicalSteps.update(childId, exVal)
-        }
-      } else {
-        //Out.lp_debug_info(s"child (step$childId) and parent (step${parent.id}) differ: (upper line child, lower line parent):\n${encStep}\n${encParent}")
-        encodeStep = true
-      }
+  def identifySteps_new(cl: ClauseProxy, identicalSteps: mutable.HashMap[Long, QName],
+                        encStep: NewLpDatastructures.lpClauseInst): (Boolean, mutable.HashMap[Long, QName]) = {
+    val parents = cl.annotation.parents
+    val matchingParent = parents.find { parent =>
+      NewLpDatastructures.ClauseEncoding.clause2LP(parent.cl).asMl == encStep.asMl
     }
-    (encodeStep, identicalSteps)
+    matchingParent match {
+      case Some(parent) =>
+        val proofName = identicalSteps.getOrElse(parent.id, nameStep_new(parent.id))
+        Out.lp_debug_info(s"identical step ${cl.id} uses proof ${proofName} of parent ${parent.id}")
+        identicalSteps.update(cl.id, proofName)
+        (false, identicalSteps)
+      case None =>
+        (parents.nonEmpty, identicalSteps)
+    }
   }
 
   /** Construct source proof references after alias resolution.
@@ -304,6 +296,26 @@ object LPoutput {
     }
   }
 
+  private def polymorphicReplayReason(step: ClauseProxy, sig: Signature): Option[String] = {
+    val info = step.furtherInfo
+    val hasTypeSubstitution =
+      info.para.exists(_.typeSubstNeeded) || info.addInfoEqFac._5 ||
+      info.addInfoUni.subst.typeSubsts.nonEmpty || info.addInfoUni.origTypeSubst != Subst.id ||
+      info.addInfoDetUni.uniSubst.encSubst.typeSubsts.nonEmpty ||
+      info.addInfoDetUni.uniSubst.origTypeSubst != Subst.id ||
+      info.addInfoRw.exists(_.origTypeSubst != Subst.id)
+
+    val clauses = step.cl +: step.annotation.parents.map(_.cl)
+    if (hasTypeSubstitution) Some("type substitution")
+    else if (clauses.exists(_.typeVars.nonEmpty)) Some("implicit type variables in a premise or conclusion")
+    else if (clauses.exists(_.symbols.contains(TyForall.key))) Some("explicit type quantification in a premise or conclusion")
+    else if (clauses.exists(_.symbols.distinct.exists { key =>
+      val symbol = sig(key)
+      !symbol.isFixedSymbol && symbol.hasType && symbol._ty.isPolyType
+    })) Some("polymorphic user symbol in a premise or conclusion")
+    else None
+  }
+
   def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo,
               proofReferences: ProofReferences = ProofReferences(),
               useTypedIntroduction: Boolean = false,
@@ -325,7 +337,8 @@ object LPoutput {
 
     val (encStep0) = ClauseEncoding.clause2LP(cl.cl)
     val encStep = encStep0.asMl
-    val (needsEnc, newIdenticalSteps) = identifySteps_new(cl,stepInfo.identicalSteps,encStep0)
+    val polymorphicReason = polymorphicReplayReason(cl, sig.orig)
+    val (needsEnc, newIdenticalSteps) = identifySteps_new(cl, stepInfo.identicalSteps, encStep0)
 
     if ((cl.role != Role_Conjecture) && needsEnc && (rule != null)) {
       rule match {
@@ -333,7 +346,7 @@ object LPoutput {
         case _ =>
           val outputInfo = new lpProofStepInfo(newIdenticalSteps)
 
-          rule match {
+          val replay: PartialFunction[CalculusRule, (Option[EncodedProofStep], lpProofStepInfo)] = {
             case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
               encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold,
                 namesInScope) match {
@@ -460,9 +473,17 @@ object LPoutput {
                 case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)),outputInfo)
               }
 
+          }
+
+          polymorphicReason match {
+            case Some(reason) if !polymorphicReplayRules.contains(rule) && replay.isDefinedAt(rule) =>
+              val pending = Some(s"polymorphic replay pending ($reason)")
+              (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), pending), outputInfo)
             case _ =>
-              val parentIDs = parentInLpEncID_new.map(name => Renderer.qname(name, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
-              (toProofStepOld(cl, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")),outputInfo)
+              replay.applyOrElse(rule, (_: CalculusRule) => {
+                val parentIDs = parentInLpEncID_new.map(name => Renderer.qname(name, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+                (toProofStepOld(cl, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")), outputInfo)
+              })
           }
       }
     }else{
