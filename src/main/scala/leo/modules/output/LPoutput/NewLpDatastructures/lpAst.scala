@@ -57,6 +57,8 @@ object LpType {
   case object LpSet extends LpType
   /** encoded HOL Types as ML Types */
   final case class El(ol: OlMonoType) extends LpType
+  /** Interpretation of a prenex HOL type scheme. */
+  final case class ElScheme(scheme: OlPolyType) extends LpType
   /** HOL propositions as ML Types */
   final case class Prf(tm: LpTerm[Level.Obj]) extends LpType
   /** Dependant types */

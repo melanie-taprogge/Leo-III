@@ -380,6 +380,7 @@ object Renderer {
   def ty(t: LpType, ro: RenderOptions, sig: LpSig): String = t match {
     case LpType.LpSet => "Set"
     case LpType.El(ol) => s"$elStr ${olTy(ol, ro, sig)}"
+    case LpType.ElScheme(scheme) => s"τₛ (${schemeTy(scheme, ro, sig)})"
     case LpType.Pi(bs, body) =>
       val b = bs.map {
         case `Var`(n, Some(t)) => s"(${n.value} : ${ty(t, ro, sig)})"
@@ -389,6 +390,14 @@ object Renderer {
     case LpType.Arrow(a, b) => s"(${ty(a, ro, sig)} → ${ty(b, ro, sig)})"
     case LpType.Prf(a) => s"$prfStr ${termP(a, ro, Prec.Atom, sig)}"
     case LpType.Old(st) => st
+  }
+
+  private def schemeTy(scheme: OlPolyType, ro: RenderOptions, sig: LpSig): String = scheme match {
+    case OlPolyType.LiftedMono(body) => s"↑ ${olTy(body, ro, sig)}"
+    case OlPolyType.TyQuant(binders, body) =>
+      binders.foldRight(s"↑ ${olTy(body, ro, sig)}") { (binder, tail) =>
+        s"`∀ₛ ${binder.name.value}, $tail"
+      }
   }
 
   /**

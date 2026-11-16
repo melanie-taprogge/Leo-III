@@ -670,6 +670,7 @@ object LPoutput {
 
     }
 
+    lazy val occupiedTypeNames = sig.typeNames.valuesIterator.map(_.local.value).toSet
     signatureSymbols.foreach { key =>
       val symbol = sig.orig.apply(key)
 
@@ -680,9 +681,12 @@ object LPoutput {
         val sName = sig.termNames(symbol.key)
         val isSk = isPropSet(Signature.PropSkolemConstant, symbol.flag)
         if (symbol.hasType) {
-          val typeDec = TypeEncoding.type2LP(symbol._ty)
-          if (isSk) skDecsSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
-          else typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, El(typeDec)), sig, RenderOptions(false, false, monomorphic)))
+          val declaredType =
+            if (symbol._ty.isPolyType) LpType.ElScheme(TypeEncoding.polyType2LP(symbol._ty, occupiedTypeNames))
+            else El(TypeEncoding.type2LP(symbol._ty))
+          val declaration = Stmt.Declaration(sName.local, Seq.empty, declaredType)
+          if (isSk) skDecsSB.append(Renderer.stmt(declaration, sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+          else typeDecSB.append(Renderer.stmt(declaration, sig, RenderOptions(false, false, monomorphic)))
         }
 
         if (symbol.hasDefn) {

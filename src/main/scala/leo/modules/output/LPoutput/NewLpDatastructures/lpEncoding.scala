@@ -34,12 +34,18 @@ object TypeEncoding {
   /** Assign name to bound type variables */
   @inline def tyVar2LP(tv: Int): Name = nameTyVar(tv)
 
-  def polyType2LP(ty: Type): OlPolyType = ty match {
+  def polyType2LP(ty: Type): OlPolyType = polyType2LP(ty, Set.empty)
+
+  def polyType2LP(ty: Type, occupiedTypeNames: Set[String]): OlPolyType = ty match {
     case PolyType(_) =>
       val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
-      val encBodyTy = type2LP(bodyTy)
-      val quantifiers = (1 to tyAbsCount).map(scope => OlMonoType.TyVar(tyVar2LP(scope)))
-      TyQuant(quantifiers, encBodyTy)
+      val namesByIndex = (1 to tyAbsCount).map(tyVar2LP)
+      val binders = namesByIndex.map { name =>
+        TyVar(Name(LpSig.freshIfNeeded(name.value, occupiedTypeNames)))
+      }
+      // Leo's index 1 is innermost, while the scheme prefix is outermost first.
+      val renaming = namesByIndex.zip(binders.reverse).toMap
+      TyQuant(binders, Substitution.substMonoType(type2LP(bodyTy), renaming))
     case _ => LiftedMono(type2LP(ty))
   }
 
