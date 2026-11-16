@@ -193,10 +193,8 @@ final case class MoveQuantStep(corrChildVar: (Int, Type),
                                 // None means occurrence evidence has not been retained.
                                 occurrence: Option[GeneralizationOccurrence] = None
                               ) extends QuantStep
-case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
-                      renameHappend: Boolean = false,
-                      addInfoQuants: Vector[QuantStep] = Vector.empty,
-                      derivedClauses: Seq[Clause]  = Seq.empty)
+case class AddInfoCnf(renameHappend: Boolean = false,
+                      addInfoQuants: Vector[QuantStep] = Vector.empty)
 
 case class AddInfoCnfConj(idxInConj: Int,
                       numOfClauses: Int)

@@ -166,10 +166,7 @@ package inferenceControl {
           val (conjCl, cnfresult) = CnfConj(cnfresult0.clauses)
           val conjResult =
             if (conjCl == lastStep.cl) lastStep
-            else {
-              val addInfo = FurtherInfo(cnfInfo = AddInfoCnf(derivedClauses = cnfresult0.clauses))
-              AnnotatedClause(conjCl, InferredFrom(cnfMode, lastStep), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties), addInfo)
-            }
+            else AnnotatedClause(conjCl, InferredFrom(cnfMode, lastStep), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
           // individual clauses of the conjunction
           val result = cnfresult.map { c =>
             val furtherInfo = FurtherInfo(cnfConjInfo = Some(c._2))
@@ -177,11 +174,9 @@ package inferenceControl {
           Out.trace(s"CNF result:\n\t${result.map(_.pretty(state.signature)).mkString("\n\t")}")
           result
         } else {
-          val lastRes = if (cnfresult0.clauses.head == lastStep.cl) lastStep
-          else {
-            val addInfon= FurtherInfo(cnfInfo = AddInfoCnf(derivedClauses = cnfresult0.clauses))
-            AnnotatedClause(cnfresult0.clauses.head, InferredFrom(cnfMode, lastStep), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties), addInfon)
-          }
+          val lastRes =
+            if (cnfresult0.clauses.head == lastStep.cl) lastStep
+            else AnnotatedClause(cnfresult0.clauses.head, InferredFrom(cnfMode, lastStep), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
           Out.trace(s"CNF result:\n\t${lastRes.pretty(state.signature)}")
           Set(lastRes)
         }

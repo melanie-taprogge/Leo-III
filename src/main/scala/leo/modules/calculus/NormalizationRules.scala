@@ -368,10 +368,8 @@ object CoreCNF {
 
   /** Combine source-ordered metadata consumed within one residual CNF segment. */
   private def mergeCnfInfo(left: AddInfoCnf, right: AddInfoCnf): AddInfoCnf =
-    AddInfoCnf(rewriteUnderBinder = left.rewriteUnderBinder || right.rewriteUnderBinder,
-      renameHappend = left.renameHappend || right.renameHappend,
-      addInfoQuants = left.addInfoQuants ++ right.addInfoQuants,
-      derivedClauses = left.derivedClauses ++ right.derivedClauses)
+    AddInfoCnf(renameHappend = left.renameHappend || right.renameHappend,
+      addInfoQuants = left.addInfoQuants ++ right.addInfoQuants)
 
   final def cnfFragment2Clause(input: Clause, delayedCNF: CnfFragment): CnfResolution = {
     var currentClause = input
@@ -396,14 +394,14 @@ object CoreCNF {
           // Only Skolemizations and the existing residual CNF segments create
           // proof boundaries. All preceding generalizations belong to this segment.
           if (currentClause != eventBefore) {
-            steps += CnfStep(eventBefore, addInfo = cnfInfo.copy(derivedClauses = Seq(eventBefore)))
+            steps += CnfStep(eventBefore, addInfo = cnfInfo)
             currentClause = eventBefore
           }
 
           val position = ClausePosition(currentClause, 0, Literal.leftSide, event.binderPath)
           val skolemInfo = addInfo.map(_.copy(position = Some(position)))
           steps += CnfStep(eventAfter, Some((data, position)),
-            AddInfoCnf(addInfoQuants = skolemInfo.toVector, derivedClauses = Seq(eventAfter)))
+            AddInfoCnf(addInfoQuants = skolemInfo.toVector))
           currentClause = eventAfter
           cnfInfo = AddInfoCnf()
       }
@@ -422,7 +420,7 @@ object CoreCNF {
     }
 
     val finalConclusion = Clause(Literal(formulaOf(finalLiterals), true))
-    if (currentClause != finalConclusion) steps += CnfStep(finalConclusion, addInfo = cnfInfo.copy(derivedClauses = finalClauses))
+    if (currentClause != finalConclusion) steps += CnfStep(finalConclusion, addInfo = cnfInfo)
     CnfResolution(finalClauses, steps.toVector)
   }
 

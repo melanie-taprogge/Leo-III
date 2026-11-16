@@ -79,8 +79,7 @@ object LPoutput {
     var defRuleDefined: Boolean = false
   }
 
-  final class lpProofStepInfo (val clausifiedSteps: Map[lpConstantTerm, lpConstantTerm] = Map.empty,
-                               val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty,
+  final class lpProofStepInfo (val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty,
                                val additionalDefinedSymbols: Set[Signature.Key] = Set.empty) //todo: remove additionalDefinedSymbols
 
   /** A source step's proof, before assembly chooses its declaration wrapper. */
@@ -331,7 +330,7 @@ object LPoutput {
       rule match {
 
         case _ =>
-          val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps)
+          val outputInfo = new lpProofStepInfo(newIdenticalSteps)
 
           rule match {
             case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
@@ -466,7 +465,7 @@ object LPoutput {
           }
       }
     }else{
-      val outputInfo = new lpProofStepInfo(Map.empty, newIdenticalSteps)
+      val outputInfo = new lpProofStepInfo(newIdenticalSteps)
       if (rule == null && (cl.role != Role_Conjecture)) {
         val skolemDefinition = (cl.role, cl.annotation, cl.cl.lits) match {
           case (Role_Definition, ClauseAnnotation.FromSystem("definition", _, _), Seq(literal))
@@ -713,7 +712,6 @@ object LPoutput {
     val compressedProof = proof
     var idClauseMap: mutable.HashMap[Long, ClauseProxy] = mutable.HashMap.empty
     val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty
-    val clausifiedSteps: mutable.HashMap[lpConstantTerm, lpConstantTerm] = mutable.HashMap.empty
     var conjEnc = false
     var axCounter = 0
     val conjName = QName.local(s"localNegatedConjecture")
@@ -784,14 +782,13 @@ object LPoutput {
         Out.lp_debug_info(s"linking to axiom $safeAxName (id: $stepId)")
         axCounter = axCounter + 1
       } else {
-        val infoForStep = new lpProofStepInfo(clausifiedSteps.toMap, identicalSteps)
+        val infoForStep = new lpProofStepInfo(identicalSteps)
         val references = if (gdv_mode) ProofReferences() else packageReferences
         val useTypedIntroduction = useLargeContextEncoding(step.cl.implicitlyBound.size, gdv_mode)
         val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep, references,
           useTypedIntroduction = useTypedIntroduction,
           standaloneSubproofThreshold = if (gdv_mode) None else standaloneSubproofThreshold,
           enclosingNames = enclosingNames)
-        clausifiedSteps ++= newInfo.clausifiedSteps
         identicalSteps ++= newInfo.identicalSteps
         additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
         newProofSteps.foreach { result =>
