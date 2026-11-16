@@ -30,8 +30,8 @@ class RenameCNFTest extends LeoTestSuite{
       s.append("\n")
       val vargen1 = freshVarGen(pc)
       val vargen2 = freshVarGen(pc)
-      val cnf1 = FullCNF(vargen1, pc)
-      val cnf3 = RenameCNF(vargen2, state.renamingCash, pc)
+      val cnf1 = FullCNF(vargen1, pc).clauses
+      val cnf3 = RenameCNF(vargen2, state.renamingCash, pc).clauses
       s.append(" >Full CNF\n   ")
       s.append(cnf1.map(_.pretty(sig)).mkString("\n   "))
       s.append("\n >Rename CNF\n   ")

@@ -15,15 +15,22 @@ object LiteralImpl {
     * Note that the resulting literal is only
     * equational if `left/right != $true/$false`. */
   final def mkLit(left: Term, right: Term, pol: Boolean, oriented: Boolean = false): Literal = {
+    mkLitAndTrack(left, right, pol, oriented)._1
+  }
+
+  /** Construct an unordered literal and report its Boolean normalization.
+    * Keep the existing branch precedence when both sides are Boolean constants.
+    */
+  final def mkLitAndTrack(left: Term, right: Term, pol: Boolean, oriented: Boolean = false): (Literal, LiteralInfo) = {
     if (left == LitFalse()) {
-      NonEqLiteral(right, !pol)
+      (NonEqLiteral(right, !pol), LiteralInfo(false, if (pol) Some(LitNorm.BotL) else Some(LitNorm.NegBotL)))
     } else if (right == LitFalse()) {
-      NonEqLiteral(left, !pol)
+      (NonEqLiteral(left, !pol), LiteralInfo(false, if (pol) Some(LitNorm.BotR) else Some(LitNorm.NegBotR)))
     } else if (left == LitTrue()) {
-      NonEqLiteral(right, pol)
+      (NonEqLiteral(right, pol), LiteralInfo(false, Some(LitNorm.TopL)))
     } else if (right == LitTrue()) {
-      NonEqLiteral(left, pol)
-    } else EqLiteral(left,right,pol,oriented)
+      (NonEqLiteral(left, pol), LiteralInfo(false, Some(LitNorm.TopR)))
+    } else (EqLiteral(left, right, pol, oriented), LiteralInfo(false, None))
   }
 
   /** Creates a new (equational) literal of the two terms t1 and t2

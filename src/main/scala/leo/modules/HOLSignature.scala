@@ -2,7 +2,7 @@ package leo.modules
 
 import leo.datastructures.{Term, Type, Signature, Kind}
 import Term.{intToBoundVar, intsToBoundVar, mkApp, mkAtom, mkTermAbs, mkTermApp, Λ,Symbol,∙, λ, mkBound}
-import Kind.{* => typeKind}
+import Kind.{TYPE => typeKind}
 import Type.typeVarToType
 
 import scala.language.implicitConversions
@@ -80,10 +80,11 @@ object HOLSignature {
   private final val norKey = nandKey + 1
   private final val niffKey = norKey + 1
   private final val neqKey = niffKey + 1
+  private final val epsilonKey = neqKey + 1
 //  private final val iteKey = neqKey + 1
 
   /** The last id that was used by predefined HOL symbols. Keep up to date! */
-  val lastId: Int = neqKey
+  val lastId: Int = epsilonKey
 
   final val o: Type = Type.mkType(oKey)
   final val i: Type = Type.mkType(iKey)
@@ -325,7 +326,16 @@ object HOLSignature {
   }
 
   /** HOL choice @+ */
-  object Choice extends HOLUnaryConnective { final val key = choiceKey; final val ty = forall((1 ->: o) ->: 1)
+  object Choice extends HOLUnaryConnective { final val key = choiceKey; final val ty: Type = forall((1 ->: o) ->: 1)
+    override final def apply(arg: Term): Term = mkApp(mkAtom(key,ty), Vector(Right(arg.ty._funDomainType), Left(arg)))
+
+    override final def unapply(t: Term): Option[Term] = t match {
+      case Symbol(`key`) ∙ Seq(Right(_), Left(t1)) => Some(t1)
+      case _ => None
+    }
+  }
+  /** Epsilon binder used in Skolem definitions. */
+  object Epsilon extends HOLUnaryConnective { final val key = epsilonKey; final val ty = Choice.ty
     override final def apply(arg: Term): Term = mkApp(mkAtom(key,ty), Vector(Right(arg.ty._funDomainType), Left(arg)))
 
     override final def unapply(t: Term): Option[Term] = t match {
@@ -334,7 +344,7 @@ object HOLSignature {
     }
   }
   /** HOL description @- */
-  object Description extends HOLUnaryConnective { final val key = descKey; final val ty = forall((1 ->: o) ->: 1)
+  object Description extends HOLUnaryConnective { final val key = descKey; final val ty: Type = forall((1 ->: o) ->: 1)
     override final def apply(arg: Term): Term = mkApp(mkAtom(key,ty), Vector(Right(arg.ty._funDomainType), Left(arg)))
 
     override final def unapply(t: Term): Option[Term] = t match {
@@ -395,7 +405,7 @@ object HOLSignature {
   /** If-Then-Else combinator */
   object IF_THEN_ELSE extends Function3[Term, Term, Term, Term] {
     final val key = iteKey
-    final val ty = forall(o ->: 1 ->: 1 ->: 1)
+    final val ty: Type = forall(o ->: 1 ->: 1 ->: 1)
 
     override final def apply(cond: Term, thn: Term, els: Term): Term = {
       mkApp(mkAtom(key,ty), Vector(Right(thn.ty), Left(cond), Left(thn), Left(els)))
@@ -426,11 +436,11 @@ object HOLSignature {
 
   import Signature.{lexStatus, multStatus}
 
-  final val multProp = multStatus * Signature.PropStatus
-  final val lexProp = lexStatus * Signature.PropStatus
+  final val multProp: Int = multStatus * Signature.PropStatus
+  final val lexProp: Int = lexStatus * Signature.PropStatus
 
   // Built-in types
-  final val types = List(
+  final val types: List[(String, Kind)] = List(
     ("$o", typeKind),
     ("$i", typeKind),
     ("$real", typeKind),
@@ -440,7 +450,7 @@ object HOLSignature {
   // Fixed symbols
   import Signature.{PropAC => ac, PropCommutative => c}
 
-  lazy val fixedConsts = List(
+  lazy val fixedConsts: List[(String, Type, Int)] = List(
     ("$true", LitTrue.ty, multProp),
     ("$false", LitFalse.ty, multProp),
     ("~", Not.ty, multProp),
@@ -479,7 +489,7 @@ object HOLSignature {
   )
 
   // Standard defined symbols
-  lazy val definedConsts = List(
+  lazy val definedConsts: List[(String, Term, Type, Int)] = List(
     ("?", existsDef, Exists.ty, multProp),
     ("&", andDef, &.ty, multProp | ac),
     ("=>", implDef, Impl.ty, lexProp),
@@ -490,6 +500,9 @@ object HOLSignature {
     ("<~>", niffDef, <~>.ty, multProp),
     ("!=", neqDef, !===.ty, multProp)
   )
+
+  // Registered after definedConsts to preserve the keys of existing HOL symbols.
+  val epsilonConst = ("#", Epsilon.ty, multProp)
 
 
   //////////////////////

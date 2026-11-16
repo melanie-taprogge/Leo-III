@@ -21,6 +21,8 @@ object EqRules {
     private val negEqBot = "=⊥'"
     private val negBotEq = "⊥='"
     private val expand_lit = "expand_lit"
+    private val forallConst = "∀_const"
+    private val existsConst = "∃_const"
 
 
     // Standard Library Theorems of Equality
@@ -37,6 +39,8 @@ object EqRules {
     private[EqRules] val negEqBot_S: SymRef = SymRef.LP(QName.local(negEqBot))
     private[EqRules] val negBotEq_S: SymRef = SymRef.LP(QName.local(negBotEq))
     private[EqRules] val expand_lit_S: SymRef = SymRef.LP(QName.local(expand_lit))
+    private[EqRules] val forallConst_S: SymRef = SymRef.LP(QName.local(forallConst))
+    private[EqRules] val existsConst_S: SymRef = SymRef.LP(QName.local(existsConst))
 
     private[EqRules] val eqImp_S: SymRef = SymRef.LP(QName.local(eqImpS))
 
@@ -55,6 +59,15 @@ object EqRules {
     def lpSimp_negBotEq[L <: Level] = LpTerm.Const[L](negBotEq_S)
     def expandLit[L <: Level] = LpTerm.Const[L](expand_lit_S)
     def eqImp[L <: Level] = LpTerm.Const[L](eqImp_S)
+    def forallConst[L <: Level] = LpTerm.Const[L](forallConst_S)
+    def existsConst[L <: Level] = LpTerm.Const[L](existsConst_S)
+
+    /** Supply the binder type while leaving the constant proposition to rewrite matching. */
+    def mkForallConst(ty: OlMonoType): LpTerm[Level.Meta] =
+      LpTerm.App(forallConst[Level.Meta], Seq(Arg.ExplicitTypeArg[Level.Meta](ty)))
+
+    def mkExistsConst(ty: OlMonoType): LpTerm[Level.Meta] =
+      LpTerm.App(existsConst[Level.Meta], Seq(Arg.ExplicitTypeArg[Level.Meta](ty)))
 
     def mkExpandLit(a: OlMonoType, b: OlMonoType, f: LpTerm[Level.Obj], g: LpTerm[Level.Obj]): LpTerm[Level.Meta] =
       LpTerm.App(expandLit[Level.Meta], Seq(Arg.ImplicitTypeArg[Level.Meta](a), Arg.ImplicitTypeArg[Level.Meta](b), Arg.Explicit(LpTerm.Obj(f)), Arg.Explicit(LpTerm.Obj(g))))

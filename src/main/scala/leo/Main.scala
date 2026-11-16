@@ -63,15 +63,7 @@ object Main {
         val logicName = getLogicFromSpec(maybeLogicSpec.get)
         val embeddingFunction = LogicEmbeddingLibrary.embeddingTable(logicName)
         Out.info(s"Input problem is non-classical (logic $logicName). Running HOL transformation from semantics specification contained in the problem file ...")
-        val params: Set[embeddingFunction.OptionType#Value] = Configuration.EMBEDDING_PARAMS.flatMap { paramName =>
-          try {
-            Set(embeddingFunction.embeddingParameter.withName(paramName))
-          } catch {
-            case _:NoSuchElementException =>
-              Out.warn(s"Passed parameter '$paramName' unknown for logic '${embeddingFunction.name}', ignored for now.")
-              Set.empty
-          }
-        }.toSet
+        val params: Set[embeddingFunction.EmbeddingParameterType] = Configuration.EMBEDDING_PARAMS.flatMap(embeddingFunction.embeddingParameter.valueOf).toSet
         problem = embeddingFunction.apply(problem, params)
         maybeLogicSpec = getLogicSpecFromProblem(problem)
       }
@@ -98,12 +90,18 @@ object Main {
             }
           case e0: OutOfMemoryError =>
             Out.output(SZSResult(SZS_MemoryOut, Configuration.PROBLEMFILE, e0.toString))
-          case _ => Out.output(SZSResult(SZS_Error, Configuration.PROBLEMFILE,e.toString))
+          case _ =>
+            Out.output(SZSResult(SZS_Error, Configuration.PROBLEMFILE,e.toString))
+            // An unexpected throwable otherwise leaves no clue at all: the SZS line carries
+            // the class name and nothing else, and the trace below only appears at a
+            // verbosity nobody runs a prover with.  stderr is outside the SZS protocol, so
+            // a consumer reading stdout is unaffected.
+            System.err.println(stackTraceAsString(e))
         }
         Out.trace(stackTraceAsString(e))
         if (e.getCause != null) {
-          Out.trace("Caused by: " + e.getCause.getMessage)
-          Out.trace("at: " + e.getCause.getStackTrace.mkString("Array(", ", ", ")"))
+          Out.trace(s"Caused by: ${e.getCause.getMessage}")
+          Out.trace(s"at: ${e.getCause.getStackTrace.mkString("Array(", ", ", ")")}")
         }
       /** Handle all top-level errors END */
     } finally {

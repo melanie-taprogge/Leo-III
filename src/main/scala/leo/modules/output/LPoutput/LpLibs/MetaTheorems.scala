@@ -17,6 +17,7 @@ object MetaTheorems {
     private val deleteBotsS = "deleteBots"
     private val transformNS = "transform_n"
     private val permuteS = "permute"
+    private val selectConjunctS = "∧ₑₙ"
 
 
     val allAscii = Seq(deleteBotsS,transformNS,permuteS)
@@ -24,6 +25,14 @@ object MetaTheorems {
     private[MetaTheorems] val deleteBotsS_S: SymRef = SymRef.LP(QName.local(deleteBotsS))
     private[MetaTheorems] val transformNS_S: SymRef = SymRef.LP(QName.local(transformNS))
     private[MetaTheorems] val permuteS_S: SymRef = SymRef.LP(QName.local(permuteS))
+    private[MetaTheorems] val selectConjunctS_S: SymRef = SymRef.LP(QName.local(selectConjunctS))
+
+    private[MetaTheorems] val mapAndLeftSym: SymRef = SymRef.LP(QName.local("mapAndLeft"))
+    private[MetaTheorems] val mapAndRightSym: SymRef = SymRef.LP(QName.local("mapAndRight"))
+    private[MetaTheorems] val mapOrLeftSym: SymRef = SymRef.LP(QName.local("mapOrLeft"))
+    private[MetaTheorems] val mapOrRightSym: SymRef = SymRef.LP(QName.local("mapOrRight"))
+    private[MetaTheorems] val conjTransformSym: SymRef = SymRef.LP(QName.local("conj_transform"))
+    private[MetaTheorems] val disjTransformSym: SymRef = SymRef.LP(QName.local("transform"))
 
   }
 
@@ -33,11 +42,26 @@ object MetaTheorems {
     private[MetaTheorems] val deleteBots_T = LpTerm.Const[Level.Meta](deleteBotsS_S)
     private[MetaTheorems] val transformNS_T = LpTerm.Const[Level.Obj](transformNS_S)
     private[MetaTheorems] val permute_T = LpTerm.Const[Level.Obj](permuteS_S)
+    private[MetaTheorems] val selectConjunct_T = LpTerm.Const[Level.Obj](selectConjunctS_S)
+
+    val mapAndLeft: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](mapAndLeftSym)
+    val mapAndRight: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](mapAndRightSym)
+    val mapOrLeft: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](mapOrLeftSym)
+    val mapOrRight: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](mapOrRightSym)
+    val conjTransform: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](conjTransformSym)
+    val disjTransform: LpTerm.Const[Level.Meta] = LpTerm.Const[Level.Meta](disjTransformSym)
   }
 
   object Inst {
 
     import MLTerms._
+
+    /** Select a conjunct at a valid zero-based index; the index condition reduces to ⊤. */
+    def selectConjunct(conjuncts: Seq[LpTerm[Level.Obj]], index: Int,
+                       parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App[Level.Obj](selectConjunct_T, Seq(
+        Arg.Explicit(LpInt[Level.Obj](index)), Arg.Explicit(LpList(conjuncts)),
+        Arg.Explicit(topIntro[Level.Obj]), Arg.Explicit(parentProof)))
 
     def deleteBots(postDeletionClause: Seq[lpLiteralInst], botIdxList: Seq[Int]) = {
       deleteBotsTerms(postDeletionClause.map(_.term), botIdxList)

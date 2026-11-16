@@ -96,6 +96,10 @@ object LpTerm {
   final case class Const[L <: Level](sym: SymRef) extends LpTerm[L]
   final case class Lam[L <: Level](binder: (Name, Option[LpType]), body: LpTerm[L]) extends LpTerm[L]
   final case class App[L <: Level](f: LpTerm[L], args: Seq[Arg[L]]) extends LpTerm[L]
+  /** Typed local definition in a Lambdapi meta-level term. */
+  final case class Let(binder: (Name, LpType),
+                       value: LpTerm[Level.Meta],
+                       body: LpTerm[Level.Meta]) extends LpTerm[Level.Meta]
   /** Placeholder in Lambdapi */
   final case class Wildcard[L <: Level]() extends LpTerm[L]
 
@@ -130,7 +134,7 @@ object Stmt {
   sealed trait DefBody
   object DefBody {
     final case class LpTermBody(t: LpTerm[Level.Meta]) extends DefBody
-    final case class ProofBody(proofScript: Seq[LpProofScript]) extends DefBody
+    final case class ProofBody(proofScript: LpProofScript.Body) extends DefBody
   }
 
   /** Modifiers of the declared/ defined Lambdapi symbols */
@@ -141,12 +145,15 @@ object Stmt {
 /** Lambdapi proof-scripts are (sequences of) applications of the various tactics the system offers*/
 sealed trait LpProofScript
 object LpProofScript {
+  /** Shared proof body while existing legacy scripts are still in use. */
+  type Body = Seq[Either[LpProofScript, lpProofScriptStep]]
+
   // ** Tactics
 
   /** Instantiate the proof term */
   final case class Refine(t: LpTerm[Level.Meta], proofScript: Seq[LpProofScript] = Nil) extends LpProofScript
   /** Define a sub-proof */
-  final case class Have(name: Name, ty: LpType, proofScript: Seq[Either[LpProofScript,lpProofScriptStep]]) extends LpProofScript // for compatibility: until fully migrated to new DS, allow stirngs here
+  final case class Have(name: Name, ty: LpType, proofScript: Body) extends LpProofScript
   /**
     * Use the proof of an equality to replace occurrences of the LHS with the RHS
     * @param pattern Apply (only) at a specified position
@@ -180,7 +187,10 @@ object LpProofScript {
   /** Direction to apply the rewrite tactic */
   sealed trait Side
   object Side { case object Left extends Side; case object Right extends Side}
-  final case class RewritePattern(LpTerm: LpTerm[Level.Obj], hole: LpTerm[Level.Obj] = Const[Level.Obj](SymRef.LP(QName.local("x")))) extends LpTerm[Level.Meta]
+  /** Select the hole itself, or search recursively inside it with `in x in`. */
+  final case class RewritePattern(LpTerm: LpTerm[Level.Obj],
+                                   hole: LpTerm[Level.Obj] = Const[Level.Obj](SymRef.LP(QName.local("x"))),
+                                   searchInside: Boolean = false) extends LpTerm[Level.Meta]
 }
 
 
@@ -314,11 +324,16 @@ object LogicConst {
       LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
     }
 
+    def apply(ty: OlMonoType, predicate: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(predicate)))
+
     def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
       case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
         val (n, Some(bty)) = bs
         val typed = (n, bty)
         Some((typed, body))
+      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(_), Arg.Explicit(LpTerm.Lam((n, Some(bty)), body)))) =>
+        Some(((n, bty), body))
       case _ => None
     }
   }
@@ -331,11 +346,16 @@ object LogicConst {
       LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
     }
 
+    def apply(ty: OlMonoType, predicate: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(predicate)))
+
     def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
       case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
         val (n, Some(bty)) = bs
         val typed = (n, bty)
         Some((typed, body))
+      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(_), Arg.Explicit(LpTerm.Lam((n, Some(bty)), body)))) =>
+        Some(((n, bty), body))
       case _ => None
     }
   }
@@ -349,11 +369,16 @@ object LogicConst {
       LpTerm.App(head, Seq(E(LpTerm.Lam(n -> Some(bTy), body))))
     }
 
+    def apply(ty: OlMonoType, predicate: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+      LpTerm.App(head, Seq(Arg.ExplicitTypeArg(ty), E(predicate)))
+
     def unapply(t: LpTerm[Level.Obj]): Option[((Name, LpType), LpTerm[Level.Obj])] = t match {
       case LpTerm.App(`head`, Seq(Arg.Explicit(LpTerm.Lam(bs, body)))) =>
         val (n, Some(bty)) = bs
         val typed = (n, bty)
         Some((typed, body))
+      case LpTerm.App(`head`, Seq(Arg.ExplicitTypeArg(_), Arg.Explicit(LpTerm.Lam((n, Some(bty)), body)))) =>
+        Some(((n, bty), body))
       case _ => None
     }
   }

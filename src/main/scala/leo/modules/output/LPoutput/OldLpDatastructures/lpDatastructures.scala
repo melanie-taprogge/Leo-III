@@ -214,9 +214,6 @@ object lpDatastructures {
           case v: lpTypedVar =>
             val tyDec: String = s"(${v.name.pretty} : ${v.ty.lift2Meta.pretty})"
             tyDec
-          case v: lpOlTypedVar => v.tyDec
-          case v: lpOlTyVar =>
-            v.tyDec
           case v => v.pretty
         }
         s"(${lpLambda.pretty} ${decVars.mkString(" ")}, ${body.pretty})"

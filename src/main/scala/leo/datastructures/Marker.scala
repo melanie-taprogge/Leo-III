@@ -2,8 +2,6 @@ package leo.datastructures
 
 import leo.datastructures.TPTP.AnnotatedFormula.FormulaType.FormulaType
 import leo.modules.HOLSignature.{LitFalse, LitTrue}
-import leo.modules.calculus.FullCNF.FVs
-import leo.modules.calculus.Unification
 import leo.modules.output.Output
 
 import scala.annotation.tailrec
@@ -109,7 +107,7 @@ object Role {
 abstract sealed class ClauseOrigin extends Ordered[ClauseOrigin] {
   protected[ClauseOrigin] def priority: Int
 
-  def compare(that: ClauseOrigin) = this.priority - that.priority
+  def compare(that: ClauseOrigin): Int = this.priority - that.priority
 }
 case object FromAxiom extends ClauseOrigin { val priority = 3 }
 case object FromConjecture extends ClauseOrigin { val priority = 2 }
@@ -180,15 +178,23 @@ sealed trait QuantStep
 final case class SkolemStep(sko: Signature.Key,
                              fVs: Seq[(Int, Type)],
                              ftVs: Seq[Int],
-                             polarity: QuantPolarity
+                             polarity: QuantPolarity,
+                             position: Option[ClausePosition] = None // Eliminated quantifier in the immediate formula parent.
                            ) extends QuantStep
+/** One generalization in its complete intermediate clause context.
+  * position.cl is the clause immediately before the generalization; after is
+  * its immediate result, before further clausification.
+  */
+final case class GeneralizationOccurrence(position: ClausePosition,
+                                           after: Clause)
+
 final case class MoveQuantStep(corrChildVar: (Int, Type),
-                                polarity: QuantPolarity
+                                polarity: QuantPolarity,
+                                // None means occurrence evidence has not been retained.
+                                occurrence: Option[GeneralizationOccurrence] = None
                               ) extends QuantStep
-case class AddInfoCnf(rewriteUnderBinder: Boolean = false,
-                      renameHappend: Boolean = false,
-                      addInfoQuants: Vector[QuantStep] = Vector.empty,
-                      derivedClauses: Seq[Clause]  = Seq.empty)
+case class AddInfoCnf(renameHappend: Boolean = false,
+                      addInfoQuants: Vector[QuantStep] = Vector.empty)
 
 case class AddInfoCnfConj(idxInConj: Int,
                       numOfClauses: Int)
@@ -251,11 +257,15 @@ object LitNorm {
 
 /**
   * @param position Index of the unification Constraint (in reference to the original position in the parent)
-  * @param literal The original unification constraint
-  *                todo: sometimes literal is used to save the original one, and sometimes the substituted one
+  * @param literal The constraint at the producer's current stage. In AddInfoUni annotations made by
+  *                UnificationControl, this is the substituted, normalized literal without additional ordering.
+  * @param normalization Boolean-equality normalization performed by that substitution, if any.
+  *                      It belongs to this original parent position, not a position in the child.
+  *                      Producers storing an original constraint leave it empty.
   */
 case class UniLitInfo(position: Int,
-                      literal: Literal)
+                      literal: Literal,
+                      normalization: Option[LitNorm] = None)
 
 /**
   * Additional information for unification steps where the substituted and deleted literals
@@ -324,7 +334,9 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
                         val rwUnderBinder: Boolean = false,
                         unencodableCNF: Boolean = false,
                         cnfInfo: AddInfoCnf = AddInfoCnf(),
-                        cnfConjInfo: Option[AddInfoCnfConj] = None){
+                        cnfConjInfo: Option[AddInfoCnfConj] = None,
+                        // A false literal was deleted by comparing bodies beneath lambdas.
+                        val simpUsedLambdaDistinctness: Boolean = false){
   /** Source decisions for a changed Miniscope result in the uncompressed proof. */
   var miniscopeTrace: Option[MiniscopeTrace] = None
   var edLitBeforeAfter: Seq[(Literal,Literal)] = Seq.empty
@@ -348,8 +360,10 @@ case class FurtherInfo (val addInfoSimpRule: Option[String] = None,
 
 object ClauseAnnotation {
   import leo.modules.calculus.CalculusRule
-  case class InferredFrom[A <: ClauseProxy](rule: leo.modules.calculus.CalculusRule, cws: Seq[(A, Output)]) extends ClauseAnnotation {
-    def pretty: String = s"inference(${rule.name},[status(${rule.inferenceStatus.pretty.toLowerCase})],[${
+  case class InferredFrom[A <: ClauseProxy](rule: leo.modules.calculus.CalculusRule, cws: Seq[(A, Output)], inferenceInfo: Option[Output] = None) extends ClauseAnnotation {
+    def pretty: String = {
+      val printInfo = inferenceInfo.map(_.apply()).filter(_.nonEmpty).map("," + _).getOrElse("")
+      s"inference(${rule.name},[status(${rule.inferenceStatus.pretty.toLowerCase})$printInfo],[${
       cws.map { case (cw, add) => if (add == null) {
         cw.id
       } else {
@@ -357,9 +371,10 @@ object ClauseAnnotation {
       }
       }.mkString(",")
     }])"
+    }
 
     def fromRule: CalculusRule = rule
-    def parents = cws.map(_._1)
+    def parents: Seq[A] = cws.map(_._1)
   }
   object InferredFrom {
     def apply[A <: ClauseProxy](rule: leo.modules.calculus.CalculusRule, cs: Seq[A]): ClauseAnnotation =
@@ -404,12 +419,14 @@ object ClauseAnnotation {
     final def parents = Seq.empty
   }
   case class FromFile(fileName: String, formulaName: String) extends ClauseAnnotation {
-    final def pretty = s"file('$fileName',${leo.modules.output.escapeTPTPName(formulaName)})"
+    final def pretty: String = s"file('$fileName',${leo.modules.output.escapeTPTPName(formulaName)})"
     final val fromRule: CalculusRule = null
     final def parents = Seq.empty
   }
-  case class FromSystem[A <: ClauseProxy](hint: String, parents: Seq[A]) extends ClauseAnnotation {
-    final def pretty = s"introduced($hint)"
+  case class FromSystem[A <: ClauseProxy](hint: String, parents: Seq[A], info: Option[Output] = None) extends ClauseAnnotation {
+    val printInfo = if (info.isDefined) s",[${info.map(_.apply()).get}]" else ""
+    val printParents = if (parents.nonEmpty) s",[${parents.map(_.id).mkString(",")}]" else ""
+    final def pretty = s"introduced($hint$printInfo$printParents)"
     final val fromRule: CalculusRule = null
   }
 

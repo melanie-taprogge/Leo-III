@@ -35,7 +35,7 @@ object TypeEncoding {
   @inline def tyVar2LP(tv: Int): Name = nameTyVar(tv)
 
   def polyType2LP(ty: Type): OlPolyType = ty match {
-    case ∀(_) =>
+    case PolyType(_) =>
       val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
       val encBodyTy = type2LP(bodyTy)
       val quantifiers = (1 to tyAbsCount).map(scope => OlMonoType.TyVar(tyVar2LP(scope)))
@@ -62,7 +62,7 @@ object TypeEncoding {
       case ProductType(tys) =>
         throw new Error(s"ProductType not yet encoded, unable to do ${ty.pretty}")
       //todo
-      case ∀(_) =>
+      case PolyType(_) =>
 //        TyQuant
         throw new Error(s"Error in LP Encoding: Found quantified type outside of prefix position")
       //todo
@@ -76,7 +76,7 @@ object TypeEncoding {
     * */
   def polyType2Lp(ty: Type): LpType = {
     ty match {
-      case ∀(_) => val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
+      case PolyType(_) => val (tyAbsCount, bodyTy) = collectForallTys(0, ty)
         val variables = (1 to tyAbsCount).map(i => Var[Level.Meta](tyVar2LP(i), Some(LpType.LpSet)))
         val encBody = type2LP(bodyTy)
         LpType.Pi(variables, LpType.El(encBody))
@@ -93,7 +93,7 @@ object TypeEncoding {
         Left(NotEncodable("Error: trying to encode ComposedType"))
       case ProductType(_) =>
         Left(NotEncodable("Error: trying to encode ProductType"))
-      case ∀(_) =>
+      case PolyType(_) =>
         Left(NotEncodable("Error: trying to encode quantified Type"))
       case _ => Right(type2LP(ty))
     }
@@ -158,6 +158,10 @@ object TermEncoding {
     case LpTerm.App(head, Seq(Arg.Explicit(argument)))
       if head == LogicConst.cAll || head == LogicConst.cEx || head == LogicConst.cCh =>
       LpTerm.App(head, Seq(Arg.Explicit(normalizeAfterBeta(argument, preserveLambda = true))))
+
+    case LpTerm.App(head, Seq(typeArgument @ Arg.ExplicitTypeArg(_), Arg.Explicit(argument)))
+      if head == LogicConst.cAll || head == LogicConst.cEx || head == LogicConst.cCh =>
+      LpTerm.App(head, Seq(typeArgument, Arg.Explicit(normalizeAfterBeta(argument, preserveLambda = true))))
 
     case LpTerm.App(head, args) =>
       val reducedHead = normalizeAfterBeta(head)
@@ -261,7 +265,8 @@ object TermEncoding {
             }
             LogicConst.Forall(quantifiedVar, encBody)
           case Forall(argument) =>
-            App(LogicConst.cAll, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
+            LogicConst.Forall(type2LP(argument.ty._funDomainType),
+              term2LP(argument, bVars, suppressReduction, replaceUnknownVars))
         }
       case Exists(_) =>
         t match {
@@ -274,11 +279,13 @@ object TermEncoding {
             }
             LogicConst.Exists(quantifiedVar, encBody)
           case Exists(argument) =>
-            App(LogicConst.cEx, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
+            LogicConst.Exists(type2LP(argument.ty._funDomainType),
+              term2LP(argument, bVars, suppressReduction, replaceUnknownVars))
         }
-      case Choice(_) =>
+      case Choice(_) | Epsilon(_) =>
+        val selector: HOLUnaryConnective = if (Epsilon.unapply(t).isDefined) Epsilon else Choice
         t match {
-          case Choice(bVarTy :::> body) =>
+          case selector(bVarTy :::> body)  =>
             val newBVar = bVarGen(bVars,bVarTy,replaceUnknownVars)//(intToName(bVars.size), bVarTy) //makeBVarList(Seq(bVarTys), bVars.size)
             val encBody = term2LP(body, fusebVarListwithMap(Seq(newBVar), bVars), suppressReduction, replaceUnknownVars)
             val quantifiedVar = {
@@ -286,8 +293,9 @@ object TermEncoding {
               (Name(newBVar._1), El(encType))
             }
             LogicConst.Choice(quantifiedVar, encBody)
-          case Choice(argument) =>
-            App(LogicConst.cCh, Seq(Arg.Explicit(term2LP(argument, bVars, suppressReduction, replaceUnknownVars))))
+          case selector(argument) =>
+            LogicConst.Choice(type2LP(argument.ty._funDomainType),
+              term2LP(argument, bVars, suppressReduction, replaceUnknownVars))
         }
       /*
       case TyForall(_) => throw new Error(s"type quantifiers are not encoded yet ${t.pretty}")

@@ -90,7 +90,7 @@ trait Term extends Pretty with Prettier {
   /** true iff this term anywhere contains a binder (λ, ∀, ∃ or a bound‐variable) */
   def hasBinder: Boolean
 
-  val numbers: Multiset[Term]
+  def numbers: Multiset[Term]
   def feasibleOccurrences: Map[Term, Set[Position]]
   def headSymbol: Term
   def headSymbolDepth: Int
@@ -150,7 +150,7 @@ trait Term extends Pretty with Prettier {
 // Associated traits, exceptions, ...
 /////////////////////////////
 
-class NotWellTypedException(msg: String, term: Option[Term]) extends RuntimeException(msg) {
+class NotWellTypedException(msg: String, val term: Option[Term]) extends RuntimeException(msg) {
   def this(msg: String) = {
     this(msg, None)
   }

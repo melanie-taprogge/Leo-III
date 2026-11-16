@@ -6,7 +6,6 @@ import leo.datastructures.Term.{:::>, TypeLambda, mkReal}
 import leo.datastructures.Term.local._
 import leo.datastructures.{Clause, Literal, Subst, Type, _}
 import leo.modules.HOLSignature.{!===, &, ===, Choice, Exists, Forall, Impl, LitFalse, LitTrue, Not, TyForall, |||}
-import leo.modules.calculus.FullCNF.{FVs, multiply}
 import leo.modules.output.{SZS_EquiSatisfiable, SZS_Theorem, SuccessSZS, ToTHF}
 
 import scala.annotation.{switch, tailrec}
@@ -88,6 +87,18 @@ object PolaritySwitch extends CalculusRule {
     }
   }
 }
+
+/**
+  * Created by mwisnie on 11.04.16.
+  */
+
+object CnfSkolem extends CalculusRule{
+  final val name: String = "skolemize"
+  final val inferenceStatus = SZS_EquiSatisfiable // todo: the remaining cnf becomes theorem now, right?
+
+  // todo: move some of the implementation here?
+
+}
 object CnfConj extends CalculusRule{
   final val name: String = "cnfConj"
   final val inferenceStatus = SZS_Theorem
@@ -96,8 +107,8 @@ object CnfConj extends CalculusRule{
 
   final def apply(cls0 : Seq[Clause]): (Clause, Set[(Clause, AddInfoCnfConj)]) = {
     import scala.collection.mutable.LinkedHashMap
-    val unquantifiedClauses = cls0.map(c => mkDisjunction(c.lits.map(Literal.asTerm(_))))
-    val conjCl =  Clause(Literal(mkConjunction(unquantifiedClauses),true))
+    val unquantifiedClauses = cls0.map(c => CoreCNF.disjunctionOf(c.lits.map(Literal.asTerm(_))))
+    val conjCl =  Clause(Literal(CoreCNF.conjunctionOf(unquantifiedClauses),true))
 
     val clauseCount = cls0.length
     val seen = LinkedHashMap.empty[Clause, AddInfoCnfConj]
@@ -197,151 +208,326 @@ object  StepCNF extends CalculusRule {
   }
 }
 
+object CoreCNF {
+  type FVs = Seq[(Int, Type)]
+  type TyFVS = Seq[Int]
+  final case class RenamingConfig(
+                                   cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)],
+                                   threshold: Int
+                                 )
+
+  sealed trait CnfFragment
+  final case class Ready(clauses: Seq[Seq[Literal]]) extends CnfFragment
+  final case class Append(left: CnfFragment, right: CnfFragment) extends CnfFragment
+  final case class Product(left: CnfFragment, right: CnfFragment) extends CnfFragment
+
+
+  sealed trait SkolemData
+  final case class TermSkolemData(skolem: Term, fvs: FVs, tyFVs: TyFVS) extends SkolemData
+  final case class TypeSkolemData(skolem: Type, tyFVs: TyFVS) extends SkolemData
+  final case class Skolemized(
+    before: Literal,
+    after: Literal,
+    data: SkolemData,
+    body: CnfFragment,
+    addInfo: Option[SkolemStep] = None
+  ) extends CnfFragment
+
+  final case class Renamed(before: Literal,
+                           after: CnfFragment,
+                          ) extends CnfFragment
+  final case class MovedQuant(before: Literal,
+                              after: Option[Literal],
+                              body: CnfFragment,
+                              addInfo: Option[MoveQuantStep] = None) extends CnfFragment
+
+  private[calculus] final def `++_delayed`(left: CnfFragment, right: CnfFragment): CnfFragment =
+    (left, right) match {
+      case (Ready(xs), Ready(ys)) => Ready(xs ++ ys)
+      case _ => Append(left, right)
+    }
+
+  private[calculus] final def mulitply_delayed(left: CnfFragment, right: CnfFragment): CnfFragment =
+    (left, right) match {
+      case (Ready(xs), Ready(ys)) => Ready(multiply(xs, ys))
+      case _ => Product(left, right)
+    }
+
+  private[calculus] final def apply(vargen: leo.modules.calculus.FreshVarGen,
+                                    renaming: Option[RenamingConfig], cl: Clause)
+                                   (implicit sig: Signature): CnfResolution = {
+    val it = cl.lits.iterator
+    val delayedCNF = if (it.hasNext) {
+      var acc = apply0(vargen.existingVars, vargen.existingTyVars, vargen, renaming, it.next())
+      while (it.hasNext) {
+        val nextFragment = apply0(vargen.existingVars, vargen.existingTyVars, vargen, renaming, it.next())
+        acc = mulitply_delayed(acc, nextFragment)
+      }
+      acc
+    } else Ready(Seq(Seq.empty))
+    cnfFragment2Clause(cl, delayedCNF)
+  }
+
+  @inline
+  final private[calculus] def apply0(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, renaming: Option[RenamingConfig], l: Literal)(implicit sig: Signature): CnfFragment = if (!l.equational) {
+    renaming match {
+      case Some(config) if FormulaRenaming.canApply(l, config.threshold) =>
+        val (replLit, defl1, defl2) = FormulaRenaming.apply(l, config.cashExtracts)
+        if (defl1 == null && defl2 == null) {
+          Renamed(l, apply0(fvs, tyFVs, vargen, renaming, replLit))
+        } else {
+          assert(defl1 != null && defl2 != null, "Non consistent definition returend in formula renaming.")
+          Renamed(l,`++_delayed`(apply0(fvs, tyFVs, vargen, renaming, replLit),mulitply_delayed(apply0(fvs, tyFVs, vargen, renaming, defl1), apply0(fvs, tyFVs, vargen, renaming, defl2))))
+        }
+      case _ =>
+        l.left match {
+          case Not(t) => apply0(fvs, tyFVs, vargen, renaming, Literal(t, !l.polarity))
+          case &(lt, rt) if l.polarity => `++_delayed`(apply0(fvs, tyFVs, vargen, renaming, Literal(lt, true)), apply0(fvs, tyFVs, vargen, renaming, Literal(rt, true)))
+          case &(lt, rt) if !l.polarity => mulitply_delayed(apply0(fvs, tyFVs, vargen, renaming, Literal(lt, false)), apply0(fvs, tyFVs, vargen, renaming, Literal(rt, false)))
+          case |||(lt, rt) if l.polarity => mulitply_delayed(apply0(fvs, tyFVs, vargen, renaming, Literal(lt, true)), apply0(fvs, tyFVs, vargen, renaming, Literal(rt, true)))
+          case |||(lt, rt) if !l.polarity => `++_delayed`(apply0(fvs, tyFVs, vargen, renaming, Literal(lt, false)), apply0(fvs, tyFVs, vargen, renaming, Literal(rt, false)))
+          case Impl(lt, rt) if l.polarity => mulitply_delayed(apply0(fvs, tyFVs, vargen, renaming, Literal(lt, false)), apply0(fvs, tyFVs, vargen, renaming, Literal(rt, true)))
+          case Impl(lt, rt) if !l.polarity => `++_delayed`(apply0(fvs, tyFVs, vargen, renaming, Literal(lt, true)), apply0(fvs, tyFVs, vargen, renaming, Literal(rt, false)))
+          case Forall(a@(ty :::> t)) if l.polarity =>
+            if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
+              `++_delayed`(apply0(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, true)), apply0(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, true)))
+            } else {
+              val v = vargen.next(ty)
+              val litAfter = Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true)
+              val next = apply0(v +: fvs, tyFVs, vargen, renaming, litAfter)
+              MovedQuant(l, Some(litAfter), next, Some(MoveQuantStep(v, QuantUniv)))
+            }
+
+          case Forall(a@(ty :::> t)) if !l.polarity =>
+            val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true)
+            val data = TermSkolemData(sko._1, fvs, tyFVs)
+            val litAfter = Literal(Term.mkTermApp(a, sko._1).betaNormalize.etaExpand, false)
+            val next = apply0(fvs, tyFVs, vargen, renaming, litAfter)
+            Skolemized(l,litAfter,data,next,Some(sko._2))
+
+          case Exists(a@(ty :::> t)) if l.polarity =>
+            val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false)
+            val data = TermSkolemData(sko._1, fvs, tyFVs)
+            val litAfter = Literal(Term.mkTermApp(a, sko._1).betaNormalize.etaExpand, true)
+            val next = apply0(fvs, tyFVs, vargen, renaming, litAfter)
+            Skolemized(l,litAfter,data,next,Some(sko._2))
+
+          case Exists(a@(ty :::> t)) if !l.polarity =>
+            if (false /*ty == o*/ ) { // present but inactive in the former fullCNF implementation
+              `++_delayed`(apply0(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, false)), apply0(fvs, tyFVs, vargen, renaming, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, false)))
+            } else {
+              val v = vargen.next(ty)
+              val litAfter = Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false)
+              val next = apply0(v +: fvs, tyFVs, vargen, renaming, litAfter)
+              MovedQuant(l, Some(litAfter), next, Some(MoveQuantStep(v, QuantExists)))
+            }
+          case TyForall(a@TypeLambda(t)) if l.polarity => val ty = vargen.next(); apply0(fvs, ty +: tyFVs, vargen, renaming, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true))
+
+          case TyForall(a@TypeLambda(t)) if !l.polarity =>
+            val sko = leo.modules.calculus.skType(tyFVs)
+            val data = TypeSkolemData(sko,tyFVs)
+            val litAfter = Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false)
+            val next = apply0(fvs, tyFVs, vargen, renaming, litAfter)
+            Skolemized(l, litAfter, data, next)
+
+          case _ => Ready(Seq(Seq(l)))
+        }
+    }
+  } else {
+    Ready(Seq(Seq(l)))
+  }
+
+  private[calculus] final def multiply[A](l: Seq[Seq[A]], r: Seq[Seq[A]]): Seq[Seq[A]] = {
+    var acc: Seq[Seq[A]] = Vector()
+    val itl = l.iterator
+    while (itl.hasNext) {
+      val llist = itl.next()
+      val itr = r.iterator
+      while (itr.hasNext) {
+        val rlist = itr.next()
+        acc = acc :+ (llist ++ rlist)
+      }
+    }
+    acc
+  }
+
+  final case class CnfStep(after: Clause,
+                           skolem: Option[(SkolemData, ClausePosition)] = None,
+                           addInfo: AddInfoCnf = AddInfoCnf())
+
+  final case class CnfResolution(clauses: Seq[Clause], steps: Seq[CnfStep])
+
+  private sealed trait QuantifierAction
+  private final case class Generalize(addInfo: MoveQuantStep) extends QuantifierAction
+  private final case class Skolemize(data: SkolemData, addInfo: Option[SkolemStep]) extends QuantifierAction
+
+  private final case class NextQuantifier(afterFormula: Term,
+                                          remainingFragment: CnfFragment,
+                                          binderPath: Position,
+                                          action: QuantifierAction)
+
+  /** Combine source-ordered metadata consumed within one residual CNF segment. */
+  private def mergeCnfInfo(left: AddInfoCnf, right: AddInfoCnf): AddInfoCnf =
+    AddInfoCnf(renameHappend = left.renameHappend || right.renameHappend,
+      addInfoQuants = left.addInfoQuants ++ right.addInfoQuants)
+
+  final def cnfFragment2Clause(input: Clause, delayedCNF: CnfFragment): CnfResolution = {
+    var currentClause = input
+    val steps = mutable.ArrayBuffer.empty[CnfStep]
+    var (beforeFormula, consumedFragment, cnfInfo, next) = extractNext(delayedCNF)
+
+    while (next.nonEmpty) {
+      val event = next.get
+      val eventBefore = Clause(Literal(beforeFormula, true))
+      val eventAfter = Clause(Literal(event.afterFormula, true))
+
+      event.action match {
+        case Generalize(quantInfo) =>
+          // Record the complete immediate states without adding a proof node.
+          // Subsequent extraction can perform further Boolean clausification.
+          val position = ClausePosition(eventBefore, 0, Literal.leftSide, event.binderPath)
+          val occurrence = GeneralizationOccurrence(position, eventAfter)
+          cnfInfo = cnfInfo.copy(addInfoQuants = cnfInfo.addInfoQuants :+
+            quantInfo.copy(occurrence = Some(occurrence)))
+
+        case Skolemize(data, addInfo) =>
+          // Only Skolemizations and the existing residual CNF segments create
+          // proof boundaries. All preceding generalizations belong to this segment.
+          if (currentClause != eventBefore) {
+            steps += CnfStep(eventBefore, addInfo = cnfInfo)
+            currentClause = eventBefore
+          }
+
+          val position = ClausePosition(currentClause, 0, Literal.leftSide, event.binderPath)
+          val skolemInfo = addInfo.map(_.copy(position = Some(position)))
+          steps += CnfStep(eventAfter, Some((data, position)),
+            AddInfoCnf(addInfoQuants = skolemInfo.toVector))
+          currentClause = eventAfter
+          cnfInfo = AddInfoCnf()
+      }
+
+      val extracted = extractNext(event.remainingFragment)
+      beforeFormula = extracted._1
+      consumedFragment = extracted._2
+      cnfInfo = mergeCnfInfo(cnfInfo, extracted._3)
+      next = extracted._4
+    }
+
+    val finalLiterals = flatten(consumedFragment)
+    val finalClauses = finalLiterals.map(lits => Clause(lits))
+    if (steps.isEmpty && finalClauses.size == 1 && finalClauses.head == input) {
+      return CnfResolution(finalClauses, Vector.empty)
+    }
+
+    val finalConclusion = Clause(Literal(formulaOf(finalLiterals), true))
+    if (currentClause != finalConclusion) steps += CnfStep(finalConclusion, addInfo = cnfInfo)
+    CnfResolution(finalClauses, steps.toVector)
+  }
+
+  // Consume ordinary CNF markers up to the next quantifier event. Complete
+  // before/after contexts and binder paths are assembled on the return path.
+  private def extractNext(fragment: CnfFragment): (Term, CnfFragment, AddInfoCnf, Option[NextQuantifier]) = {
+
+    def extractBinary(left: CnfFragment, right: CnfFragment,
+                      connective: (Term, Term) => Term,
+                      rebuild: (CnfFragment, CnfFragment) => CnfFragment): (Term, CnfFragment, AddInfoCnf, Option[NextQuantifier]) = {
+      val (leftFormula, consumedLeft, leftInfo, leftEvent) = extractNext(left)
+      leftEvent match {
+        case Some(event) =>
+          val rightFormula = pendingFormula(right)
+          (connective(leftFormula, rightFormula), rebuild(consumedLeft, right), leftInfo, Some(event.copy(
+            afterFormula = connective(event.afterFormula, rightFormula),
+            remainingFragment = rebuild(event.remainingFragment, right),
+            binderPath = event.binderPath.preprendArgPos(1)
+          )))
+        case None =>
+          val (rightFormula, consumedRight, rightInfo, rightEvent) = extractNext(right)
+          (connective(leftFormula, rightFormula), rebuild(consumedLeft, consumedRight), mergeCnfInfo(leftInfo, rightInfo), rightEvent.map(event => event.copy(
+            afterFormula = connective(leftFormula, event.afterFormula),
+            remainingFragment = rebuild(consumedLeft, event.remainingFragment),
+            binderPath = event.binderPath.preprendArgPos(2)
+          )))
+      }
+    }
+
+    fragment match {
+      case Ready(clauses) => (formulaOf(clauses), fragment, AddInfoCnf(), None)
+      case Skolemized(before, after, data, body, lpData) =>
+        val binderPath = if (before.polarity) Position.root else Position.root.argPos(1)
+        (Literal.asTerm(before), fragment, AddInfoCnf(),
+          Some(NextQuantifier(Literal.asTerm(after), body, binderPath, Skolemize(data, lpData))))
+      case Renamed(_, after) =>
+        val (formula, consumed, info, next) = extractNext(after)
+        (formula, consumed, info.copy(renameHappend = true), next)
+      case MovedQuant(before, Some(after), body, Some(quantInfo)) =>
+        val binderPath = if (before.polarity) Position.root else Position.root.argPos(1)
+        (Literal.asTerm(before), fragment, AddInfoCnf(),
+          Some(NextQuantifier(Literal.asTerm(after), body, binderPath, Generalize(quantInfo))))
+      case MovedQuant(_, _, body, quantInfo) =>
+        // Without local reconstruction evidence retain the previous consuming
+        // behavior, including any variable metadata that is available.
+        val (formula, consumed, info, next) = extractNext(body)
+        (formula, consumed, info.copy(addInfoQuants = quantInfo.toVector ++ info.addInfoQuants), next)
+      case Append(left, right) => extractBinary(left, right, &, Append.apply)
+      case Product(left, right) => extractBinary(left, right, |||, Product.apply)
+    }
+  }
+
+  private def pendingFormula(fragment: CnfFragment): Term = {
+
+    fragment match {
+      case Ready(clauses) => formulaOf(clauses)
+      case Append(left, right) => &(pendingFormula(left), pendingFormula(right))
+      case Product(left, right) => |||(pendingFormula(left), pendingFormula(right))
+      case Skolemized(before, _, _, _, _) => Literal.asTerm(before)
+      case Renamed(before, _) => Literal.asTerm(before)
+      case MovedQuant(before, _, _, _) => Literal.asTerm(before)
+    }
+  }
+
+  // Match the right-nested conjunction used by Lambdapi's list-based conjunction elimination.
+  private[calculus] def conjunctionOf(terms: Seq[Term]): Term = terms match {
+    case Seq() => LitTrue()
+    case _ => terms.reduceRight((left, right) => &(left, right))
+  }
+
+  // Match the right-nested disjunction used by the Lambdapi clause encoding.
+  private[calculus] def disjunctionOf(terms: Seq[Term]): Term = terms match {
+    case Seq() => LitFalse()
+    case _ => terms.reduceRight((left, right) => |||(left, right))
+  }
+
+  private def formulaOf(clauses: Seq[Seq[Literal]]): Term = {
+    conjunctionOf(clauses.map(lits => disjunctionOf(lits.map(Literal.asTerm))))
+  }
+
+  private def flatten(fragment: CnfFragment): Seq[Seq[Literal]] = {
+    fragment match {
+      case Ready(clauses) => clauses
+      case Append(left, right) => flatten(left) ++ flatten(right)
+      case Product(left, right) => multiply(flatten(left), flatten(right))
+      case Skolemized(_, _, _, _, _) =>
+        throw new IllegalStateException("Cannot flatten a CNF fragment with an unconsumed Skolemization marker.")
+      case Renamed(_, after) => flatten(after)
+      case MovedQuant(_, _, body, _) => flatten(body)
+    }
+  }
+}
+
 
 object RenameCNF extends CalculusRule {
   final val name : String = "cnf"
   final val inferenceStatus = SZS_EquiSatisfiable
-  type FVs = FullCNF.FVs
-  type TyFVS = FullCNF.TyFVS
 
   @inline
   final def canApply(l : Literal) : Boolean = FullCNF.canApply(l)
 
   final def canApply(cl: Clause): Boolean = cl.lits.exists(canApply)
 
-  final def apply(vargen : leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], cl : Clause, THRESHHOLD : Int = 0)(implicit sig: Signature) : Seq[Clause] = {
-    val lits = cl.lits
-    val normLits = apply(vargen, cashExtracts, lits, THRESHHOLD)
-    normLits.map{ls => Clause(ls)}
-  }
-
-  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], cl: Clause, THRESHHOLD: Int = 0)(implicit sig: Signature): (Seq[Clause], AddInfoCnf) = {
-    val lits = cl.lits
-    val (normLits, cnfInfo) = apply_rwUnderBinder(vargen, cashExtracts, lits, THRESHHOLD)
-    (normLits.map { ls => Clause(ls) }, cnfInfo)
-  }
-
-  final def apply(vargen: leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], l : Seq[Literal], THRESHHOLD : Int)(implicit sig: Signature): (Seq[Seq[Literal]]) = {
-    var acc : Seq[Seq[Literal]] = Seq(Seq())
-    val it : Iterator[Literal] = l.iterator
-    while(it.hasNext){
-      val nl = it.next()
-      apply(vargen, cashExtracts, nl, THRESHHOLD) match {
-        case Seq(Seq(lit)) => acc = acc.map{normLits => normLits :+ lit}
-        case norms =>  acc = multiply(acc, norms)
-      }
-    }
-    acc
-  }
-
-  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], l: Seq[Literal], THRESHHOLD: Int)(implicit sig: Signature): (Seq[Seq[Literal]], AddInfoCnf) = {
-    var acc: Seq[Seq[Literal]] = Seq(Seq())
-    var accSko: Vector[QuantStep] = Vector()
-    var unencodableRewrite = false
-    var renameHappened = false
-    val it: Iterator[Literal] = l.iterator
-    var litRes: Seq[Seq[Seq[Literal]]] = Seq(Seq())
-    while (it.hasNext) {
-      val nl = it.next()
-      val (l, cnfInfo) = apply_rwUnderBinder(vargen, cashExtracts, nl, THRESHHOLD)
-      if (cnfInfo.rewriteUnderBinder) unencodableRewrite = true
-      if (cnfInfo.renameHappend) renameHappened = true
-      accSko = accSko ++ cnfInfo.addInfoQuants
-      litRes = litRes :+ l
-      l match {
-        case Seq(Seq(lit)) =>
-          acc = acc.map { normLits => normLits :+ lit}
-        case norms =>
-          acc = multiply(acc, norms)
-      }
-    }
-    (acc, AddInfoCnf(unencodableRewrite, renameHappened, accSko))
-  }
-
-  final def apply(vargen: leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], l : Literal,THRESHHOLD : Int)(implicit sig: Signature): Seq[Seq[Literal]] = apply0(vargen.existingVars, vargen.existingTyVars, vargen, cashExtracts, l, THRESHHOLD)
-
-  final def apply_rwUnderBinder(vargen: leo.modules.calculus.FreshVarGen, cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)], l: Literal, THRESHHOLD: Int)(implicit sig: Signature): (Seq[Seq[Literal]], AddInfoCnf) = {
-    val st = new RewriteState
-    val cnfSet = apply0(vargen.existingVars, vargen.existingTyVars, vargen, cashExtracts, l, THRESHHOLD, st)
-    (cnfSet, AddInfoCnf(st.rewriteUnderBinderHappened,st.renamed,st.skolemTerms))
-  }
-
-  @inline
-  final private def apply0(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, cashExtracts : mutable.Map[Term, (Term, Boolean, Boolean)], l : Literal, THRESHHOLD : Int, st: RewriteState = new RewriteState)(implicit sig: Signature): Seq[Seq[Literal]] =
-    if(!l.equational){
-    if(FormulaRenaming.canApply(l, THRESHHOLD)) {
-      st.renamed = true
-      val (replLit, defl1, defl2) = FormulaRenaming.apply(l, cashExtracts)
-      if(defl1 == null && defl2 == null){
-        apply0(fvs, tyFVs, vargen, cashExtracts, replLit, THRESHHOLD, st)
-      } else {
-        assert(defl1 != null && defl2 != null, "Non consistent definition returend in formula renaming.")
-        apply0(fvs, tyFVs, vargen, cashExtracts, replLit, THRESHHOLD, st) ++ multiply(apply0(fvs, tyFVs, vargen, cashExtracts, defl1, THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, defl2, THRESHHOLD, st))
-      }
-    } else {
-    l.left match {
-      case Not(t) => apply0(fvs, tyFVs, vargen, cashExtracts, Literal(t, !l.polarity), THRESHHOLD, st)
-      case &(lt,rt) if l.polarity =>
-        st.beqondOuterQuantifiers = true
-        apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true), THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,true), THRESHHOLD, st)
-      case &(lt,rt) if !l.polarity =>
-        st.beqondOuterQuantifiers = true
-        multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false), THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, false), THRESHHOLD, st))
-      case |||(lt,rt) if l.polarity =>
-        st.beqondOuterQuantifiers = true
-        multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true),THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, true),THRESHHOLD, st))
-      case |||(lt,rt) if !l.polarity =>
-        st.beqondOuterQuantifiers = true
-        apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false),THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,false),THRESHHOLD, st)
-      case Impl(lt,rt) if l.polarity =>
-        st.beqondOuterQuantifiers = true
-        multiply(apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,false),THRESHHOLD, st), apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt, true),THRESHHOLD, st))
-      case Impl(lt,rt) if !l.polarity =>
-        st.beqondOuterQuantifiers = true
-        apply0(fvs, tyFVs, vargen, cashExtracts, Literal(lt,true),THRESHHOLD, st) ++ apply0(fvs, tyFVs, vargen, cashExtracts, Literal(rt,false),THRESHHOLD, st)
-      case Forall(a@(ty :::> t)) if l.polarity =>
-        //st.rewriteUnderBinderHappened = true
-        if (st.beqondOuterQuantifiers) st.rewriteUnderBinderHappened = true
-        val v = vargen.next(ty)
-        st.skolemTerms = st.skolemTerms :+ MoveQuantStep(v,QuantUniv)
-        apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true),THRESHHOLD, st)
-      case Forall(a@(ty :::> t)) if !l.polarity =>
-        val (sko, addInfo) = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, true)
-        st.skolemTerms = st.skolemTerms :+ addInfo
-        apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD, st)
-      case Exists(a@(ty :::> t)) if l.polarity =>
-        val (sko, addInfo) = leo.modules.calculus.skTermDefined(a, fvs, tyFVs, false)
-        st.skolemTerms = st.skolemTerms :+ addInfo
-        apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true),THRESHHOLD, st)
-      case Exists(a@(ty :::> t)) if !l.polarity =>
-        //st.rewriteUnderBinderHappened = true
-        if (st.beqondOuterQuantifiers) st.rewriteUnderBinderHappened = true
-        val v = vargen.next(ty)
-        st.skolemTerms = st.skolemTerms :+ MoveQuantStep(v,QuantExists)
-        apply0(v +: fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false),THRESHHOLD, st)
-      case TyForall(a@TypeLambda(t)) if l.polarity =>
-        st.rewriteUnderBinderHappened = true
-        val ty = vargen.next(); apply0(fvs, ty +: tyFVs, vargen, cashExtracts, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true),THRESHHOLD, st)
-      case TyForall(a@TypeLambda(t)) if !l.polarity =>
-        st.rewriteUnderBinderHappened = true
-        val sko = leo.modules.calculus.skType(tyFVs); apply0(fvs, tyFVs, vargen, cashExtracts, Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false),THRESHHOLD, st)
-      case _ =>
-        if ((l.left.etaContract.hasBinder)) {
-          // todo: remove this case once Lambdapi can handle rewrite under binder
-          st.rewriteUnderBinderHappened = true
-        }
-
-        Seq(Seq(l))
-    }}
-  } else {
-    if ((l.left.etaContract.hasBinder) || (l.right.etaContract.hasBinder)) {
-      // todo: remove this case once Lambdapi can handle rewrite under binder
-      st.rewriteUnderBinderHappened = true
-    }
-    Seq(Seq(l))
-  }
-
-  private[calculus] final def multiply[A](l : Seq[Seq[A]], r : Seq[Seq[A]]) : Seq[Seq[A]] = FullCNF.multiply(l,r)
+  final def apply(vargen: leo.modules.calculus.FreshVarGen,
+                  cashExtracts: mutable.Map[Term, (Term, Boolean, Boolean)],
+                  cl: Clause, THRESHHOLD: Int = 0)(implicit sig: Signature): CoreCNF.CnfResolution =
+    CoreCNF.apply(vargen, Some(CoreCNF.RenamingConfig(cashExtracts, THRESHHOLD)), cl)
 }
 
 /**
@@ -350,8 +536,7 @@ object RenameCNF extends CalculusRule {
 object FullCNF extends CalculusRule {
   final val name: String = "cnf"
   final val inferenceStatus = SZS_EquiSatisfiable
-  type FVs = Seq[(Int, Type)]
-  type TyFVS = Seq[Int]
+
 
   final def canApply(l: Literal): Boolean = if (!l.equational) {
     l.left match {
@@ -376,75 +561,9 @@ object FullCNF extends CalculusRule {
     false
   }
 
-  final def apply(vargen: leo.modules.calculus.FreshVarGen, cl: Clause)(implicit sig: Signature): Seq[Clause] = {
-    val lits = cl.lits
-    val normLits = apply(vargen, lits)
-    normLits.map{ls => Clause(ls)}
-  }
-
-  final def apply(vargen: leo.modules.calculus.FreshVarGen, l : Seq[Literal])(implicit sig: Signature): (Seq[Seq[Literal]]) = {
-    var acc : Seq[Seq[Literal]] = Vector(Vector())
-    val it : Iterator[Literal] = l.iterator
-    while(it.hasNext){
-      val nl = it.next()
-      apply(vargen, nl) match {
-        case Seq(Seq(lit)) => acc = acc.map{normLits => normLits :+ lit}
-        case norms =>  acc = multiply(acc, norms)
-      }
-    }
-    acc
-  }
-
-  final def apply(vargen: leo.modules.calculus.FreshVarGen, l : Literal)(implicit sig: Signature): Seq[Seq[Literal]] = apply0(vargen.existingVars, vargen.existingTyVars, vargen, l)
-
-  @inline
-  final private def apply0(fvs: FVs, tyFVs: TyFVS, vargen: leo.modules.calculus.FreshVarGen, l : Literal)(implicit sig: Signature): Seq[Seq[Literal]] = if(!l.equational){
-    l.left match {
-      case Not(t) => apply0(fvs, tyFVs, vargen, Literal(t, !l.polarity))
-      case &(lt,rt) if l.polarity => apply0(fvs, tyFVs, vargen, Literal(lt,true)) ++ apply0(fvs, tyFVs, vargen, Literal(rt,true))
-      case &(lt,rt) if !l.polarity => multiply(apply0(fvs, tyFVs, vargen, Literal(lt,false)), apply0(fvs, tyFVs, vargen, Literal(rt, false)))
-      case |||(lt,rt) if l.polarity => multiply(apply0(fvs, tyFVs, vargen, Literal(lt,true)), apply0(fvs, tyFVs, vargen, Literal(rt, true)))
-      case |||(lt,rt) if !l.polarity => apply0(fvs, tyFVs, vargen, Literal(lt,false)) ++ apply0(fvs, tyFVs, vargen, Literal(rt,false))
-      case Impl(lt,rt) if l.polarity => multiply(apply0(fvs, tyFVs, vargen, Literal(lt,false)), apply0(fvs, tyFVs, vargen, Literal(rt, true)))
-      case Impl(lt,rt) if !l.polarity => apply0(fvs, tyFVs, vargen, Literal(lt,true)) ++ apply0(fvs, tyFVs, vargen, Literal(rt,false))
-      case Forall(a@(ty :::> t)) if l.polarity =>
-        import leo.modules.HOLSignature.{o, LitTrue, LitFalse}
-        if (false /*ty == o*/) {
-          apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, true)) ++ apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, true))
-        } else {
-          val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, true))
-        }
-      case Forall(a@(ty :::> t)) if !l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,true)._1; apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, false))
-      case Exists(a@(ty :::> t)) if l.polarity => val sko = leo.modules.calculus.skTermDefined(a, fvs, tyFVs,false)._1; apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, sko).betaNormalize.etaExpand, true))
-      case Exists(a@(ty :::> t)) if !l.polarity =>
-        import leo.modules.HOLSignature.{o, LitTrue, LitFalse}
-        if (false /*ty == o*/) {
-          apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, LitTrue).betaNormalize.etaExpand, false)) ++ apply0(fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, LitFalse).betaNormalize.etaExpand, false))
-        } else {
-          val v = vargen.next(ty); apply0(v +: fvs, tyFVs, vargen, Literal(Term.mkTermApp(a, Term.mkBound(v._2, v._1)).betaNormalize.etaExpand, false))
-        }
-
-      case TyForall(a@TypeLambda(t)) if l.polarity => val ty = vargen.next(); apply0(fvs, ty +: tyFVs, vargen, Literal(Term.mkTypeApp(a, Type.mkVarType(ty)).betaNormalize.etaExpand, true))
-      case TyForall(a@TypeLambda(t)) if !l.polarity => val sko = leo.modules.calculus.skType(tyFVs); apply0(fvs, tyFVs, vargen, Literal(Term.mkTypeApp(a, sko).betaNormalize.etaExpand, false))
-      case _ => Vector(Vector(l))
-    }
-  } else {
-    Vector(Vector(l))
-  }
-
-  private[calculus] final def multiply[A](l : Seq[Seq[A]], r : Seq[Seq[A]]) : Seq[Seq[A]] = {
-    var acc : Seq[Seq[A]] = Vector()
-    val itl = l.iterator
-    while(itl.hasNext) {
-      val llist = itl.next()
-      val itr = r.iterator
-      while(itr.hasNext){
-        val rlist = itr.next()
-        acc = acc :+ (llist ++ rlist)
-      }
-    }
-    acc
-  }
+  final def apply(vargen: leo.modules.calculus.FreshVarGen, cl: Clause)
+                 (implicit sig: Signature): CoreCNF.CnfResolution =
+    CoreCNF.apply(vargen, None, cl)
 }
 
 
@@ -991,21 +1110,27 @@ object Simp extends CalculusRule {
     newLits
   }
 
-  final def shallowSimp_rwUnderBinder(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Boolean) = {
+  /** Return simplified literals, rewriting-under-binders information, and whether
+    * deleting a false literal used distinctness beneath lambdas.
+    */
+  final def shallowSimp_rwUnderBinder(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Boolean, Boolean) = {
     var newLits: Seq[Literal] = Vector.empty
     val litIt = lits.iterator
     var rewrittenUnderBinder = false
+    var usedLambdaDistinctness = false
     while (litIt.hasNext) {
       val lit0 = litIt.next()
       val (lit, rewrittenUnderBinder0) = apply_infoUnderBinder(lit0)(sig)
       if (rewrittenUnderBinder0) rewrittenUnderBinder = true
-      if (!Literal.isFalse(lit)) {
+      val (isFalse, lambdaDistinctness) = Literal.isFalseWithInfo(lit)
+      if (lambdaDistinctness) usedLambdaDistinctness = true
+      if (!isFalse) {
         if (!newLits.contains(lit)) {
           newLits = newLits :+ lit
         }
       }
     }
-    (newLits, rewrittenUnderBinder)
+    (newLits, rewrittenUnderBinder, usedLambdaDistinctness)
   }
 
   final def shallowSimp_andTrack(lits: Seq[Literal])(implicit sig: Signature): (Seq[Literal], Seq[(Seq[Int], Int)]) = {
@@ -1029,9 +1154,9 @@ object Simp extends CalculusRule {
     Clause(shallowSimp(cl.lits)(sig))
   }
 
-  final def shallowSimp_rwUnderBinder(cl: Clause)(implicit sig: Signature): (Clause, Boolean) = {
-    val (simpLits, rewrittenUnderBinder) = shallowSimp_rwUnderBinder(cl.lits)(sig)
-    (Clause(simpLits),rewrittenUnderBinder)
+  final def shallowSimp_rwUnderBinder(cl: Clause)(implicit sig: Signature): (Clause, Boolean, Boolean) = {
+    val (simpLits, rewrittenUnderBinder, usedLambdaDistinctness) = shallowSimp_rwUnderBinder(cl.lits)(sig)
+    (Clause(simpLits),rewrittenUnderBinder,usedLambdaDistinctness)
   }
 
   final def shallowSimp_andTrack(cl: Clause)(implicit sig: Signature): (Clause, Seq[(Seq[Int], Int)]) = {

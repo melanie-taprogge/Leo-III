@@ -93,6 +93,19 @@ trait Literal extends Pretty with Prettier {
       }
     }
   }
+  /** Apply the same substitution as [[substitute]], retaining any Boolean-equality
+    * normalization performed when rebuilding an equational literal.
+    */
+  @inline final def substituteAndTrack(termSubst: Subst, typeSubst: Subst = Subst.id): (Literal, LiteralInfo) = {
+    if (termSubst == Subst.id && typeSubst == Subst.id) (this, LiteralInfo(false, None))
+    else {
+      val lsubst = left.substitute(termSubst, typeSubst)
+      if (equational) {
+        val rsubst = right.substitute(termSubst, typeSubst)
+        Literal.mkLitAndTrack(lsubst, rsubst, polarity)
+      } else (Literal.mkLit(lsubst, polarity), LiteralInfo(false, None))
+    }
+  }
   /** Apply substitution `(termSubst, typeSubst)` to literal (i.e. to both sides of the equation).
     * Result it beta-normalized and oriented if possible. */
   @inline final def substituteOrdered(termSubst : Subst, typeSubst: Subst = Subst.id)(implicit sig: Signature) : (Literal, LiteralInfo) = {
@@ -153,6 +166,14 @@ object Literal {
     assert(Term.wellTyped(t2), s"Right side of literal not well-typed: ${t2.pretty}")
     assert(t1.ty == t2.ty)
     LitImpl.mkLit(t1,t2,pol,oriented)
+  }
+  /** Construct the same literal as [[mkLit]], also reporting Boolean normalization.
+    */
+  @inline final def mkLitAndTrack(t1: Term, t2: Term, pol: Boolean, oriented: Boolean = false): (Literal, LiteralInfo) = {
+    assert(Term.wellTyped(t1), s"Left side of literal not well-typed: ${t1.pretty}")
+    assert(Term.wellTyped(t2), s"Right side of literal not well-typed: ${t2.pretty}")
+    assert(t1.ty == t2.ty)
+    LitImpl.mkLitAndTrack(t1, t2, pol, oriented)
   }
   /** Creates a new (equational) literal of the two terms t1 and t2
     * and polarity `polarity`. During construction, the method
@@ -389,25 +410,31 @@ object Literal {
   final def distinctSides(l: Literal): Boolean = {
     distinctSides0(l.left, l.right, 0)
   }
-  @tailrec final def distinctSides0(left: Term, right: Term, depth: Int): Boolean = {
+  final def distinctSides0(left: Term, right: Term, depth: Int): Boolean =
+    distinctSides0WithInfo(left, right, depth)._1
+
+  // Report lambda descent only when comparing the bodies establishes distinctness.
+  @tailrec private def distinctSides0WithInfo(left: Term, right: Term, depth: Int): (Boolean, Boolean) = {
     import leo.modules.HOLSignature.Not
     import leo.modules.myAssert
     import leo.datastructures.Term.{Symbol, Bound, :::>, Integer, Rational, Real}
+    // true iff it is necessary to descent under binders in order to establish distinctness
+    def result(distinct: Boolean): (Boolean, Boolean) = (distinct, distinct && depth > 0)
     (left, right) match {
-      case (Symbol(idl), Symbol(idr)) if idl != idr => idl <= leo.modules.HOLSignature.lastId && idr <= leo.modules.HOLSignature.lastId
-      case (Integer(_), Integer(_)) => left != right
-      case (Rational(_, _), Rational(_, _)) => left != right
-      case (Real(_, _, _), Real(_, _, _)) => left != right
-      case (Bound(_, scopeL), Bound(_, scopeR)) if scopeL <= depth && scopeR <= depth => scopeL != scopeR
-      case (Not(a),b) if a == b => true
-      case (a, Not(b)) if a == b => true
+      case (Symbol(idl), Symbol(idr)) if idl != idr => result(idl <= leo.modules.HOLSignature.lastId && idr <= leo.modules.HOLSignature.lastId)
+      case (Integer(_), Integer(_)) => result(left != right)
+      case (Rational(_, _), Rational(_, _)) => result(left != right)
+      case (Real(_, _, _), Real(_, _, _)) => result(left != right)
+      case (Bound(_, scopeL), Bound(_, scopeR)) if scopeL <= depth && scopeR <= depth => result(scopeL != scopeR)
+      case (Not(a),b) if a == b => result(true)
+      case (a, Not(b)) if a == b => result(true)
       case (_ :::> _, _ :::> _) =>
         val (bodyLeft, absLeft) = collectLambdas(left)
         val (bodyRight, absRight) = collectLambdas(right)
         myAssert(absLeft == absRight)
-        distinctSides0(bodyLeft, bodyRight, depth + absLeft.size)
+        distinctSides0WithInfo(bodyLeft, bodyRight, depth + absLeft.size)
       // TODO: Extend to 'distinct symbols' from TPTP
-      case _ => false
+      case _ => (false, false)
     }
   }
   /** Returns a term representation of the literal.
@@ -425,7 +452,12 @@ object Literal {
   /** Returns true iff the literal is trivially semantically equal to $true. */
   final def isTrue(l: Literal): Boolean = if (l.polarity) trivial(l) else distinctSides(l)
   /** Returns true iff the literal is trivially semantically equal to $false. */
-  final def isFalse(l: Literal): Boolean = if (!l.polarity) trivial(l) else distinctSides(l)
+  final def isFalse(l: Literal): Boolean = isFalseWithInfo(l)._1
+  /** Return falsity and whether establishing it required comparing bodies beneath lambdas.
+    * A negative reflexive equality does not require that distinctness argument.
+    */
+  final def isFalseWithInfo(l: Literal): (Boolean, Boolean) =
+    if (!l.polarity) (trivial(l), false) else distinctSides0WithInfo(l.left, l.right, 0)
   /** Returns a new literal with the same equation as this one, only with polarity flipped.
     * It is also oriented, if the original was oriented. */
   final def flipPolarity(l: Literal): Literal = if (l.equational) apply(l.left, l.right, !l.polarity, l.oriented) else apply(l.left, !l.polarity)

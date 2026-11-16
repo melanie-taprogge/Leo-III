@@ -14,7 +14,8 @@ import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures.PrettyCo
 //////////////////////////////////////////
 
 /** Render Options dictating prefixing and level of implicitness of typing (depending on weather the problem is monomorphic) */
-final case class RenderOptions(sigPrefix: Boolean = true, formulaPrefix: Boolean = true, monomorphic: Boolean = true)
+final case class RenderOptions(sigPrefix: Boolean = true, formulaPrefix: Boolean = true, monomorphic: Boolean = true,
+                               explicitTypes: Boolean = false)
 
 object Renderer {
 
@@ -44,8 +45,7 @@ object Renderer {
       val eq = body match {
         case DefBody.LpTermBody(t0) => " " + renderTerm(t0, ro, sig) + ";"
         case DefBody.ProofBody(p) =>
-          val proofScript = p.map(step =>
-            indent(proof(step, ro, sig))).mkString("\n")
+          val proofScript = indent(proofBody(p, ro, sig, terminateLegacy = true))
           "\n" + "begin\n" + proofScript + "\nend;"
       }
       s"${mod}symbol ${n.value}$imp$par$colonTy ≔$eq\n"
@@ -54,6 +54,28 @@ object Renderer {
       val vs = if (vars.isEmpty) "" else " " + vars.map(_.value).mkString(" ")
       s"rule ${renderTerm(h, ro, sig)}$vs ↪ ${renderTerm(rhs, ro, sig)};\n"
   }
+
+  /** Render new and legacy script fragments in their original order.
+    * The caller supplies the enclosing `begin/end` or local `have` braces and indentation.
+    *
+    * @param terminateLegacy true for top-level definitions, where the final legacy
+    *                        fragment needs a separator before `end`; false preserves
+    *                        its existing optional separator before a local closing brace
+    */
+  private def proofBody(body: LpProofScript.Body, ro: RenderOptions, sig: LpSig,
+                        terminateLegacy: Boolean = false): String = body.zipWithIndex.map {
+    // New tactics already include their terminating semicolon in `proof`.
+    case (Left(step), _) => proof(step, ro, sig)
+    case (Right(script), index) =>
+      // Reuse the legacy printer for nested proofs and the caller's symbol prefixes.
+      val rendered = script.pretty(PrettyConfig(ro.sigPrefix, ro.formulaPrefix))
+      // Legacy fragments omit their final separator inside a local have.
+      // Fragments need separators before subsequent fragments or top-level `end`.
+      val needsSeparator = terminateLegacy || index < body.size - 1
+      // Empty fragments contribute no tactic; already-terminated fragments need no extra ';'.
+      if (needsSeparator && rendered.trim.nonEmpty && !rendered.trim.endsWith(";")) rendered + ";"
+      else rendered
+  }.mkString("\n")
 
   /**
     * Print Lambdapi proof scripts
@@ -69,18 +91,17 @@ object Renderer {
       val proofScript = if (subs.isEmpty) "" else s"\n${curly(subs.map(step => indent(proof(step, ro, sig))).mkString("\n"))}"
       s"refine ${renderTerm(t, ro, sig)}$proofScript;"
     case Have(n, ty0, pr) =>
-      //val proofScript = curly(pr.map(step => indent(proof(step, ro, sig))).mkString("\n"))
-      val proofScript = curly(pr.map {
-        case Left(step) => proof(step, ro, sig)
-        case Right(lpScript) => lpScript.pretty(PrettyConfig(ro.sigPrefix, ro.formulaPrefix))
-      }.mkString("\n"))
+      val proofScript = curly(proofBody(pr, ro, sig))
       s"have ${n.value} : ${ty(ty0, ro, sig)}\n" + indent(proofScript) + ";"
     case Rewrite(pattern, rule, side) =>
       val sside = side match {
         case Side.Left => " left ";
         case Side.Right => " "
       }
-      val pat = pattern.fold("") { p => s".[${termP(p.hole, ro, 0, sig)} in ${termP(p.LpTerm, ro, 0, sig)}] " }
+      val pat = pattern.fold("") { p =>
+        val inside = if (p.searchInside) "in " else ""
+        s".[$inside${termP(p.hole, ro, 0, sig)} in ${termP(p.LpTerm, ro, 0, sig)}] "
+      }
       s"rewrite$sside$pat${renderTerm(rule, ro, sig)};"
     case Reflexivity => "reflexivity;"
     case Simplify(ns,onlyBeta) =>
@@ -118,6 +139,8 @@ object Renderer {
           case None => n.value
         }
         s"(λ $dec, $bodyStr)"
+      case Let((name, domain), value, body) =>
+        s"(let ${name.value} : ${ty(domain, ro, sig)} ≔ ${renderTerm(value, ro, sig)} in ${renderTerm(body, ro, sig)})"
       case App(f, args) =>
         val (imps, exps) = args.partition(arg => arg.isInstanceOf[Arg.Implicit[_]] || arg.isInstanceOf[Arg.ImplicitTypeArg[_]])
         val is = if (imps.isEmpty) "" else " " + imps.map {
@@ -135,7 +158,9 @@ object Renderer {
       case TptpInt(n) => qname(QName.in(Prefix.Sig, nameInt(n)), ro)
       case LpString(t) => s"\"${renderTerm(t,  ro, sig)}\""
       case LpInt(n) => n.toString()
-      case RewritePattern(pattern, hole) => s".[${termP(hole, ro, Prec.Atom, sig)} in ${termP(pattern, ro, Prec.Atom, sig)}]"
+      case RewritePattern(pattern, hole, searchInside) =>
+        val inside = if (searchInside) "in " else ""
+        s".[$inside${termP(hole, ro, Prec.Atom, sig)} in ${termP(pattern, ro, Prec.Atom, sig)}]"
       case LpList(els) => if (els.isEmpty) "□" else s"(${els.map(renderTerm(_, ro, sig)).mkString(" ⸬ ")} ⸬ □)"
     }
   }
@@ -165,10 +190,14 @@ object Renderer {
         val ls = termP(l, ro, Prec.Imp, sig)
         val rs = termP(r, ro, Prec.Imp - 1, sig)
         bin(impStr, Prec.Imp, ls, rs, ctx)
-      case LogicConst.Eq(_, l, r) => //todo: add option to print type
-        val ls = termP(l, ro, Prec.Eq + 1, sig)
-        val rs = termP(r, ro, Prec.Eq + 1, sig)
-        bin(eqStr, Prec.Eq, ls, rs, ctx)
+      case LogicConst.Eq(a, l, r) =>
+        if (ro.explicitTypes)
+          typedApplication(eqStr, a, Seq(Arg.Explicit(l), Arg.Explicit(r)), ro, ctx, sig)
+        else {
+          val ls = termP(l, ro, Prec.Eq + 1, sig)
+          val rs = termP(r, ro, Prec.Eq + 1, sig)
+          bin(eqStr, Prec.Eq, ls, rs, ctx)
+        }
 
       // ** Unary connectives
       case LogicConst.Not(x) =>
@@ -176,25 +205,21 @@ object Renderer {
         paren(ctx > Prec.Not, s"$negStr $xs")
 
       // ** TPTP connectives abstracted away in the Lambdapi encoding
-      case LogicConst.InEq(t, l, r) => //todo: add option to print type
+      case LogicConst.InEq(t, l, r) =>
         termP(LogicConst.Not(LogicConst.Eq(t, l, r)),ro, ctx, sig)
 
       // ** Binders
-      case LogicConst.Forall(bind, body) =>
-        val bodyStr = termP(body, ro, Prec.Min, sig)
-        val (n, t0) = bind
-        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
-        s"($forAllStr(λ $bStr, $bodyStr))"
-      case LogicConst.Exists(bind, body) =>
-        val bodyStr = termP(body, ro, Prec.Min, sig)
-        val (n, t0) = bind
-        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
-        s"($exStr(λ $bStr, $bodyStr))"
-      case LogicConst.Choice(bind, body) =>
-        val bodyStr = termP(body, ro, Prec.Min, sig)
-        val (n, t0) = bind
-        val bStr = s"(${n.value} : ${ty(t0, ro, sig)})"
-        s"($choiceStr(λ $bStr, $bodyStr))"
+      // Prefer a supplied domain to a lambda annotation when both are present.
+      case LpTerm.App(LpTerm.Const(SymRef.Leo(i)), Arg.ExplicitTypeArg(a) +: args)
+        if ro.explicitTypes && leoBinders.contains(i) =>
+        typedApplication(qname(sig.termNames(i), ro), a, args, ro, ctx, sig)
+      case LpTerm.App(LpTerm.Const(SymRef.Leo(i)), Seq(Arg.Explicit(LpTerm.Lam((n, Some(a)), body))))
+        if leoBinders.contains(i) =>
+        binderApplication(qname(sig.termNames(i), ro), (n, a), body, ro, ctx, sig)
+      case LpTerm.App(LpTerm.Const(SymRef.Leo(i)),
+        Seq(Arg.ExplicitTypeArg(_), Arg.Explicit(LpTerm.Lam((n, Some(a)), body))))
+        if leoBinders.contains(i) =>
+        binderApplication(qname(sig.termNames(i), ro), (n, a), body, ro, ctx, sig)
 
       // ** Placeholder
       case Wildcard() => "_"
@@ -227,6 +252,9 @@ object Renderer {
         val ifs = qname(sig.termNames(i), ro)
         val encArgs: Seq[String] = args match {
           case Nil => Seq()
+          // Keep complete predicate applications implicit in the ordinary mode.
+          case Seq(Arg.ExplicitTypeArg(_), predicate @ Arg.Explicit(_)) =>
+            renderArgs(Seq(predicate), ro, sig)
           case Arg.ExplicitTypeArg(t) +: remArgs => s"[${olTy(t, ro, sig)}]" +: renderArgs(remArgs,ro,sig)
           case _ => renderArgs(args, ro, sig)
         }
@@ -287,6 +315,25 @@ object Renderer {
     * */
   private def bin(op: String, pOp: Int, lhs: String, rhs: String, ctx: Int) = paren(ctx >= pOp, s"$lhs $op $rhs")
 
+
+  /** Print a logical symbol with its recorded implicit domain supplied explicitly. */
+  private def typedApplication(symbol: String, domain: OlMonoType, args: Seq[Arg[Level.Obj]],
+                               ro: RenderOptions, ctx: Int, sig: LpSig): String = {
+    val arguments = renderArgs(args, ro, sig)
+    val suffix = if (arguments.isEmpty) "" else " " + arguments.mkString(" ")
+    paren(ctx > Prec.App, s"($symbol) [${olTy(domain, ro, sig)}]$suffix")
+  }
+
+  /** Use a lambda's recorded domain when no separate type argument was supplied. */
+  private def binderApplication(symbol: String, binder: (Name, LpType), body: LpTerm[Level.Obj],
+                                ro: RenderOptions, ctx: Int, sig: LpSig): String = binder._2 match {
+    case LpType.El(domain) if ro.explicitTypes =>
+      val predicate = LpTerm.Lam[Level.Obj](binder._1 -> Some(binder._2), body)
+      typedApplication(symbol, domain, Seq(Arg.Explicit(predicate)), ro, ctx, sig)
+    case _ =>
+      val (name, domain) = binder
+      s"($symbol(λ (${name.value} : ${ty(domain, ro, sig)}), ${termP(body, ro, Prec.Min, sig)}))"
+  }
 
   /** Helper for printing an individual argument */
   private def renderArg(arg: Arg[Level.Obj], ro: RenderOptions, sig: LpSig) = {

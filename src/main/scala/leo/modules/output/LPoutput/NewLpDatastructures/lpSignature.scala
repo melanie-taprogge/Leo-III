@@ -89,8 +89,8 @@ object LpSig {
   }
    */
   // use this for compatibility reasons for now but the commented version above would be nicer...
-  /** Generate a fresh name if the currently chosen one is already occupied */
-  private def freshIfNeeded(name: String, taken: collection.mutable.Set[String]): String = {
+  /** Append underscores until the name is unoccupied, without modifying `taken`. */
+  def freshIfNeeded(name: String, taken: collection.Set[String]): String = {
     if (!taken.contains(name)) name
     else {
       val newName = s"${name}_"

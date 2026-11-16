@@ -83,7 +83,7 @@ object TO_CPO_Naive extends TermOrdering {
   // Comparisons of types
   ////////////////////////////////////
   final private def gt0(a: Type, b: Type): Boolean = {
-    import leo.datastructures.Type.{BaseType,->,∀}
+    import leo.datastructures.Type.{BaseType,->,PolyType}
 
     if (a == b) return false
     if (a.isBoundTypeVar) return false
@@ -115,12 +115,12 @@ object TO_CPO_Naive extends TermOrdering {
     }
     /* adaption for quantified types */
     if (a.isPolyType) {
-      val aO = ∀.unapply(a).get
+      val aO = PolyType.unapply(a).get
 
       if (ge0(aO, b)) return true
 
       if (b.isPolyType) {
-        val bO = ∀.unapply(b).get
+        val bO = PolyType.unapply(b).get
         return gt0(aO,bO)
       }
       // TODO: Are there further meaningful cases?
@@ -131,7 +131,7 @@ object TO_CPO_Naive extends TermOrdering {
   }
 
   final private def ge0(a: Type, b: Type): Boolean = {
-    import leo.datastructures.Type.{BaseType,->,∀}
+    import leo.datastructures.Type.{BaseType,->,PolyType}
 
     if (a == b) return true
     if (a.isBaseType) {
@@ -160,12 +160,12 @@ object TO_CPO_Naive extends TermOrdering {
     }
     /* adaption for quantified types */
     if (a.isPolyType) {
-      val aO = ∀.unapply(a).get
+      val aO = PolyType.unapply(a).get
 
       if (gt0(aO, b)) return true
 
       if (b.isPolyType) {
-        val bO = ∀.unapply(b).get
+        val bO = PolyType.unapply(b).get
         return gt0(aO,bO)
       }
       // TODO: Are there further meaningful cases?
@@ -257,7 +257,32 @@ object TO_CPO_Naive extends TermOrdering {
     } else false
   }
 
+  /* gt0 is a function of (s, t, depth) alone -- the signature and the precedence
+     do not change during a comparison -- but it calls itself on the same pairs of
+     subterms over and over: cases 7 and 8 below compare a prefix of s with t and
+     with the parts of t, and every level of nesting multiplies the work.  On the
+     ontological-argument problems a single comparison could run for minutes, and
+     the prover with it, far past its time limit (GoedelVariantHOML2/L: 248 s at
+     -t 10).  The answers are kept for the duration of one outermost comparison:
+     the same answers as before, so the same search, computed once each. */
+  private[this] var memoDepth: Int = 0
+  private[this] var memo: java.util.HashMap[(Term, Term, Int), java.lang.Boolean] = null
+
   final private def gt0(s: Term, t: Term, depth: Int)(sig: Signature): Boolean = {
+    if (memoDepth == 0) memo = new java.util.HashMap[(Term, Term, Int), java.lang.Boolean]()
+    val key = (s, t, depth)
+    val known = memo.get(key)
+    if (known != null) known.booleanValue()
+    else {
+      memoDepth += 1
+      val result = try gt0Impl(s, t, depth)(sig) finally memoDepth -= 1
+      memo.put(key, result)
+      if (memoDepth == 0) memo = null
+      result
+    }
+  }
+
+  final private def gt0Impl(s: Term, t: Term, depth: Int)(sig: Signature): Boolean = {
     import leo.datastructures.Term.{:::>, Bound, Symbol, TypeLambda, ∙}
     import leo.datastructures.Term.local.mkApp
 

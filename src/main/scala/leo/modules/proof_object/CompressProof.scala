@@ -32,11 +32,9 @@ object CompressProof {
     var curAn = cl.annotation
     while(true){
       curAn match {
-        case anno@InferredFrom(rule, cws) =>
+        case anno@InferredFrom(rule, cws, inferenceInfo) =>
           assert(cws.nonEmpty, "An empty inferred from occured")
-          // If it is branching we cannot compress with this method
-          // or we reached an important rule
-          if(cws.size > 1 || important.contains(rule) || cws.head._1.role == Role_NegConjecture) {
+          if(cws.size > 1 || inferenceInfo.isDefined || important.contains(rule) || cws.head._1.role == Role_NegConjecture) {
             return CompressedRule(pickedUpRules.reverse, anno)
           } else {
             // Otherwise compress further

@@ -131,7 +131,7 @@ package inferenceControl {
   import leo.modules.HOLSignature.LitFalse
   import leo.modules.calculus._
   import leo.modules.control.Control.LocalState
-  import leo.modules.output.{SZS_Theorem, SuccessSZS}
+  import leo.modules.output.{SZS_Theorem, SuccessSZS, ToTHF}
 
   import scala.annotation.tailrec
   package object inferenceControl {
@@ -143,64 +143,74 @@ package inferenceControl {
     import leo.datastructures.ClauseAnnotation.InferredFrom
 
     final def cnf(cl : AnnotatedClause)(implicit state: LocalState): Set[AnnotatedClause] = {
-      if (state.runStrategy.renaming) cnf2(cl, state)
-      else cnf1(cl, state.signature)
-    }
+      val (cnfMode, cnfresult0) = if (state.runStrategy.renaming) {
+        val mode = RenameCNF
+        val cnfresult0 = RenameCNF.apply(leo.modules.calculus.freshVarGen(cl.cl), state.renamingCash, cl.cl)(state.signature)
+        (mode, cnfresult0)
+      } else {
+        val mode = FullCNF
+        val cnfresult0 = FullCNF.apply(leo.modules.calculus.freshVarGen(cl.cl), cl.cl)(state.signature)
+        (mode, cnfresult0)
+      }
 
-    private final def cnf1(cl: AnnotatedClause, sig: Signature): Set[AnnotatedClause] = {
-      Out.trace(s"Standard CNF of ${cl.pretty(sig)}")
-      val cnfresult0 = FullCNF(leo.modules.calculus.freshVarGen(cl.cl), cl.cl)(sig)
-      if (CnfConj.canApply(cnfresult0)) {
-        // conjunction of all derived clauses
-        val (conjCl, cnfresult) = CnfConj(cnfresult0)
-        val conjResult = AnnotatedClause(conjCl, InferredFrom(FullCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
-        // individual clauses of the conjunction
-        val result = cnfresult.map { c => AnnotatedClause(c._1, InferredFrom(CnfConj, conjResult), conjResult.properties) }
-        Out.trace(s"CNF result:\n\t${result.map(_.pretty(sig)).mkString("\n\t")}")
-        result
-      } else if (cnfresult0.isEmpty) Set.empty
-      else {
-        if (cnfresult0.head == cl.cl) {
-          // no CNF step at all
-          Out.trace(s"CNF result:\n\t${cl.pretty(sig)}")
-          Set(cl)
+      if (cnfresult0.clauses.isEmpty) Set.empty
+      else if (cnfresult0.clauses.head == cl.cl) {
+        // no CNF step at all
+        Out.trace(s"CNF result:\n\t${cl.pretty(state.signature)}")
+        Set(cl)
+      } else {
+        val lastStep = cnfresult0.steps.foldLeft(cl)((lastCl, step) => annotateCnfSteps(step, state.signature, lastCl, cnfMode))
+
+        if (CnfConj.canApply(cnfresult0.clauses)) {
+          // conjunction of all derived clauses
+          val (conjCl, cnfresult) = CnfConj(cnfresult0.clauses)
+          val conjResult =
+            if (conjCl == lastStep.cl) lastStep
+            else AnnotatedClause(conjCl, InferredFrom(cnfMode, lastStep), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
+          // individual clauses of the conjunction
+          val result = cnfresult.map { c =>
+            val furtherInfo = FurtherInfo(cnfConjInfo = Some(c._2))
+            AnnotatedClause(c._1, InferredFrom(CnfConj, conjResult), conjResult.properties, furtherInfo) }
+          Out.trace(s"CNF result:\n\t${result.map(_.pretty(state.signature)).mkString("\n\t")}")
+          result
         } else {
-          // CNF resulted in only one clause
-          val result = AnnotatedClause(cnfresult0.head, InferredFrom(FullCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
-          Out.trace(s"CNF result:\n\t${result.pretty(sig)}")
-          Set(result)
+          val lastRes =
+            if (cnfresult0.clauses.head == lastStep.cl) lastStep
+            else AnnotatedClause(cnfresult0.clauses.head, InferredFrom(cnfMode, lastStep), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties))
+          Out.trace(s"CNF result:\n\t${lastRes.pretty(state.signature)}")
+          Set(lastRes)
         }
       }
     }
 
-    private final def cnf2(cl: AnnotatedClause, s: GeneralState[AnnotatedClause]): Set[AnnotatedClause] = {
-      Out.trace(s"Rename CNF of ${cl.pretty(s.signature)}")
-      val (cnfresult0, cnfInfo) = RenameCNF.apply_rwUnderBinder(leo.modules.calculus.freshVarGen(cl.cl), s.renamingCash, cl.cl)(s.signature)
-      if (CnfConj.canApply(cnfresult0)) {
-        // conjunction of all derived clauses
-        val (conjCl, cnfresult) = CnfConj(cnfresult0)
-        val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder, cnfInfo.renameHappend, cnfInfo.addInfoQuants, cnfresult0))
-        val conjResult = AnnotatedClause(conjCl, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties), furtherInfo)
-        // individual clauses of the conjunction
-        val result = cnfresult.map { (cIdx) =>
-          val furtherInfo = FurtherInfo(cnfConjInfo = Some(cIdx._2))
-          AnnotatedClause(cIdx._1, InferredFrom(CnfConj, conjResult), conjResult.properties, furtherInfo)
-        }
-        Out.trace(s"CNF result:\n\t${result.map(_.pretty(s.signature)).mkString("\n\t")}")
-        result
-      } else if (cnfresult0.isEmpty) Set.empty
-      else {
-        if (cnfresult0.head == cl.cl) {
-          // no CNF step at all
-          Out.trace(s"CNF result:\n\t${cl.pretty(s.signature)}")
-          Set(cl)
-        } else {
-          // CNF resulted in only one clause
-          val furtherInfo = FurtherInfo(cnfInfo = AddInfoCnf(cnfInfo.rewriteUnderBinder, cnfInfo.renameHappend, cnfInfo.addInfoQuants, cnfresult0))
-          val result = AnnotatedClause(cnfresult0.head, InferredFrom(RenameCNF, cl), deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, cl.properties), furtherInfo)
-          Out.trace(s"CNF result:\n\t${result.pretty(s.signature)}")
-          Set(result)
-        }
+    def annotateCnfSteps(step: CoreCNF.CnfStep, sig: Signature, last: AnnotatedClause, cnfKind: CalculusRule): AnnotatedClause = {
+
+      val properties: ClauseAnnotation.ClauseProp = deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified, last.properties)
+      step.skolem match {
+        case Some((data, pos)) =>
+
+          val skInfo = ToTHF.skolem(data, pos)(sig)
+
+          val annotaion: ClauseAnnotation = data match {
+            case CoreCNF.TermSkolemData(skolem, _, _) =>
+              // construct the equality for the definition
+              val skDef: AnnotatedClause = {
+                val symbol = skolem.headSymbol
+                val key = Term.Symbol.unapply(symbol).get
+                val info = new leo.modules.output.Output {
+                  override def apply(): String =
+                    s"new_symbols(skolem,[${sig(key).name}])"
+                }
+                AnnotatedClause(Clause(Literal(symbol, sig(key)._defn, true)), Role_Definition, ClauseAnnotation.FromSystem("definition", Seq(last), Some(info)), ClauseAnnotation.PropNoProp)
+              }
+              InferredFrom(CnfSkolem, Seq((last, null), (skDef, null)), Some(skInfo))
+            case CoreCNF.TypeSkolemData(_, _) =>
+              InferredFrom(CnfSkolem, Seq((last, null)), Some(skInfo))
+          }
+          AnnotatedClause(step.after, annotaion, properties, FurtherInfo(cnfInfo = step.addInfo))
+
+        case None =>
+          AnnotatedClause(step.after, InferredFrom(cnfKind, last), properties, FurtherInfo(cnfInfo = step.addInfo))
       }
     }
 
@@ -416,7 +426,7 @@ package inferenceControl {
                                      intoPos: Position,
                                      shiftedIntoTerm: Term)(implicit sig: Signature): AnnotatedClause = {
 
-      val (result0,preSimp,simpUnderBilnder) = OrderedParamod(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm)(sig)
+      val (result0,preSimp,simpUnderBilnder,usedLambdaDistinctness) = OrderedParamod(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm)(sig)
 
       val uniLit = result0.lits.last
       val (uniEqLeft,uniEqRight) = UnificationControl.getUniTaskFromLit(uniLit)
@@ -431,7 +441,7 @@ package inferenceControl {
         addInfoPara.para = Some(AddInfoPara(withClause, withIndex, withSide, shiftedIntoClause, intoIndex, intoSide, intoPos, shiftedIntoTerm, preSimp, false))
         val intermediateClause =  if (result0 != preSimp) {
           val intermediateClause0 = AnnotatedClause(preSimp, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
-          val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder)
+          val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder, simpUsedLambdaDistinctness = usedLambdaDistinctness)
           AnnotatedClause(result0, InferredFrom(Simp, intermediateClause0), newProperties, addInfoSimp) // todo: properties and annotations
         }
         else {
@@ -455,7 +465,7 @@ package inferenceControl {
             val preSimpRes1 = preSimp.substituteOrdered(Subst.id, initialTypeSubst)(sig)._1
             val preSimpRes2 = Clause(preSimpRes1.lits.map(l => Literal.mkLit(l.left.etaExpand, l.right.etaExpand, l.polarity, l.oriented)))
             val intermediateClause0 = AnnotatedClause(preSimpRes2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
-            val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder)
+            val addInfoSimp = FurtherInfo(addInfoSimpRule = Some("paraSimp"), rwUnderBinder = simpUnderBilnder, simpUsedLambdaDistinctness = usedLambdaDistinctness)
             AnnotatedClause(result2, InferredFrom(Simp, intermediateClause0), newProperties, addInfoSimp)
           }else {
             AnnotatedClause(result2, InferredFrom(OrderedParamod, Seq(withWrapper, intoWrapper)), newProperties, addInfoPara)
@@ -1277,7 +1287,13 @@ package inferenceControl {
       val (clause, subst) = uniResult
       val (tPTPRepresent, addInfoUnification0) = ToTHF.apply_andTrack(subst._1, subst._2, origin.cl.implicitlyBound, origin.cl.typeVars)(sig)
       val addInfoUnification = FurtherInfo()
-      val uniLitSubst = uniLitsInfo.map(uniLit => UniLitInfo(uniLit.position, uniLit.literal.substitute(subst._1, subst._2)))
+      // Deleted constraints can normalize too. Keep that information at their
+      // original parent positions, separately from surviving-literal metadata.
+      // Unordered substitution preserves the literal representation used before.
+      val uniLitSubst = uniLitsInfo.map { uniLit =>
+        val (literal, info) = uniLit.literal.substituteAndTrack(subst._1, subst._2)
+        UniLitInfo(uniLit.position, literal, info.normalize)
+      }
       addInfoUnification.addInfoUni = AddInfoUni(addInfoUnification0, uniLitSubst, flippedIds, subst._1, subst._2)
       if (rule == PreUni) addInfoUnification.addInfoUniRule = (mode, preUniModeLits(uniLitsInfo))
       val res = AnnotatedClause(clause, Role_Plain, InferredFrom(rule, Seq((origin, tPTPRepresent))), leo.datastructures.deleteProp(ClauseAnnotation.PropNeedsUnification | ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,origin.properties | ClauseAnnotation.PropUnified),addInfoUnification)
@@ -2209,9 +2225,9 @@ package inferenceControl {
         cl
       } else {
         //val simpresult = Simp.shallowSimp(cl.cl)
-        val (simpresult, rewrittenUnderBinder) = Simp.shallowSimp_rwUnderBinder(cl.cl)
+        val (simpresult, rewrittenUnderBinder, usedLambdaDistinctness) = Simp.shallowSimp_rwUnderBinder(cl.cl)
         val result = if (simpresult != cl.cl){
-          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rewrittenUnderBinder)
+          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rewrittenUnderBinder, simpUsedLambdaDistinctness = usedLambdaDistinctness)
           AnnotatedClause(simpresult, InferredFrom(Simp, cl), addProp(ClauseAnnotation.PropShallowSimplified, cl.properties), furtherInfo)
         }
         else cl
@@ -2333,13 +2349,13 @@ package inferenceControl {
           else deleteProp(ClauseAnnotation.PropFullySimplified | ClauseAnnotation.PropShallowSimplified,cl.properties)
           AnnotatedClause(newCl, Role_Plain, InferredFrom(RewriteSimp, Seq(cl) ++ rewriteRulesUsed.toSeq), newAnnotation, information)
         }
-        val (simpResult, rewrittenUnderBinder) = Simp.shallowSimp_rwUnderBinder(result0.cl)(sig)
+        val (simpResult, rewrittenUnderBinder, usedLambdaDistinctness) = Simp.shallowSimp_rwUnderBinder(result0.cl)(sig)
         val result = if (simpResult == result0.cl) result0
         else {
           //print(s"${result0.cl.pretty}\n")
           //print(s"${simpResult.pretty}\n")
           //information.addInfoSimp = information.addInfoSimp ++ addInfo
-          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rewrittenUnderBinder)
+          val furtherInfo = FurtherInfo(addInfoSimpRule = Some("eqSimp"), rwUnderBinder = rewrittenUnderBinder, simpUsedLambdaDistinctness = usedLambdaDistinctness)
           AnnotatedClause(simpResult, Role_Plain, InferredFrom(Simp, Seq(result0)), result0.properties, furtherInfo)
         }
         Out.debug(s"[Rewriting] Result: ${result.pretty(sig)}")
@@ -3643,16 +3659,16 @@ package schedulingControl {
             remainingTime = remainingTime - proportionalTimeOfStrategy
             shareSum = shareSum + strategy.share
           } else {
-	    if (result.isEmpty) {
-	       return Iterable((strategy, remainingTime))
-	    } else {
+            if (result.isEmpty) {
+               return Iterable((strategy, remainingTime))
+            } else {
               // distribute remaining time
               val remainingTime0 = remainingTime
               result = result.map {case (s,time) =>
-              	  val extraTime = (remainingTime0 * (s.share / shareSum)).floor.toInt
-              	  (s, time+extraTime)
+                  val extraTime = (remainingTime0 * (s.share / shareSum)).floor.toInt
+                  (s, time+extraTime)
               }
-	    }
+            }
           }
         }
         Iterable(result:_*)

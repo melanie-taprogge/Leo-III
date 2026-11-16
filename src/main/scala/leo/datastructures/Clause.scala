@@ -22,6 +22,14 @@ trait Clause extends Pretty with Prettier with HasCongruence[Clause] {
   /** The source from where the clause was created, See `ClauseOrigin`. */
   def origin: ClauseOrigin
 
+  /** The multiset of symbols occurring in this clause.
+    *
+    * Asked for once per comparison by the orderings that choose the given
+    * clause, so it is worth keeping rather than recomputing: a clause never
+    * changes.  Implementations should override this with a cached value. */
+  def symbols: Multiset[Signature.Key] =
+    lits.map(Literal.symbols).foldLeft(Multiset.empty[Signature.Key]){case (a,b) => a.sum(b)}
+
   // Further properties
   /** Those literals in `lits` that are positive. */
   def posLits: Seq[Literal]
@@ -41,8 +49,8 @@ trait Clause extends Pretty with Prettier with HasCongruence[Clause] {
   @inline final def mapLit(f: Literal => Literal): Clause = Clause(lits.map(f), Derived)
   @inline final def replace(what: Term, by: Term): Clause = Clause(lits.map(_.replaceAll(what, by)))
 
-  final def pretty = s"[${lits.map(_.pretty).mkString(" , ")}]"
-  final def pretty(sig: Signature) = s"[${lits.map(_.pretty(sig)).mkString(" , ")}]"
+  final def pretty: String = s"[${lits.map(_.pretty).mkString(" , ")}]"
+  final def pretty(sig: Signature): String = s"[${lits.map(_.pretty(sig)).mkString(" , ")}]"
 
   /** Conquence `cong(c1,c2)` on two clauses is more semantical that equals: Two clauses `c1` and `c2` are congruence
     * if `c1` contains all literals of `c2` set-wise and vice-versa, i.e. we have that
@@ -129,7 +137,7 @@ object Clause {
   /** True iff this clause is a rewrite rule. */
   @inline final def rewriteRule(c: Clause): Boolean = demodulator(c) && c.posLits.head.oriented
   /** Returns the multiset of symbols occurring in the clause. */
-  final def symbols(c: Clause): Multiset[Signature.Key] = c.lits.map(Literal.symbols).foldLeft(Multiset.empty[Signature.Key]){case (a,b) => a.sum(b)}
+  @inline final def symbols(c: Clause): Multiset[Signature.Key] = c.symbols
   /** Returns the multiset of variables occurring freely in the clause. */
   final def vars(c: Clause): Multiset[Int] = c.lits.map(Literal.vars).foldLeft(Multiset.empty[Signature.Key]){case (a,b) => a.sum(b)}
   /** Returns a representation of the clause `c` as term. */

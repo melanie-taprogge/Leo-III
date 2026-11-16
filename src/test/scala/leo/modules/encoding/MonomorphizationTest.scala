@@ -26,7 +26,7 @@ class MonomorphizationTest extends LeoTestSuite {
     Out.finest(f1.pretty(sig))
     Term.wellTyped(f1)
 
-    val problem = leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f1)).toSet
+    val problem = leo.modules.calculus.FullCNF.apply(leo.modules.calculus.freshVarGenFromBlank, termToClause(f1)).clauses.toSet
     Out.finest(problem.map(_.pretty(sig)).mkString("\n"))
     val (monoProb, monoSig) = Monomorphization(problem)
 

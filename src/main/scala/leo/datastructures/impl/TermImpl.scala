@@ -163,6 +163,19 @@ protected[datastructures] sealed abstract class TermImpl(protected[TermImpl] var
 
 /** Representation of terms that are in (weak) head normal form. */
 protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
+  /* Terms are immutable and are keys everywhere (the sharing tables, the clause
+     sets); the generated hash code walked the whole term at every call, and that
+     was 14 per cent of the running time on TPTP library problems.  It is computed
+     once now, with the value the case class would compute -- the expression the
+     compiler generates, with the class's seed as it stands in the bytecode of 1.7.0 --
+     so no table iterates differently; equality asks it before walking.  A lazy val: a
+     plain val is read while the object is still being built and is then 0, which
+     changed the search. */
+  override final lazy val hashCode: Int = scala.util.hashing.MurmurHash3.productHash(this, -920296880, true)
+  override final def equals(that: Any): Boolean = that match {
+    case o: Root => (this eq o) || (hashCode == o.hashCode && hd == o.hd && args == o.args)
+    case _ => false
+  }
   import TermImpl.{headToTerm, mkRedex, mkRoot}
 
   protected[impl] def markBetaNormal(): Unit = {
@@ -226,10 +239,10 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
     case SNil => funty
     case App(s0,tail) => funty match {
       case (_ -> out) => ty0(out, tail)
-      case _ => throw NotWellTypedException(this) // this should not happen if well-typed
+      case _ => throw NotWellTypedException("A symbol without function type is applied like a function.", this) // this should not happen if well-typed
     }
     case TyApp(s0,tail) => funty match {
-      case tt@(∀(_)) => ty0(tt.instantiate(s0), tail)
+      case tt@(PolyType(_)) => ty0(tt.instantiate(s0), tail)
       case _ => throw NotWellTypedException(this) // this should not happen if well-typed
     }
     case _ => throw new IllegalArgumentException("closure occured in term")// other cases do not apply
@@ -262,13 +275,13 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
     }
   }
 
-  override lazy val headSymbol = Root(hd, SNil)
+  override lazy val headSymbol: Root = Root(hd, SNil)
   override val headSymbolDepth = 0
-  override lazy val feasibleOccurrences = if (args.length == 0)
+  override lazy val feasibleOccurrences: Map[Term,Set[Position]] = if (args.length == 0)
     Map(this.asInstanceOf[Term] -> Set(Position.root))
   else
     fuseMaps(Map(this.asInstanceOf[Term] -> Set(Position.root)), args.feasibleOccurences)
-  override lazy val size = 2 + args.size
+  override lazy val size: Int = 2 + args.size
 
   // Other operations
   override lazy val etaExpand0: TermImpl = {
@@ -385,6 +398,11 @@ protected[impl] final case class Root(hd: Head, args: Spine) extends TermImpl {
 // For all terms that have not been normalized, assume they are a redex, represented
 // by this term instance
 protected[impl] case class Redex(body: Term, args: Spine) extends TermImpl {
+  override final lazy val hashCode: Int = scala.util.hashing.MurmurHash3.productHash(this, -357099666, true)
+  override final def equals(that: Any): Boolean = that match {
+    case o: Redex => (this eq o) || (hashCode == o.hashCode && body == o.body && args == o.args)
+    case _ => false
+  }
   import TermImpl.mkRedex
 
   final protected[impl] def markBetaNormal(): Unit = {
@@ -405,9 +423,9 @@ protected[impl] case class Redex(body: Term, args: Spine) extends TermImpl {
   protected[impl] def flexHead0(depth: Int): Boolean = body.asInstanceOf[TermImpl].flexHead0(depth)
 
   // Handling def. expansion
-  final def δ_expandable(implicit sig: Signature) = body.δ_expandable(sig) || args.δ_expandable(sig)
-  final def δ_expand(rep: Int)(implicit sig: Signature) = mkRedex(body.δ_expand(rep)(sig), args.δ_expand(rep)(sig))
-  final def δ_expand(implicit sig: Signature) = mkRedex(body.δ_expand(sig), args.δ_expand(sig))
+  final def δ_expandable(implicit sig: Signature): Boolean = body.δ_expandable(sig) || args.δ_expandable(sig)
+  final def δ_expand(rep: Int)(implicit sig: Signature): Redex = mkRedex(body.δ_expand(rep)(sig), args.δ_expand(rep)(sig))
+  final def δ_expand(implicit sig: Signature): Redex = mkRedex(body.δ_expand(sig), args.δ_expand(sig))
   final def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = mkRedex(body.δ_expand_upTo(symbs)(sig), args.δ_expand_upTo(symbs)(sig))
 
   final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term, Seq[Signature.Key]) = {
@@ -417,7 +435,7 @@ protected[impl] case class Redex(body: Term, args: Spine) extends TermImpl {
   }
 
   // Queries on terms
-  lazy val ty = ty0(body.ty, args)
+  lazy val ty: Type = ty0(body.ty, args)
   private def ty0(funty: Type, s: Spine): Type = s match {
     case SNil => funty
     case App(s0,tail) => funty match {
@@ -425,7 +443,7 @@ protected[impl] case class Redex(body: Term, args: Spine) extends TermImpl {
       case _ => throw NotWellTypedException(this) // this should not happen if well-typed
     }
     case TyApp(s0,tail) => funty match {
-      case tt@(∀(_)) => ty0(tt.instantiate(s0), tail)
+      case tt@(PolyType(_)) => ty0(tt.instantiate(s0), tail)
       case _ => throw NotWellTypedException(this) // this should not happen if well-typed
     }
     case _ => throw new IllegalArgumentException("closure occured in term")// other cases do not apply
@@ -441,9 +459,9 @@ protected[impl] case class Redex(body: Term, args: Spine) extends TermImpl {
 
   lazy val symbolMap: Map[Signature.Key, (Count, Depth)] = fuseSymbolMap(body.asInstanceOf[TermImpl].symbolMap, args.symbolMap.view.mapValues{case (c,d) => (c,d+1)}.toMap)
   lazy val headSymbol = body.headSymbol
-  lazy val headSymbolDepth = 1 + body.headSymbolDepth
-  lazy val size = 1 + body.size + args.size
-  lazy val feasibleOccurrences = fuseMaps(fuseMaps(Map(this.asInstanceOf[Term] -> Set(Position.root)), body.feasibleOccurrences.view.mapValues(_.map(_.prependHeadPos)).toMap), args.feasibleOccurences)
+  lazy val headSymbolDepth: Int = 1 + body.headSymbolDepth
+  lazy val size: Int = 1 + body.size + args.size
+  lazy val feasibleOccurrences: Map[Term,Set[Position]] = fuseMaps(fuseMaps(Map(this.asInstanceOf[Term] -> Set(Position.root)), body.feasibleOccurrences.view.mapValues(_.map(_.prependHeadPos)).toMap), args.feasibleOccurences)
   // Other operations
   def etaExpand0: TermImpl = throw new IllegalArgumentException("this should not have happend. calling eta expand on not beta normalized term")
   def etaContract0: TermImpl = throw new IllegalArgumentException("this should not have happend. calling eta expand on not beta normalized term")
@@ -460,7 +478,7 @@ protected[impl] case class Redex(body: Term, args: Spine) extends TermImpl {
                                                     case _ => Redex(body, args.replaceAt(at, by))
                                                   }
 
-  final def normalize(termSubst: Subst, typeSubst: Subst) = normalize0(termSubst, typeSubst, termSubst, typeSubst)
+  final def normalize(termSubst: Subst, typeSubst: Subst): TermImpl = normalize0(termSubst, typeSubst, termSubst, typeSubst)
 
   @tailrec
   protected[impl] final def normalize0(headTermSubst: Subst, headTypeSubst: Subst, spineTermSubst: Subst, spineTypeSubst: Subst): TermImpl = args match {
@@ -482,11 +500,16 @@ protected[impl] case class Redex(body: Term, args: Spine) extends TermImpl {
   }
 
   /** Pretty */
-  final def pretty = s"[${body.pretty}] ⋅ (${args.pretty})"
+  final def pretty: String = s"[${body.pretty}] ⋅ (${args.pretty})"
   final def pretty(sig: Signature): String =  s"[${body.pretty(sig)}] ⋅ (${args.pretty(sig)})"
 }
 
 protected[impl] case class TermAbstr(typ: Type, body: Term) extends TermImpl {
+  override final lazy val hashCode: Int = scala.util.hashing.MurmurHash3.productHash(this, -777815312, true)
+  override final def equals(that: Any): Boolean = that match {
+    case o: TermAbstr => (this eq o) || (hashCode == o.hashCode && typ == o.typ && body == o.body)
+    case _ => false
+  }
   import TermImpl.mkTermAbstr
 
   final protected[impl] def markBetaNormal(): Unit = {
@@ -509,9 +532,9 @@ protected[impl] case class TermAbstr(typ: Type, body: Term) extends TermImpl {
   protected[impl] def flexHead0(depth: Int): Boolean = body.asInstanceOf[TermImpl].flexHead0(depth+1)
 
   // Handling def. expansion
-  final def δ_expandable(implicit sig: Signature) = body.δ_expandable(sig)
-  final def δ_expand(rep: Int)(implicit sig: Signature) = mkTermAbstr(typ, body.δ_expand(rep)(sig))
-  final def δ_expand(implicit sig: Signature) = mkTermAbstr(typ, body.δ_expand(sig))
+  final def δ_expandable(implicit sig: Signature): Boolean = body.δ_expandable(sig)
+  final def δ_expand(rep: Int)(implicit sig: Signature): TermImpl = mkTermAbstr(typ, body.δ_expand(rep)(sig))
+  final def δ_expand(implicit sig: Signature): TermImpl = mkTermAbstr(typ, body.δ_expand(sig))
   final def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = mkTermAbstr(typ, body.δ_expand_upTo(symbs)(sig))
 
   final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term,Seq[Signature.Key]) = {
@@ -521,15 +544,15 @@ protected[impl] case class TermAbstr(typ: Type, body: Term) extends TermImpl {
 
 
   // Queries on terms
-  lazy val ty = typ ->: body.ty
+  lazy val ty: Type = typ ->: body.ty
   lazy val fv: Set[(Int, Type)] = body.fv.map{case (i,t) => (i-1,t)}.filter(_._1 > 0)
   lazy val tyFV: Set[Int] = typ.typeVars.map(BoundType.unapply(_).get) union body.tyFV
   def vars0(depth: Int): (Multiset[Int],Set[Int]) = body.asInstanceOf[TermImpl].vars0(depth+1)
   lazy val symbolMap: Map[Signature.Key, (Count, Depth)] = body.asInstanceOf[TermImpl].symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap
   lazy val headSymbol = body.headSymbol
-  lazy val headSymbolDepth = 1 + body.headSymbolDepth
-  lazy val size = 1 + body.size
-  lazy val feasibleOccurrences = {
+  lazy val headSymbolDepth: Int = 1 + body.headSymbolDepth
+  lazy val size: Int = 1 + body.size
+  lazy val feasibleOccurrences: Map[Term,Set[Position]] = {
     val bodyOccurrences = body.feasibleOccurrences
     var filteredOccurrences: Map[Term, Set[Position]] = Map()
     val bodyOccIt = bodyOccurrences.iterator
@@ -595,17 +618,22 @@ protected[impl] case class TermAbstr(typ: Type, body: Term) extends TermImpl {
                                                 else
                                                   TermAbstr(typ, body.replaceAt(at.tail, by))
 
-  final def normalize(termSubst: Subst, typeSubst: Subst) =
+  final def normalize(termSubst: Subst, typeSubst: Subst): TermAbstr =
     TermAbstr(typ.substitute(typeSubst), body.asInstanceOf[TermImpl].normalize(termSubst.sink, typeSubst))
 
   /** Pretty */
-  final def pretty = s"λ[${typ.pretty}]. (${body.pretty})"
+  final def pretty: String = s"λ[${typ.pretty}]. (${body.pretty})"
   final def pretty(sig: Signature): String =  s"λ[${typ.pretty(sig)}]. (${body.pretty(sig)})"
 }
 
 protected[impl] case class TypeAbstr(body: Term) extends TermImpl {
+  override final lazy val hashCode: Int = scala.util.hashing.MurmurHash3.productHash(this, 1191903704, true)
+  override final def equals(that: Any): Boolean = that match {
+    case o: TypeAbstr => (this eq o) || (hashCode == o.hashCode && body == o.body)
+    case _ => false
+  }
   import TermImpl.mkTypeAbstr
-  import Type.∀
+  import Type.PolyType
 
   final protected[impl] def markBetaNormal(): Unit = {
     this.normal = true
@@ -627,9 +655,9 @@ protected[impl] case class TypeAbstr(body: Term) extends TermImpl {
   protected[impl] def flexHead0(depth: Int): Boolean = body.asInstanceOf[TermImpl].flexHead0(depth)
 
   // Handling def. expansion
-  final def δ_expandable(implicit sig: Signature) = body.δ_expandable(sig)
-  final def δ_expand(rep: Int)(implicit sig: Signature) = mkTypeAbstr(body.δ_expand(rep)(sig))
-  final def δ_expand(implicit sig: Signature) = mkTypeAbstr(body.δ_expand(sig))
+  final def δ_expandable(implicit sig: Signature): Boolean = body.δ_expandable(sig)
+  final def δ_expand(rep: Int)(implicit sig: Signature): TermImpl = mkTypeAbstr(body.δ_expand(rep)(sig))
+  final def δ_expand(implicit sig: Signature): TermImpl = mkTypeAbstr(body.δ_expand(sig))
   final def δ_expand_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): Term = mkTypeAbstr(body.δ_expand_upTo(symbs)(sig))
 
   final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term,Seq[Signature.Key]) = {
@@ -638,15 +666,15 @@ protected[impl] case class TypeAbstr(body: Term) extends TermImpl {
   }
 
   // Queries on terms
-  lazy val ty = ∀(body.ty)
+  lazy val ty: Type = mkPolyType(body.ty)
   lazy val fv: Set[(Int, Type)] = body.fv
   lazy val tyFV: Set[Int] = body.tyFV.map(_ - 1).filter(_ > 0)
   def vars0(depth: Int): (Multiset[Int],Set[Int]) = body.asInstanceOf[TermImpl].vars0(depth)
   lazy val symbolMap: Map[Signature.Key, (Count, Depth)] = body.asInstanceOf[TermImpl].symbolMap.view.mapValues {case (c,d) => (c,d+1)}.toMap
   lazy val headSymbol = body.headSymbol
-  lazy val headSymbolDepth = 1 + body.headSymbolDepth
+  lazy val headSymbolDepth: Int = 1 + body.headSymbolDepth
 
-  lazy val size = 1 + body.size
+  lazy val size: Int = 1 + body.size
   lazy val feasibleOccurrences = body.feasibleOccurrences // FIXME
 
   // Other operations
@@ -663,11 +691,11 @@ protected[impl] case class TypeAbstr(body: Term) extends TermImpl {
                                                 else
                                                   TypeAbstr(body.replaceAt(at.tail, by))
 
-  final def normalize(termSubst: Subst, typeSubst: Subst) =
+  final def normalize(termSubst: Subst, typeSubst: Subst): TypeAbstr =
     TypeAbstr(body.asInstanceOf[TermImpl].normalize(termSubst, typeSubst.sink))
 
   /** Pretty */
-  final def pretty = s"Λ. (${body.pretty})"
+  final def pretty: String = s"Λ. (${body.pretty})"
   final def pretty(sig: Signature): String =   s"Λ. (${body.pretty(sig)})"
 }
 
@@ -689,7 +717,7 @@ protected[impl] case class TermClos(term: Term, σ: (Subst, Subst)) extends Term
   @inline final val isTermAbs = false
   @inline final val isTypeAbs = false
   @inline final val isApp = false
-  protected[impl] def flexHead0(depth: Int): Boolean = this.betaNormalize.asInstanceOf[TermImpl].flexHead0(depth)
+  protected[impl] def flexHead0(depth: Int): Boolean = betaNF.flexHead0(depth)
 
   // Handling def. expansion
   def δ_expandable(implicit sig: Signature) = false // TODO
@@ -699,31 +727,42 @@ protected[impl] case class TermClos(term: Term, σ: (Subst, Subst)) extends Term
 
   def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(implicit sig: Signature): (Term,Seq[Signature.Key]) = ???
 
+  /* Every query below used to beta-normalise the closure afresh: applying the
+   * substitution, inserting the result into the shared term bank, and throwing
+   * it away again.  A closure is a term and a substitution, both immutable, so
+   * its normal form is the same every time it is asked for.  It is now asked
+   * for once.
+   *
+   * That this matters is a consequence of fixing Term.symbolMap to descend
+   * into the arguments of a term whose head is a bound variable: symbolMap is
+   * one of these queries, and the orderings that choose the given clause ask
+   * for it constantly. */
+  private[this] lazy val betaNF: TermImpl = betaNormalize.asInstanceOf[TermImpl]
 
   // Queries on terms
   final def ty = term.ty
-  final def fv: Set[(Int, Type)] = betaNormalize.fv
-  final def tyFV: Set[Int] = betaNormalize.tyFV
-  def vars0(depth: Int): (Multiset[Int], Set[Int]) = betaNormalize.asInstanceOf[TermImpl].vars0(depth)
-  final def symbolMap: Map[Signature.Key, (Count, Depth)] = betaNormalize.asInstanceOf[TermImpl].symbolMap
-  final def headSymbol = betaNormalize.headSymbol
-  final def headSymbolDepth = 1 + term.headSymbolDepth
-  final def feasibleOccurrences = betaNormalize.feasibleOccurrences
+  final def fv: Set[(Int, Type)] = betaNF.fv
+  final def tyFV: Set[Int] = betaNF.tyFV
+  def vars0(depth: Int): (Multiset[Int], Set[Int]) = betaNF.vars0(depth)
+  final def symbolMap: Map[Signature.Key, (Count, Depth)] = betaNF.symbolMap
+  final def headSymbol = betaNF.headSymbol
+  final def headSymbolDepth: Int = 1 + term.headSymbolDepth
+  final def feasibleOccurrences = betaNF.feasibleOccurrences
   final def size = term.size // this might not be reasonable, but will never occur when used properly
 
   // Other operations
-  final def etaExpand0: TermImpl = betaNormalize.asInstanceOf[TermImpl].etaExpand0
+  final def etaExpand0: TermImpl = betaNF.etaExpand0
 
-  final def etaContract0: TermImpl = betaNormalize.asInstanceOf[TermImpl].etaContract0
+  final def etaContract0: TermImpl = betaNF.etaContract0
 
   final def replace(what: Term, by: Term): Term = betaNormalize.replace(what, by)
   final def replaceAt(at: Position, by: Term): Term = betaNormalize.replaceAt(at, by)
 
-  final def normalize(termSubst: Subst, typeSubst: Subst) =
+  final def normalize(termSubst: Subst, typeSubst: Subst): TermImpl =
     term.asInstanceOf[TermImpl].normalize(σ._1 o termSubst, σ._2 o typeSubst)
 
   /** Pretty */
-  final def pretty = s"${term.pretty}[${σ._1.pretty}/${σ._2.pretty}]"
+  final def pretty: String = s"${term.pretty}[${σ._1.pretty}/${σ._2.pretty}]"
   final def pretty(sig: Signature): String =   s"${term.pretty(sig)}[${σ._1.pretty}/${σ._2.pretty}]"
 }
 
@@ -743,7 +782,13 @@ protected[impl] sealed abstract class Head extends Pretty with Prettier {
 
   // Queries
   def ty: Type
-  final def toTerm: Term = mkRoot(this, mkSpineNil)
+  /* Every pattern match on an application (TermImpl.appMatcher) turns the head
+     back into a term, and mkRoot answered that with a lookup in the shared
+     table each time -- with the head's hash code, recomputed for a BoundIndex,
+     at every call.  The answer for a given head is always the same shared root,
+     so it is kept.  Keeping it also keeps that root alive, which the table holds
+     only weakly; it would otherwise be rebuilt equal, not different. */
+  final lazy val toTerm: Term = mkRoot(this, mkSpineNil)
 
   // Handling def. expansion
   def defExpandable(sig: Signature): Boolean
@@ -752,6 +797,15 @@ protected[impl] sealed abstract class Head extends Pretty with Prettier {
 }
 
 protected[impl] final case class BoundIndex(ty: Type, scope: Int) extends Head {
+  /* The generated equality compares the type first and the index second.  The
+     index is an integer and differs far more often; asking it first spares the
+     type comparison (18 per cent of the samples on the ontological-argument
+     problems).  Same answer, other order; the hash code stays the generated one. */
+  override final def equals(that: Any): Boolean = that match {
+    case o: BoundIndex => (this eq o) || (scope == o.scope && ty == o.ty)
+    case _ => false
+  }
+  override final lazy val hashCode: Int = scala.runtime.Statics.finalizeHash(scala.runtime.Statics.mix(scala.runtime.Statics.mix(scala.runtime.Statics.mix(-889275714, 676272660), scala.runtime.Statics.anyHash(ty)), scope), 2)
   // Predicates
   @inline override def isBound = true
   @inline override def isConstant = false
@@ -978,20 +1032,20 @@ protected[impl] case object SNil extends Spine {
   final def feasibleOccurrences0(pos: Int) = Map.empty
 
   // Misc
-  final def merge(subst: (Subst, Subst), sp: Spine, spSubst: (Subst, Subst)) = SpineClos(sp, spSubst)
+  final def merge(subst: (Subst, Subst), sp: Spine, spSubst: (Subst, Subst)): SpineClos = SpineClos(sp, spSubst)
   final def ++(sp: Spine) = sp
 
-  final def drop(n: Int) = n match {
+  final def drop(n: Int): Spine = n match {
     case 0 => SNil
     case _ => throw new IllegalArgumentException("Trying to drop elements from nil spine.")
   }
-  final def dropRight0(n: Int, length: Int) = n match {
+  final def dropRight0(n: Int, length: Int): Spine = n match {
     case 0 => SNil
     case _ => throw new IllegalArgumentException("Trying to drop elements from nil spine.")
   }
 
-  final def last = throw new IllegalArgumentException("Trying to access last element of Nil")
-  final def init = throw new IllegalArgumentException("Trying to access init of Nil")
+  final def last: Either[Term,Type] = throw new IllegalArgumentException("Trying to access last element of Nil")
+  final def init: Spine = throw new IllegalArgumentException("Trying to access init of Nil")
   final def replace(what: Term, by: Term): Spine = SNil
   final def replaceAt0(pos: Int, tail: Position, by: Term): Spine = SNil
 
@@ -1003,6 +1057,11 @@ protected[impl] case object SNil extends Spine {
 }
 
 protected[impl] case class App(hd: Term, tail: Spine) extends Spine {
+  override final lazy val hashCode: Int = scala.util.hashing.MurmurHash3.productHash(this, 641717582, true)
+  override final def equals(that: Any): Boolean = that match {
+    case o: App => (this eq o) || (hashCode == o.hashCode && hd == o.hd && tail == o.tail)
+    case _ => false
+  }
   import TermImpl.{mkSpineCons => cons}
 
   protected[impl] def markBetaNormal(): Unit = {
@@ -1014,7 +1073,7 @@ protected[impl] case class App(hd: Term, tail: Spine) extends Spine {
     tail.markBetaEtaNormal()
   }
 
-  def normalize(termSubst: Subst, typeSubst: Subst) = {
+  def normalize(termSubst: Subst, typeSubst: Subst): Spine = {
 //    if (isIndexed) { // TODO: maybe optimize re-normalization if term is indexed?
 //      ???
 //    } else {
@@ -1026,10 +1085,10 @@ protected[impl] case class App(hd: Term, tail: Spine) extends Spine {
   def etaContract: Spine = App(hd.asInstanceOf[TermImpl].etaContract0, tail.etaContract)
 
   // Handling def. expansion
-  @inline final def δ_expandable(sig: Signature) = hd.δ_expandable(sig) || tail.δ_expandable(sig)
-  @inline final def δ_expand(rep: Int)(sig: Signature) = cons(Left(hd.δ_expand(rep)(sig)), tail.δ_expand(rep)(sig))
-  @inline final def δ_expand(sig: Signature) = cons(Left(hd.δ_expand(sig)), tail.δ_expand(sig))
-  @inline final def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature) = cons(Left(hd.δ_expand_upTo(symbs)(sig)), tail.δ_expand_upTo(symbs)(sig))
+  @inline final def δ_expandable(sig: Signature): Boolean = hd.δ_expandable(sig) || tail.δ_expandable(sig)
+  @inline final def δ_expand(rep: Int)(sig: Signature): Spine = cons(Left(hd.δ_expand(rep)(sig)), tail.δ_expand(rep)(sig))
+  @inline final def δ_expand(sig: Signature): Spine = cons(Left(hd.δ_expand(sig)), tail.δ_expand(sig))
+  @inline final def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature): Spine = cons(Left(hd.δ_expand_upTo(symbs)(sig)), tail.δ_expand_upTo(symbs)(sig))
 
   @inline final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(sig: Signature): (Spine, Seq[Signature.Key]) = {
     val (expHd, expSymolsHd) = hd.δ_expand_andTrack_upTo(symbs)(sig)
@@ -1046,26 +1105,26 @@ protected[impl] case class App(hd: Term, tail: Spine) extends Spine {
     (headVars._1 sum tailVars._1, headVars._2 union tailVars._2)
   }
   lazy val symbolMap: Map[Signature.Key, (Int, Int)] = hd.asInstanceOf[TermImpl].fuseSymbolMap(hd.asInstanceOf[TermImpl].symbolMap, tail.symbolMap)
-  lazy val length = 1 + tail.length
-  lazy val asTerms = Left(hd) +: tail.asTerms
-  lazy val size = 1+ hd.size + tail.size
-  def feasibleOccurrences0(pos: Int) = fuseMaps(hd.feasibleOccurrences.view.mapValues(_.map(_.preprendArgPos(pos))).toMap, tail.feasibleOccurrences0(pos+1))
+  lazy val length: Int = 1 + tail.length
+  lazy val asTerms: Seq[Either[Term,Type]] = Left(hd) +: tail.asTerms
+  lazy val size: Int = 1+ hd.size + tail.size
+  def feasibleOccurrences0(pos: Int): Map[Term,Set[Position]] = fuseMaps(hd.feasibleOccurrences.view.mapValues(_.map(_.preprendArgPos(pos))).toMap, tail.feasibleOccurrences0(pos+1))
 
   // Misc
-  def merge(subst: (Subst, Subst), sp: Spine, spSubst: (Subst, Subst)) = App(TermClos(hd, subst), tail.merge(subst, sp, spSubst))
-  def ++(sp: Spine) = cons(Left(hd), tail ++ sp)
+  def merge(subst: (Subst, Subst), sp: Spine, spSubst: (Subst, Subst)): App = App(TermClos(hd, subst), tail.merge(subst, sp, spSubst))
+  def ++(sp: Spine): Spine = cons(Left(hd), tail ++ sp)
 
-  final def drop(n: Int) = n match {
+  final def drop(n: Int): Spine = n match {
     case 0 => this
     case _ => tail.drop(n-1)
   }
-  final def dropRight0(n: Int, length: Int) = if (length == n) SNil
+  final def dropRight0(n: Int, length: Int): Spine = if (length == n) SNil
   else App(hd, tail.dropRight0(n,length-1))
-  lazy val last = tail match {
+  lazy val last: Either[Term,Type] = tail match {
     case SNil => Left(hd)
     case _ => tail.last
   }
-  lazy val init = tail match {
+  lazy val init: Spine = tail match {
     case App(_,SNil) => App(hd, SNil)
     case TyApp(_,SNil) => App(hd, SNil)
     case _ => App(hd, tail.init)
@@ -1085,11 +1144,16 @@ protected[impl] case class App(hd: Term, tail: Spine) extends Spine {
   final def substitute(subst: Subst): Spine = App(hd.substitute(subst), tail.substitute(subst))
 
   // Pretty printing
-  final def pretty = s"${hd.pretty};${tail.pretty}"
-  final def pretty(sig: Signature) = s"${hd.pretty(sig)};${tail.pretty(sig)}"
+  final def pretty: String = s"${hd.pretty};${tail.pretty}"
+  final def pretty(sig: Signature): String = s"${hd.pretty(sig)};${tail.pretty(sig)}"
 }
 
 protected[impl] case class TyApp(hd: Type, tail: Spine) extends Spine {
+  override final lazy val hashCode: Int = scala.util.hashing.MurmurHash3.productHash(this, -244798555, true)
+  override final def equals(that: Any): Boolean = that match {
+    case o: TyApp => (this eq o) || (hashCode == o.hashCode && hd == o.hd && tail == o.tail)
+    case _ => false
+  }
   import TermImpl.{mkSpineCons => cons}
 
   final protected[impl] def markBetaNormal(): Unit = {
@@ -1099,17 +1163,17 @@ protected[impl] case class TyApp(hd: Type, tail: Spine) extends Spine {
     tail.markBetaEtaNormal()
   }
 
-  def normalize(termSubst: Subst, typeSubst: Subst) = {
+  def normalize(termSubst: Subst, typeSubst: Subst): Spine = {
     cons(Right(hd.substitute(typeSubst)), tail.normalize(termSubst, typeSubst))
   }
   lazy val etaExpand: Spine = TyApp(hd,  tail.etaExpand)
   def etaContract: Spine = TyApp(hd, tail.etaContract)
 
   // Handling def. expansion
-  @inline final def δ_expandable(sig: Signature) = tail.δ_expandable(sig)
-  @inline final def δ_expand(rep: Int)(sig: Signature) = cons(Right(hd), tail.δ_expand(rep)(sig))
-  @inline final def δ_expand(sig: Signature) = cons(Right(hd), tail.δ_expand(sig))
-  @inline final def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature) = cons(Right(hd), tail.δ_expand_upTo(symbs)(sig))
+  @inline final def δ_expandable(sig: Signature): Boolean = tail.δ_expandable(sig)
+  @inline final def δ_expand(rep: Int)(sig: Signature): Spine = cons(Right(hd), tail.δ_expand(rep)(sig))
+  @inline final def δ_expand(sig: Signature): Spine = cons(Right(hd), tail.δ_expand(sig))
+  @inline final def δ_expand_upTo(symbs: Set[Signature.Key])(sig: Signature): Spine = cons(Right(hd), tail.δ_expand_upTo(symbs)(sig))
 
   @inline final def δ_expand_andTrack_upTo(symbs: Set[Signature.Key])(sig: Signature): (Spine,Seq[Signature.Key]) = {
     val (expTail, expSymbolsTail) = tail.δ_expand_andTrack_upTo(symbs)(sig)
@@ -1121,27 +1185,27 @@ protected[impl] case class TyApp(hd: Type, tail: Spine) extends Spine {
   lazy val tyFV: Set[Int] = tail.tyFV union hd.typeVars.map(BoundType.unapply(_).get)
   def vars0(depth: Int): (Multiset[Int], Set[Int]) = tail.vars0(depth)
   lazy val symbolMap: Map[Signature.Key, (Int, Int)] = tail.symbolMap
-  lazy val length = 1 + tail.length
-  lazy val asTerms = Right(hd) +: tail.asTerms
-  lazy val size = 1 + tail.size
-  final def feasibleOccurrences0(pos: Int) = tail.feasibleOccurrences0(pos+1)
+  lazy val length: Int = 1 + tail.length
+  lazy val asTerms: Seq[Either[Term,Type]] = Right(hd) +: tail.asTerms
+  lazy val size: Int = 1 + tail.size
+  final def feasibleOccurrences0(pos: Int): Map[Term,Set[Position]] = tail.feasibleOccurrences0(pos+1)
 
   // Misc
-  def merge(subst: (Subst, Subst), sp: Spine, spSubst: (Subst, Subst)) = TyApp(hd.substitute(subst._2), tail.merge(subst, sp, spSubst))
-  def ++(sp: Spine) = cons(Right(hd), tail ++ sp)
+  def merge(subst: (Subst, Subst), sp: Spine, spSubst: (Subst, Subst)): TyApp = TyApp(hd.substitute(subst._2), tail.merge(subst, sp, spSubst))
+  def ++(sp: Spine): Spine = cons(Right(hd), tail ++ sp)
 
-  final def drop(n: Int) = n match {
+  final def drop(n: Int): Spine = n match {
     case 0 => this
     case _ => tail.drop(n-1)
   }
-  final def dropRight0(n: Int, length: Int) = if (length == n) SNil
+  final def dropRight0(n: Int, length: Int): Spine = if (length == n) SNil
   else TyApp(hd, tail.dropRight0(n,length-1))
-  lazy val last = tail match {
+  lazy val last: Either[Term,Type] = tail match {
     case SNil => Right(hd)
     case _ => tail.last
   }
 
-  lazy val init = tail match {
+  lazy val init: Spine = tail match {
     case App(_,SNil) => TyApp(hd, SNil)
     case TyApp(_,SNil) => TyApp(hd, SNil)
     case _ => TyApp(hd, tail.init)
@@ -1155,8 +1219,8 @@ protected[impl] case class TyApp(hd: Type, tail: Spine) extends Spine {
   final def substitute(subst: Subst): Spine = TyApp(hd, tail.substitute(subst))
 
   // Pretty printing
-  final def pretty = s"${hd.pretty};${tail.pretty}"
-  final def pretty(sig: Signature) = s"${hd.pretty(sig)};${tail.pretty(sig)}"
+  final def pretty: String = s"${hd.pretty};${tail.pretty}"
+  final def pretty(sig: Signature): String = s"${hd.pretty(sig)};${tail.pretty(sig)}"
 }
 
 
@@ -1170,7 +1234,7 @@ protected[impl] case class SpineClos(sp: Spine, s: (Subst, Subst)) extends Spine
     throw new IllegalArgumentException("Marked Spine closure as beta-eta-normal.")
   }
 
-  def normalize(termSubst: Subst, typeSubst: Subst) = {
+  def normalize(termSubst: Subst, typeSubst: Subst): Spine = {
     sp.normalize(s._1 o termSubst, s._2 o typeSubst)
   }
   lazy val etaExpand: Spine = ???
@@ -1195,7 +1259,7 @@ protected[impl] case class SpineClos(sp: Spine, s: (Subst, Subst)) extends Spine
   def feasibleOccurrences0(pos: Int) = Map.empty
 
   // Misc
-  def merge(subst: (Subst, Subst), sp: Spine, spSubst: (Subst, Subst)) = sp.merge((s._1 o subst._1,s._2 o subst._2),sp, spSubst)
+  def merge(subst: (Subst, Subst), sp: Spine, spSubst: (Subst, Subst)): Spine = sp.merge((s._1 o subst._1,s._2 o subst._2),sp, spSubst)
   def ++(sp: Spine) = ???
 
   def drop(n: Int) = ???
@@ -1209,8 +1273,8 @@ protected[impl] case class SpineClos(sp: Spine, s: (Subst, Subst)) extends Spine
   def substitute(subst: Subst): Spine = ???
 
   // Pretty printing
-  final def pretty = s"(${sp.pretty}[${s._1.pretty}/${s._2.pretty}])"
-  final def pretty(sig: Signature) = s"(${sp.pretty(sig)}[${s._1.pretty}/${s._2.pretty}])"
+  final def pretty: String = s"(${sp.pretty}[${s._1.pretty}/${s._2.pretty}])"
+  final def pretty(sig: Signature): String = s"(${sp.pretty(sig)}[${s._1.pretty}/${s._2.pretty}])"
 }
 
 

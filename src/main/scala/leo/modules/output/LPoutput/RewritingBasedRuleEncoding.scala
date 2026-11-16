@@ -57,16 +57,16 @@ object RewritingBasedRuleEncoding {
       * instances in one pass.
       *
       * The returned context contains both the encoded clauses and the proof
-      * names that will later be used to refine with the parent proofs.
+      * terms that will later be used to refine with the parent proofs.
       */
     def initRewriteRuleCtxt(childCl: Clause,
                             parentCl: Clause,
                             finalResultCl: RawClause,
                             rewriteRuleCls: Seq[RawClause],
-                            parentNameLpEnc0: Name,
-                            rewriteRuleNameLpEnc0: Seq[Name]): EncRewriteCtx = {
+                            parentNameLpEnc0: LpTerm[Level.Obj],
+                            rewriteRuleNameLpEnc0: Seq[LpTerm[Level.Obj]]): EncRewriteCtx = {
       require(rewriteRuleCls.length == rewriteRuleNameLpEnc0.length,
-        "Each rewrite-rule clause must have a corresponding Lambdapi proof name")
+        "Each rewrite-rule clause must have a corresponding Lambdapi proof term")
 
       val allClauses = Seq(childCl, parentCl)
       val rawClauseVars = (Seq(finalResultCl) ++ rewriteRuleCls).flatMap(_.implicitlyBound)
@@ -81,7 +81,7 @@ object RewritingBasedRuleEncoding {
         RawClauseEncoding.clause2Lp(rewriteRule, sharedVarMap, suppressReduction = true)
       }
 
-      EncRewriteCtx(encChild, encParent, encFinalResult, encRewriteRules, sharedVarMap, proofName(parentNameLpEnc0), rewriteRuleNameLpEnc0.map(proofName)
+      EncRewriteCtx(encChild, encParent, encFinalResult, encRewriteRules, sharedVarMap, parentNameLpEnc0, rewriteRuleNameLpEnc0
       )
     }
 
@@ -236,9 +236,12 @@ object RewriteSimpEncoding {
     *    final raw result. Replay every recorded occurrence with a focused
     *    rewrite in Leo's order, then close modulo beta/eta conversion.
     *
-    * 5. Apply the local implication to the instantiated parent proof.
+    * 5. Apply the local implication to the instantiated parent proof. If some
+    *    parent variables disappear from the child, first prove the child under
+    *    those variables and then instantiate that local proof with witnesses.
     */
-  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], Int)], parentNameLpEnc: Seq[Name], _sig: LpSig): EncodeResult = {
+  def encRewrite(cl: ClauseProxy, parents: Seq[ClauseProxy], addInfoSimp: Seq[(Seq[Int], Int)], parentNameLpEnc: Seq[LpTerm[Level.Obj]], _sig: LpSig,
+                 useTypedIntroduction: Boolean = false): EncodeResult = {
     Out.lp_debug_info("Encoding instance of rewrite simplification")
     assert(parents.length == parentNameLpEnc.length)
 
@@ -282,7 +285,7 @@ object RewriteSimpEncoding {
     val ctxt = initRewriteRuleCtxt(cl.cl, parent.cl, finalRawResult, preparedRewriteUses.map(_.instantiatedRule), sourceBeforeParent, rewriteRuleSourceNames)
     val EncRewriteCtx(encChild, encParent, encFinalResult, encRewriteRules, sharedVarMap, parentNameLpEnc0, rewriteRuleNamesLpEnc) = ctxt
 
-    Out.lp_debug_info(s"Encoding application or RW-rule on ${sourceBeforeParent.value}")
+    Out.lp_debug_info(s"Encoding application or RW-rule on ${sourceBeforeParent}")
     Out.lp_debug_info(s"Found ${rewriteUses.length} recorded rewrite rule use(s)")
 
     val initialReasons = mutable.LinkedHashSet.empty[String]
@@ -334,6 +337,10 @@ object RewriteSimpEncoding {
       // Replay the rewrite under the variables that disappear from the child,
       // then instantiate that local proof with witnesses. This keeps each such
       // variable consistent across the rewrite-rule instance and main parent.
+      // TODO: The local proof may be avoidable by substituting the same witness
+      // for each disappearing variable throughout the rule proofs, rewrite
+      // patterns, implication, and parent application. Validate this for
+      // occurrences whose recorded redex contains a disappearing variable.
       val localProofName = Name("RewriteWithParentVars")
       val disappearingBinders = disappearingParentVars.map { case (index, ty) =>
         Lifting.OlVarM(var2Lp(index, ty, sharedVarMap))
@@ -395,7 +402,7 @@ object RewriteSimpEncoding {
     }
 
     // prepare the pattern context at applied position
-    val patternContext = PatternBuilder.prepareClausePositionPattern(rewrittenParent, rewriteUse.occurrence) match {
+    val patternContext = prepareRewriteOccurrenceContext(rewrittenParent, rewriteUse.occurrence) match {
       case Left(reason) => return Left(reason)
       case Right(context) => context
     }
@@ -404,6 +411,17 @@ object RewriteSimpEncoding {
       val clausePattern = patternContext.plug(pattern)
       val implicationPattern = PatternBuilder.embedPatternInBinaryConnective(clausePattern, Side.Left, LogicConst.Imp.apply)
       (state2, FocusedRewrite(implicationPattern, pointwise.proof))
+    }
+  }
+
+  /** Prepare a recorded RewriteSimp occurrence and check its expected redex. */
+  private def prepareRewriteOccurrenceContext(clause: Clause,
+                                              occurrence: RewriteOccurrence): Either[String, PatternBuilder.ClausePositionPatternContext] = {
+    val position = ClausePosition(clause, occurrence.literalIndex, occurrence.side, occurrence.position)
+    PatternBuilder.prepareClausePositionPattern(position).flatMap { context =>
+      if (context.selectedTerm != occurrence.redex)
+        Left(s"RW: Recorded redex does not match the subterm at position ${occurrence.position.pretty}")
+      else Right(context)
     }
   }
 

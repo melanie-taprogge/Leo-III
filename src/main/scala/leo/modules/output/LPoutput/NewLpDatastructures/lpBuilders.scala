@@ -121,6 +121,12 @@ object lpTermBuilder {
   def lam(binders: Seq[Var[Level.Obj]], body: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
     binders.foldRight(body) { case (v, acc) => LpTerm.Lam[Level.Obj](v.name -> v.ty, acc) }
 
+  /** Universally quantify an object-level body, with the first variable outermost.
+    * An empty prefix leaves the body unchanged; binders must carry HOL types.
+    */
+  def forall(binders: Seq[Var[Level.Obj]], body: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    binders.foldRight(body) { case (v, rest) => Forall(v.name -> LpType.El(olTy(v)), rest) }
+
   /** Wrap a meta-level type in Π binders over the given object variables. */
   def pi(binders: Seq[Var[Level.Obj]], body: LpType): LpType =
     if (binders.isEmpty) body else Pi(binders.map(Lifting.OlVarM(_)), body)

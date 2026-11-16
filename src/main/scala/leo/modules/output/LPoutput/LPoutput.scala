@@ -1,8 +1,8 @@
 package leo.modules.output.LPoutput
 
-import leo.{Out, modules}
+import leo.{Configuration, Out, modules}
 import leo.datastructures.Term.Integer
-import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_NegConjecture, Signature, isPropSet}
+import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Term, isPropSet}
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
 import leo.modules.prover.LocalState
@@ -10,8 +10,7 @@ import leo.modules.{numbersInProof, saturatedUserSignature, symbolsInProof}
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
 import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{lpDne, tempLib, tempLibDeps}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
-import leo.modules.output.LPoutput.ModularProofEncoding.CnfConjEncoding.encCnfConj
-import leo.modules.output.LPoutput.ModularProofEncoding.RwCnfEncoding.encRenameCnf_conj
+import leo.modules.output.LPoutput.ClausificationEncoding.{encCnf, encCnfConj, encSkolem, useReflectiveCnfBooleanBridges}
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Obj, Wildcard}
@@ -21,6 +20,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.nameGeneration.nameInt
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.TimeUnit
 import scala.collection.mutable
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, ClauseEncoding, DefEncoding, HolBaseTypes, Level, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, Prefix, QName, RenderOptions, Renderer, Stmt, SymRef, TermEncoding, TypeEncoding, tptpConstMappings}
 import leo.modules.output.LPoutput.UnificationEncoding.encodePatternUni
@@ -36,12 +36,20 @@ object LPoutput {
 
   val outputSingleFile = false
 
+  // Provisional threshold shared by explicit printing and typed variable introduction.
+  private val explicitTypesVariableThreshold = 50
+  private val defaultStandaloneSubproofThreshold = 15
+
+  private def useLargeContextEncoding(variableCount: Int, gdvMode: Boolean): Boolean =
+    !gdvMode && variableCount >= explicitTypesVariableThreshold
+
   val permlibFile = "MetaTheorems"
   val calcRuleLibFile = "EPrules"
   val leoSimpTacticFile = "UserTactic"
   val tptpArithmeticFile = "TptpArithmatic"
   val nameLeoIIILPlib = "Leo-III-lambdapi-lib"
   val nameProofFile = "encodedProof"
+  private val nameAuxiliaryFile = "Auxiliary"
   val nameSignatureFile = "Signature"
   val abbreviationSignatureFileNoDot = "S"
   val abbreviationSignatureFile = if (outputSingleFile) "" else abbreviationSignatureFileNoDot + "."
@@ -60,6 +68,9 @@ object LPoutput {
   val simpTacLibStr = f"${nameLeoIIILPlib}.${leoSimpTacticFile}"
   val tptpArithmeticLibStr = f"${nameLeoIIILPlib}.${tptpArithmeticFile}"
   val calcRuleLibStr = f"${nameLeoIIILPlib}.${calcRuleLibFile}"
+  private def cnfReflectionImport: String =
+    if (useReflectiveCnfBooleanBridges) s"require open $nameLeoIIILPlib.CNF;\n" else ""
+
   val gdvRequireOpenLine: String =
     s"require open $calcRuleLibStr $permLibStr $simpTacLibStr $tptpArithmeticLibStr Stdlib.Epsilon Stdlib.Disj Stdlib.Conj Stdlib.String;"
 
@@ -68,54 +79,78 @@ object LPoutput {
     var defRuleDefined: Boolean = false
   }
 
-  final class lpProofStepInfo (val clausifiedSteps: Map[lpConstantTerm, lpConstantTerm] = Map.empty,
-                               val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty,
+  final class lpProofStepInfo (val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty,
                                val additionalDefinedSymbols: Set[Signature.Key] = Set.empty) //todo: remove additionalDefinedSymbols
 
-  def toProofStepOld(stepName: String, encStep: LpType, ruleName: String, proofTerm: lpProofScriptStep, notEncoded: Option[String]): Option[(LpProofScript.Comment, LpProofScript)] = {
-    toProofStepOld(stepName, encStep, ruleName, Right(proofTerm), notEncoded)
+  /** A source step's proof, before assembly chooses its declaration wrapper. */
+  final case class EncodedProofStep(source: ClauseProxy,
+                                    name: Name,
+                                    ty: LpType,
+                                    body: LpProofScript.Body,
+                                    comment: LpProofScript.Comment,
+                                    admittedWholesale: Boolean,
+                                    auxiliaryLemmas: Seq[Stmt.Definition] = Seq.empty) {
+    /** Number of clause term variables, excluding binders inside formulas. */
+    def variableCount: Int = source.cl.implicitlyBound.size
   }
 
-    def toProofStepOld(stepName: String, encStep: LpType, ruleName: String, proofTerm: Either[Seq[LpProofScript], lpProofScriptStep], notEncoded: Option[String]): Option[(LpProofScript.Comment,LpProofScript)] = {
-    if (notEncoded.isDefined) {
-      // if the step is actually new, we want to add it to the output
-      // add substeps for which the encoding is not implemented using the "admit" tactic
-      Out.lp_debug_info(s"Not encoded yet (${notEncoded.get})\n")
-      //val proofScript = lpHave(stepName, encStep, lpProofScript(Seq(lpProofScriptAdmit())))
-      val proofScript = LpProofScript.Have(Name(stepName),encStep,Seq(Left(LpProofScript.Admit)))
-      Some((LpProofScript.Comment(s"Unencoded step ($ruleName): " + notEncoded.get), proofScript))
-    } else {
-      Out.lp_debug_info(s"Encoding finished!\n")
-      // add the encoded proofs to the overall proof as substeps
-      val proofScript = proofTerm match {
-        case Left(newScr) => LpProofScript.Have(Name(stepName),encStep,newScr.map(step => Left(step)))
-        case Right(oldScr) => LpProofScript.Have(Name(stepName),encStep,Seq(Right(oldScr)))
-      }
-      Some((LpProofScript.Comment(ruleName), proofScript))
-      // and add the necessary symbols to the generated Signature
+  final case class ProofStepCounts(total: Int, admitted: Int)
+
+  /** Package a legacy script fragment through the common step-result builder.
+    * A fragment may itself be an entire legacy `lpProofScript`.
+    */
+  def toProofStepOld(step: ClauseProxy, encStep: LpType, ruleName: String, proofTerm: lpProofScriptStep, notEncoded: Option[String]): Option[EncodedProofStep] = {
+    toProofStepOld(step, encStep, ruleName, Right(proofTerm), notEncoded)
+  }
+
+  /** Build a proof-step result without choosing its surrounding declaration.
+    *
+    * @param step original source node, retaining its identity, parents, and metadata
+    * @param encStep encoded child type, including the clause's variable binders
+    * @param ruleName rule label used in the generated diagnostic comment
+    * @param proofTerm either a sequence of new tactics (`Left`) or a legacy fragment (`Right`)
+    * @param notEncoded an unsupported-case reason; when present, replace the supplied
+    *                   script with an explicit `admit` and retain the reason in the comment
+    * @return an emitted step record; equivalent-step elision is handled by `step2LP`
+    */
+  def toProofStepOld(step: ClauseProxy, encStep: LpType, ruleName: String, proofTerm: Either[Seq[LpProofScript], lpProofScriptStep], notEncoded: Option[String]): Option[EncodedProofStep] = {
+    val (body, comment) = notEncoded match {
+      case Some(reason) =>
+        // Preserve an unsupported occurrence visibly, rather than using a partial script.
+        Out.lp_debug_info(s"Not encoded yet ($reason)\n")
+        (Seq(Left(LpProofScript.Admit)), LpProofScript.Comment(s"Unencoded step ($ruleName): " + reason))
+      case None =>
+        Out.lp_debug_info(s"Encoding finished!\n")
+        // Keep the scripts structured; legacy fragments retain their own nested tactics.
+        val scripts: LpProofScript.Body = proofTerm match {
+          case Left(newScript) => newScript.map(Left(_))
+          case Right(oldScript) => Seq(Right(oldScript))
+        }
+        (scripts, LpProofScript.Comment(ruleName))
     }
+    // Assembly later chooses a local Have for GDV or a standalone package lemma.
+    Some(EncodedProofStep(step, nameStep_new(step.id).local, encStep, body, comment,
+      admittedWholesale = notEncoded.isDefined))
   }
 
-  def toProofStep(stepName: String, encStep: LpType, ruleName: String, proofTerm: lpProofScriptStep, notEncoded: Option[String]): Option[(LpProofScript.Comment, LpProofScript)] = {
-    toProofStepOld(stepName, encStep, ruleName, Right(proofTerm), notEncoded)
+  /** Legacy-script overload of `toProofStep`, sharing the same diagnostics and
+    * unsupported-case handling as `toProofStepOld`.
+    */
+  def toProofStep(step: ClauseProxy, encStep: LpType, ruleName: String, proofTerm: lpProofScriptStep, notEncoded: Option[String]): Option[EncodedProofStep] = {
+    toProofStepOld(step, encStep, ruleName, Right(proofTerm), notEncoded)
   }
 
-  def toProofStep(stepName: String, encStep: LpType, ruleName: String, proofTerm: Either[LpProofScript, lpProofScriptStep], notEncoded: Option[String]): Option[(LpProofScript.Comment, LpProofScript)] = {
-    // todo: use the new trait for results rather than optional stirngs
-    if (notEncoded.isDefined) {
-      // if the step is actually new, we want to add it to the output
-      // add substeps for which the encoding is not implemented using the "admit" tactic
-      Out.lp_debug_info(s"Not encoded yet (${notEncoded.get})\n")
-      //val proofScript = lpHave(stepName, encStep, lpProofScript(Seq(lpProofScriptAdmit())))
-      val proofScript = LpProofScript.Have(Name(stepName), encStep, Seq(Left(LpProofScript.Admit)))
-      Some((LpProofScript.Comment(s"Unencoded step ($ruleName): " + notEncoded.get), proofScript))
-    } else {
-      Out.lp_debug_info(s"Encoding finished!\n")
-      // add the encoded proofs to the overall proof as substeps
-      val proofScript = LpProofScript.Have(Name(stepName), encStep, Seq(proofTerm))
-      Some((LpProofScript.Comment(ruleName), proofScript))
-      // and add the necessary symbols to the generated Signature
+  /** Accept a single new tactic or a legacy fragment and build the same step record.
+    * Only the input shape differs from `toProofStepOld`; proof content, source
+    * provenance, and unsupported-case handling pass through unchanged.
+    */
+  def toProofStep(step: ClauseProxy, encStep: LpType, ruleName: String, proofTerm: Either[LpProofScript, lpProofScriptStep], notEncoded: Option[String]): Option[EncodedProofStep] = {
+    // Lift a single new tactic into the sequence expected by the common builder.
+    val scripts: Either[Seq[LpProofScript], lpProofScriptStep] = proofTerm match {
+      case Left(script) => Left(Seq(script))
+      case Right(script) => Right(script)
     }
+    toProofStepOld(step, encStep, ruleName, scripts, notEncoded)
   }
 
   def identifySteps(cl: ClauseProxy, identicalSteps: mutable.HashMap[Long, lpConstantTerm], sig:LpSig, encStep: lpClause): (Boolean, mutable.HashMap[Long, lpConstantTerm]) = {
@@ -171,7 +206,42 @@ object LPoutput {
     (encodeStep, identicalSteps)
   }
 
-  final case class ParentInfo(clPr: ClauseProxy, lpName: lpConstantTerm)
+  /** Construct source proof references after alias resolution.
+    * Registered derived lemmas uniformly take the negated-conjecture proof
+    * when present; this does not analyse whether an individual step uses it.
+    */
+  final case class ProofReferences(negConjRef: Option[(QName, Name)] = None,
+                                   derivedSteps: Set[QName] = Set.empty) {
+    def proof(name: QName): LpTerm[Level.Obj] = negConjRef match {
+      // if the name of the step matches the name of the negated conjecture,
+      //  return the local reference to it as a term
+      case Some((rootName, localProofName)) if name == rootName =>
+        LpTerm.Var[Level.Obj](localProofName, None)
+      // Supply the common assumption required by every registered derived lemma.
+      case Some((_, localProofName)) if derivedSteps.contains(name) =>
+        LpTerm.App[Level.Obj](LpTerm.Const(SymRef.LP(name)), Seq(Arg.Explicit(LpTerm.Var[Level.Obj](localProofName, None))))
+      // Else return the name as a term
+      case _ => LpTerm.Const[Level.Obj](SymRef.LP(name))
+    }
+
+    def resolve(id: Long, aliases: Map[Long, QName]): LpTerm[Level.Obj] =
+      proof(aliases.getOrElse(id, nameStep_new(id)))
+  }
+
+  /** Bridge only source references, before encoders add clause instantiations. */
+  private[output] def legacyProofReference(proof: LpTerm[Level.Obj]): lpTerm = proof match {
+    case LpTerm.Const(SymRef.LP(name)) =>
+      lpConstantTerm(Renderer.qname(name, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+    case LpTerm.Var(name, _) => lpUntypedVar(lpConstantTerm(name.value))
+    case LpTerm.App(function, arguments) =>
+      lpFunctionApp(legacyProofReference(function), arguments.map {
+        case Arg.Explicit(argument) => legacyProofReference(argument)
+        case argument => throw new IllegalArgumentException(s"Unexpected argument in a resolved parent proof: $argument")
+      })
+    case _ => throw new IllegalArgumentException(s"Unexpected resolved parent proof: $proof")
+  }
+
+  final case class ParentInfo(clPr: ClauseProxy, lpName: lpTerm)
 
   def extractParentInfoN(child: ClauseProxy,
                          identicalSteps: Map[Long, lpConstantTerm],
@@ -190,18 +260,14 @@ object LPoutput {
 
   def extractParentInfoN_new(child: ClauseProxy,
                          identicalSteps: Map[Long, QName],
-                         expectedParents: Int
+                         expectedParents: Int,
+                         proofReferences: ProofReferences = ProofReferences()
                         ): Either[String, Seq[ParentInfo]] = {
     val parents = child.annotation.parents
     if (parents.length != expectedParents)
       Left(s"Lambdapi encoding error: expected $expectedParents parents, got ${parents.length} (child id ${child.id})")
     else {
-      def nameOf(p: ClauseProxy): lpConstantTerm = {
-        val asName = identicalSteps.getOrElse(p.id, nameStep_new(p.id))
-        lpConstantTerm(Renderer.qname(asName,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
-      }
-
-      Right(parents.map(p => ParentInfo(p, nameOf(p))))
+      Right(parents.map(p => ParentInfo(p, legacyProofReference(proofReferences.resolve(p.id, identicalSteps)))))
     }
   }
 
@@ -213,8 +279,8 @@ object LPoutput {
     }
   }
 
-  def extractParentInfo2_new(child: ClauseProxy, identicalSteps: Map[Long, QName]): Either[String, (ParentInfo, ParentInfo)] = {
-    extractParentInfoN_new(child, identicalSteps, 2) match {
+  def extractParentInfo2_new(child: ClauseProxy, identicalSteps: Map[Long, QName], proofReferences: ProofReferences = ProofReferences()): Either[String, (ParentInfo, ParentInfo)] = {
+    extractParentInfoN_new(child, identicalSteps, 2, proofReferences) match {
       case Left(error) => Left(error)
       case Right(Seq(parent0, parent1)) => Right((parent0, parent1))
       case _ => Left(s"Lambdapi encoding error: Failure when extracting parent info")
@@ -229,25 +295,28 @@ object LPoutput {
     }
   }
 
-  def extractParentInfo1_new(child: ClauseProxy, identicalSteps: Map[Long, QName]): Either[String, ParentInfo] = {
-    extractParentInfoN_new(child, identicalSteps, 1) match {
+  def extractParentInfo1_new(child: ClauseProxy, identicalSteps: Map[Long, QName], proofReferences: ProofReferences = ProofReferences()): Either[String, ParentInfo] = {
+    extractParentInfoN_new(child, identicalSteps, 1, proofReferences) match {
       case Left(error) => Left(error)
       case Right(Seq(parent0)) => Right(parent0)
       case _ => Left(s"Lambdapi encoding error: Failure when extracting parent info")
     }
   }
 
-  def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo): (Option[(LpProofScript.Comment,LpProofScript)], lpProofStepInfo) = {
+  def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo,
+              proofReferences: ProofReferences = ProofReferences(),
+              useTypedIntroduction: Boolean = false,
+              standaloneSubproofThreshold: Option[Int] = None,
+              enclosingNames: Set[String] = Set.empty): (Option[EncodedProofStep], lpProofStepInfo) = {
 
     val stepName = nameStep(cl.id).name
     val rule = cl.annotation.fromRule
+    val namesInScope = enclosingNames ++ proofReferences.negConjRef.map(_._2.value)
     // since we do not write out steps that are identical in our encoding, we keep track of what the reference to the parent clause in LP is
     val parentInLpEncID_new = cl.annotation.parents.map(parent => stepInfo.identicalSteps.getOrElse(parent.id, nameStep_new(parent.id)))
 
-    // for compatibility, temproarily translate the names to constantnt terms...
-    val parentInLpEncID = {
-      parentInLpEncID_new.map(nm => lpConstantTerm(Renderer.qname(nm,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic))))
-    }
+    val parentProofs = parentInLpEncID_new.map(proofReferences.proof)
+    val parentInLpEncID = parentProofs.map(legacyProofReference)
     Out.lp_debug_info(s"parents in lp encoding new : $parentInLpEncID_new, as terms: $parentInLpEncID")
 
     Out.lp_debug_info(s"Encoding step $stepName: application of caluclus rule ${if (rule == null) "Tautology" else rule.name}")
@@ -261,48 +330,53 @@ object LPoutput {
       rule match {
 
         case _ =>
-          val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps)
+          val outputInfo = new lpProofStepInfo(newIdenticalSteps)
 
           rule match {
-            case leo.modules.calculus.CnfConj =>
-              val parent = extractParentInfo1_new(cl, stepInfo.identicalSteps.toMap) match {
-                case Left(error) => throw new Exception(error)
-                case Right(value) => value
+            case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
+              encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold,
+                namesInScope) match {
+                case Right(encoding) =>
+                  val result = toProofStepOld(cl, encStep, rule.name, Left(encoding.scripts), None)
+                  (result.map(_.copy(auxiliaryLemmas = encoding.auxiliaryLemmas)), outputInfo)
+                case Left(reason) =>
+                  (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
               }
-              val idx = cl.furtherInfo.cnfConjInfo match {
-                case Some(value) => value
-                case None => throw new Exception("Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
-              }
-              val encProof = encCnfConj(cl, parent, idx, sig.orig)
-              (toProofStepOld(stepName, encStep, rule.name, encProof, None), outputInfo)
 
-            case leo.modules.calculus.RenameCNF =>
-              val encodingCNF = encRenameCnf_conj(cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.cnfInfo, sig.orig)
-              val compatibleStep = LpType.Old(encodingCNF._3.pretty(PrettyConfig(!outputSingleFile,!outputSingleFile)))
-              val stepsCNF = toProofStepOld(stepName, compatibleStep, "RenameCNF_conj", encodingCNF._1, encodingCNF._2)
-              val outputInfo = new lpProofStepInfo(Map.empty,newIdenticalSteps,encodingCNF._4)
-              (stepsCNF,outputInfo)
+            case leo.modules.calculus.CnfSkolem =>
+              val encoding = encSkolem(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
+              encoding match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+              }
+
+            case leo.modules.calculus.CnfConj =>
+              val encoding = encCnfConj(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
+              encoding match {
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+              }
 
             case leo.modules.calculus.PolaritySwitch =>
               val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig.orig) //¿polarity switch always only has one parent, right?
-              (toProofStepOld(stepName, encStep, "PolaritySwitch", encoding, None),outputInfo)
+              (toProofStepOld(cl, encStep, "PolaritySwitch", encoding, None),outputInfo)
 
             case leo.modules.calculus.FuncExt =>
               val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig.orig)
-              (toProofStepOld(stepName, encStep, "FuncExt", encoding._1, encoding._2),outputInfo)
+              (toProofStepOld(cl, encStep, "FuncExt", encoding._1, encoding._2),outputInfo)
 
             case leo.modules.calculus.BoolExt =>
               val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig.orig)
-              (toProofStepOld(stepName, encStep, "BoolExt", encoding._1, encoding._2),outputInfo)
+              (toProofStepOld(cl, encStep, "BoolExt", encoding._1, encoding._2),outputInfo)
 
             case leo.modules.calculus.OrderedEqFac =>
               val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig.orig)
-              (toProofStepOld(stepName, encStep, "OrderedEqFac", encodings._1, None),outputInfo)
+              (toProofStepOld(cl, encStep, "OrderedEqFac", encodings._1, encodings._2),outputInfo)
 
             ////////////////////////////////////////
             // Paramodulation encoding
             case leo.modules.calculus.OrderedParamod =>
-              val (parentWithClause, parentIntoClause) = extractParentInfo2_new(cl, stepInfo.identicalSteps.toMap) match {
+              val (parentWithClause, parentIntoClause) = extractParentInfo2_new(cl, stepInfo.identicalSteps.toMap, proofReferences) match {
                 case Left(error) => throw new Exception(error)
                 case Right(value) => value
               }
@@ -311,90 +385,108 @@ object LPoutput {
                 case None => throw new Exception("Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
               }
               val (encProof, cantencode) = encPara(cl.cl, parentWithClause, parentIntoClause, addInfoPara, sig.orig)
-              (toProofStepOld(stepName, encStep, "OrderedPara", encProof, cantencode),outputInfo)
+              (toProofStepOld(cl, encStep, "OrderedPara", encProof, cantencode),outputInfo)
 
             case leo.modules.calculus.DefExpSimp =>
               //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
               // todo: eta expansion
               val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, st.defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName0, parentInLpEncID.head, sig.orig)
               if (!cantENcode.isDefined) st.etaExpFlag = true
-              (toProofStepOld(stepName, encStep, "DefExpand", lpProofScript(proofSteps), cantENcode),outputInfo)
+              (toProofStepOld(cl, encStep, "DefExpand", lpProofScript(proofSteps), cantENcode),outputInfo)
 
             case leo.modules.calculus.Simp =>
               if (cl.furtherInfo.addInfoSimpRule.isDefined) {
                 if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp") {
 //                  if (cl.furtherInfo.rwUnderBinder) {
-//                    (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
+//                    (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
 //                  }
 //                  else {
-                    val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig)
-                    (toProofStepOld(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None),outputInfo)
+                    val (allSteps, notEncoded) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, cl.furtherInfo.simpUsedLambdaDistinctness)
+                    (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded),outputInfo)
 //                  }
                 } else if (cl.furtherInfo.addInfoSimpRule.get == "paraSimp") {
 //                  if (cl.furtherInfo.rwUnderBinder) {
-//                    (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
+//                    (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
 //                  }
 //                  else {
-                    val allSteps = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, Seq(cl.annotation.parents.head.cl.lits.length - 1))
-                    (toProofStepOld(stepName, encStep, s"FormulaSimp", lpProofScript(allSteps), None), outputInfo)
+                    val (allSteps, notEncoded) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, cl.furtherInfo.simpUsedLambdaDistinctness, Seq(cl.annotation.parents.head.cl.lits.length - 1))
+                    (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded), outputInfo)
 //                  }
                 }else if (cl.furtherInfo.addInfoSimpRule.get == "detUniInferences") {
-                  val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,Name(parentInLpEncID.head.name),sig)
+                  val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
                   encProof match {
-                    case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "DetUniSimp", Left(scripts), None), outputInfo)
-                    case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some(reason)), outputInfo)
+                    case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "DetUniSimp", Left(scripts), None), outputInfo)
+                    case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some(reason)), outputInfo)
                   }
                 } else {
                   val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
-                  (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
+                  (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
                 }
               } else {
                 val annotation = Some("Simp: Unidentified formula simplification unencoded")
-                (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
+                (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
               }
 
             case leo.modules.calculus.PreUni =>
-              val encProof = encodePreUni(cl.annotation.parents.head, cl, Name(parentInLpEncID.head.name), sig)
+              val encProof = encodePreUni(cl.annotation.parents.head, cl, parentProofs.head, sig, useTypedIntroduction = useTypedIntroduction)
               encProof match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "PreUni", Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, s"Rule ${rule.name} not encoded yet", Left(Seq.empty), Some(reason)), outputInfo)
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "PreUni", Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", Left(Seq.empty), Some(reason)), outputInfo)
               }
 
             case leo.modules.calculus.RewriteSimp =>
-              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentInLpEncID.map(id => Name(id.name)), sig)
+              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
               encodingRewrite match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "RewriteSimp", Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, "RewriteSimp", Left(Seq.empty), Some(reason)), outputInfo)
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(Seq.empty), Some(reason)), outputInfo)
               }
 
             case leo.modules.calculus.Miniscope =>
-              val encoding = MiniscopeEncoding.encMiniscope(cl, parentInLpEncID_new, sig)
+              val encoding = MiniscopeEncoding.encMiniscope(cl, parentProofs, sig)
               encoding match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, "Miniscope", Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, "Miniscope", Left(Seq.empty), Some(reason)), outputInfo)
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "Miniscope", Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, "Miniscope", Left(Seq.empty), Some(reason)), outputInfo)
               }
 
             case leo.modules.calculus.LiftEq =>
               val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig.orig)
-              (toProofStepOld(stepName, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
+              (toProofStepOld(cl, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
 
             case leo.modules.calculus.PatternUni =>
-              val encProof = encodePatternUni(cl.annotation.parents.head,cl,Name(parentInLpEncID.head.name),sig)
+              val encProof = encodePatternUni(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
               encProof match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(stepName, encStep, rule.name, Left(scripts), None),outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(stepName, encStep, rule.name, Left(Seq.empty), Some(reason)),outputInfo)
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None),outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)),outputInfo)
               }
 
             case _ =>
-              val parentIDs = parentInLpEncID.map(id => id.name)
-              (toProofStepOld(stepName, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")),outputInfo)
+              val parentIDs = parentInLpEncID_new.map(name => Renderer.qname(name, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+              (toProofStepOld(cl, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")),outputInfo)
           }
       }
     }else{
-      val outputInfo = new lpProofStepInfo(Map.empty, newIdenticalSteps)
+      val outputInfo = new lpProofStepInfo(newIdenticalSteps)
       if (rule == null && (cl.role != Role_Conjecture)) {
-        Out.lp_debug_info(s"role : ${cl.role}")
-        (toProofStepOld(stepName, encStep, "Tautology", lpProofScript(Seq.empty), Some("Tautology generation not yet encoded")), outputInfo)
+        val skolemDefinition = (cl.role, cl.annotation, cl.cl.lits) match {
+          case (Role_Definition, ClauseAnnotation.FromSystem("definition", _, _), Seq(literal))
+            if literal.equational && literal.polarity =>
+            literal.left match {
+              case Term.Symbol(key) if isPropSet(Signature.PropSkolemConstant, sig.orig(key).flag) &&
+                  sig.orig(key).hasDefn && literal.right == sig.orig(key)._defn =>
+                Some(nameSkDef(key, sig.orig))
+              case _ => None
+            }
+          case _ => None
+        }
+        skolemDefinition match {
+          case Some(definitionName) =>
+            // Skolemization consumes the declared pointwise equality, instantiated with its recorded variables.
+            newIdenticalSteps.update(cl.id, definitionName)
+            (None, outputInfo)
+          case None =>
+            Out.lp_debug_info(s"role : ${cl.role}")
+            (toProofStepOld(cl, encStep, "Tautology", lpProofScript(Seq.empty), Some("Tautology generation not yet encoded")), outputInfo)
+        }
       }else{
         (None, outputInfo)
       }
@@ -592,14 +684,18 @@ object LPoutput {
     (typeDecSB, skDecsSB, defSB, tacticSB)
   }
 
-  def extractNecessaryFormulas(state: LocalState, gdv_mode: Boolean, gdvProofParam: Option[String] = None)  = {
+  def extractNecessaryFormulas(state: LocalState, gdv_mode: Boolean, gdvProofParam: Option[String] = None,
+                               standaloneSubproofThreshold: Option[Int] = Some(defaultStandaloneSubproofThreshold),
+                               splitAuxiliaryLemmas: Boolean = false) = {
 
 
     val proofFileSB: mutable.StringBuilder = new StringBuilder()
     val signatureFileSB: mutable.StringBuilder = new StringBuilder()
     val formulaeFileSB: mutable.StringBuilder = new StringBuilder()
+    val auxiliaryFileSB = new mutable.StringBuilder()
     var proofSteps: Seq[LpProofScript] = Seq.empty
     var gdvParentProofSteps: Seq[LpProofScript] = Seq.empty
+    val packageSteps = mutable.ArrayBuffer.empty[EncodedProofStep] // collect encoded steps
 
     val flagSt = new lpProofObject
 
@@ -616,14 +712,37 @@ object LPoutput {
     val compressedProof = proof
     var idClauseMap: mutable.HashMap[Long, ClauseProxy] = mutable.HashMap.empty
     val identicalSteps: mutable.HashMap[Long, QName] = mutable.HashMap.empty
-    val clausifiedSteps: mutable.HashMap[lpConstantTerm, lpConstantTerm] = mutable.HashMap.empty
     var conjEnc = false
     var axCounter = 0
     val conjName = QName.local(s"localNegatedConjecture")
 
     val problemEncSB: mutable.StringBuilder = new StringBuilder()
 
-    var conjecture: LpTerm[Level.Obj] = LogicConst.Bot // default Bot, as Leo omits conjecture from proof in this case todo: should we change that?!
+    // Decide if a negated conjecture is needed based on reachable source nodes, so an unused input conjecture does not
+    // introduce an artificial assumption into an axioms-only refutation.
+    val packageRoots = if (gdv_mode) Seq.empty else proof.filter(_.role == Role_NegConjecture)
+    if (packageRoots.size > 1)
+      throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
+    val packageRoot = packageRoots.headOption
+
+    // Reserve signature, clause-variable, and helper names before choosing
+    // the package's proposition abbreviation and common proof parameter.
+    val occupiedNames = if (gdv_mode) Set.empty[String] else {
+      sig.reserved ++ (sig.termNames.values ++ sig.typeNames.values).map(_.local.value) ++
+        proof.flatMap(step => ClauseEncoding.clause2LP(step.cl).metaVars.map(_.name.value)) ++
+        proof.map(step => nameStep_new(step.id).local.value) ++
+        // Legacy definition expansion and paramodulation introduce h/h1 in
+        // helper proofs, we therefore exclude them here.
+        // todo: carry general record of used names thoruhgout the proof
+        Set(nameProofFile, conjName.local.value, applyAllDefsTacName0, "h", "h1")
+    }
+    val ncName = Name(LpSig.freshIfNeeded("NC", occupiedNames))
+    val hypothesisName = Name(LpSig.freshIfNeeded("h", occupiedNames + ncName.value))
+    var packageReferences = ProofReferences(packageRoot.map(_ => conjName -> hypothesisName))
+    // The GDV wrapper introduces these proof binders before the step scripts.
+    val enclosingNames = if (gdv_mode) Set(conjName.local.value) ++ gdvProofParam else Set.empty[String]
+    // Default conjecture to bot; update if the traversal finds the root (if the proof is not just showing that axioms are contradictory).
+    var conjecture: LpTerm[Level.Obj] = LogicConst.Bot
 
     compressedProof foreach { step =>
       val stepId = step.id
@@ -632,12 +751,13 @@ object LPoutput {
       if (step.role == Role_NegConjecture) {
         if (conjEnc) throw new Exception("found more than one negated conjecture in the proof object to encode in LP")
         conjEnc = true
-        val (encConj, _) = clause2LP(step.cl, Set(), sig.orig)
-        val (newEncConj) = ClauseEncoding.clause2LP(step.cl)
         identicalSteps += (stepId -> conjName)
-        conjecture = newEncConj.lits.map(_.term) match {
+        // Extract the conjecture from its negation.
+        conjecture = ClauseEncoding.clause2LP(step.cl).lits.map(_.term) match {
           case Seq(LogicConst.Not(conj)) => conj
-          case _ => throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
+          case _ =>
+            val (encConj, _) = clause2LP(step.cl, Set(), sig.orig)
+            throw new Exception(s"given negated conjecture ${encConj.pretty} not negated")
         }
       } else if (step.role == Role_Axiom) { //todo: what about other roles like lamme etc. ?
         val encClause = ClauseEncoding.clause2LP(step.cl)
@@ -662,27 +782,40 @@ object LPoutput {
         Out.lp_debug_info(s"linking to axiom $safeAxName (id: $stepId)")
         axCounter = axCounter + 1
       } else {
-        val infoForStep = new lpProofStepInfo(clausifiedSteps.toMap, identicalSteps)
-        val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep)
-        clausifiedSteps ++= newInfo.clausifiedSteps
+        val infoForStep = new lpProofStepInfo(identicalSteps)
+        val references = if (gdv_mode) ProofReferences() else packageReferences
+        val useTypedIntroduction = useLargeContextEncoding(step.cl.implicitlyBound.size, gdv_mode)
+        val (newProofSteps, newInfo) = step2LP(step, sig, flagSt, infoForStep, references,
+          useTypedIntroduction = useTypedIntroduction,
+          standaloneSubproofThreshold = if (gdv_mode) None else standaloneSubproofThreshold,
+          enclosingNames = enclosingNames)
         identicalSteps ++= newInfo.identicalSteps
         additionalSymbols = additionalSymbols ++ newInfo.additionalDefinedSymbols
-        val newStepsSeq =
-          if (newProofSteps.isDefined) {
-            if (gdv_mode) Seq(newProofSteps.get._2)
-            else Seq(newProofSteps.get._1,newProofSteps.get._2)
-          } else Seq.empty
-        proofSteps = proofSteps ++ newStepsSeq
+        newProofSteps.foreach { result =>
+          if (gdv_mode) {
+            proofSteps = proofSteps :+ LpProofScript.Have(result.name, result.ty, result.body)
+          } else {
+            packageSteps += result
+            // Only emitted lemmas receive the common proof argument.
+            // Input axioms or the (negated) conjecture keep their own reference kind.
+            packageReferences = packageReferences.copy(
+              derivedSteps = packageReferences.derivedSteps + QName.local(result.name.value))
+          }
+        }
       }
     }
 
     val (typeDecSB, skDecSB, defSB, tacticSB) = generateObjectDeclaartions(proof, sig)
 
-    // set necessary flags
-    if (flagSt.etaExpFlag) proofFileSB.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n\n")
+    val splitAuxiliary = splitAuxiliaryLemmas && !gdv_mode &&
+      packageSteps.exists(_.auxiliaryLemmas.nonEmpty)
+    val auxiliaryDeclarations = if (splitAuxiliary) auxiliaryFileSB else proofFileSB
 
-    if (setBuiltins) proofFileSB.append("// BUILTINS /////////////////////////////////\n\nbuiltin \"arr\" ≔ ⤳;\nbuiltin \"funExt\" ≔ funExt;\n")
-
+    val proofPrelude = new mutable.StringBuilder()
+    if (flagSt.etaExpFlag) proofPrelude.append("// FLAGS /////////////////////////////////\n\nflag \"eta_equality\" on;\n\n")
+    if (setBuiltins) proofPrelude.append("// BUILTINS /////////////////////////////////\n\nbuiltin \"arr\" ≔ ⤳;\nbuiltin \"funExt\" ≔ funExt;\n")
+    proofFileSB.append(proofPrelude)
+    if (splitAuxiliary) auxiliaryFileSB.append(proofPrelude)
 
     // Generate declarations of symbols that are implicit in TPTP but not mapped to a Lambdapi encoding
     /*
@@ -716,9 +849,11 @@ object LPoutput {
     }
 
     if (skDecSB.length != 0) {
-      proofFileSB.append("\n\n// SKOLEM TERMS ///////////////////////////////////\n\n")
-      proofFileSB.append(skDecSB)
+      auxiliaryDeclarations.append("\n\n// SKOLEM TERMS ///////////////////////////////////\n\n")
+      auxiliaryDeclarations.append(skDecSB)
     }
+
+    if (splitAuxiliary) auxiliaryFileSB.append("\n\n// AUXILIARY LEMMAS /////////////////////////////////\n\n")
 
     if (tacticSB.nonEmpty) {
       proofFileSB.append("\n\n// TACTIC TERMS ///////////////////////////////////\n\n")
@@ -733,75 +868,146 @@ object LPoutput {
 
     proofFileSB.append("\n\n// PROOF ENCODING ////////////////////////////////////////\n\n")
 
-    // construct the proof based on all the individual steps
-    // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
-    proofSteps = gdvParentProofSteps ++ proofSteps
-    proofSteps = LpProofScript.Assume(Seq(conjName.local)) +: proofSteps
-    val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]))))
-    proofSteps = refineStep +: proofSteps
-    gdvProofParam.foreach { proofParamName => proofSteps = LpProofScript.Assume(Seq(Name(proofParamName))) +: proofSteps}
-    // finally, test if the derived last clause is the empty clause or a flex-flex clause.
-    // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
-    val emptyClause = NewLpDatastructures.lpClauseInst(Seq(),Seq()).asMl//lpClause(Seq(), Seq(lpOlBot))
-    val lastStep: LpTerm[Level.Meta] = proofSteps.last match {
-      //case lpHave(name, `emptyClause`, _, _) => lpConstantTerm(name)
-      case LpProofScript.Have(name,`emptyClause`,_) => LpTerm.Const(SymRef.LP(QName.local(name.value)))
-      case LpProofScript.Have(name, flexFlex0, _) =>
-        //throw new Exception(s"flex flex clause!")
-        // transformation of flex-flex to bot necessary todo
-        Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
-        val proofFun = LpType.Arrow(flexFlex0,LpType.Prf(LogicConst.Bot))//lpMlFunctionType(Seq(flexFlex0, lpOlBot.prf))
-        val flexFlexStepName = "flexflex_to_bot"
-        throw new Exception(s"flex flex clause!, ${flexFlex0}")
-        LpTerm.Const(SymRef.LP(QName.local(name.value)))
-        /*
-        val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
-          case LpType.Pi(binders, body) =>
-            val appliedVars = binders.map(bind => bind.ty match {
-              case Some(LpType.El(olT)) => ND.Inst.lpWitness(olT)
-              case _ => throw new Exception(s"encountered clause bindings with illegal format")
-            }
-          case lpClause(vars, lits) =>
-            val appliedVars = vars.map(var0 => lpWitness(isTermVar(var0).ty))
-            (lpFunctionApp(lpConstantTerm(flexFlexStepName), appliedVars), (lpFunctionApp(lpConstantTerm(name), appliedVars)))
-          case _ => (lpConstantTerm(flexFlexStepName), lpConstantTerm(name))
-        }
-        //throw new Exception(s"vars are ${variablesToApply.map(_.pretty)}")
-        val proofHave = lpHave(flexFlexStepName, proofFun, lpProofScript(Seq(lpProofScriptAdmit())))
-        proofSteps = proofSteps :+ proofHave
-        lpFunctionApp(appliedflexFlexStepName, Seq(appliedStepName))
+    if (gdv_mode) {
+      // construct the proof based on all the individual steps
+      // in the proof of the conjecture, first instanciate dne, then assume the negated conjecture
+      proofSteps = gdvParentProofSteps ++ proofSteps
+      proofSteps = LpProofScript.Assume(Seq(conjName.local)) +: proofSteps
+      val refineStep = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),Seq(Arg.Explicit(LpTerm.Obj(conjecture)),Arg.Explicit(Wildcard[Level.Meta]()))))
+      proofSteps = refineStep +: proofSteps
+      gdvProofParam.foreach { proofParamName => proofSteps = LpProofScript.Assume(Seq(Name(proofParamName))) +: proofSteps}
+      // finally, test if the derived last clause is the empty clause or a flex-flex clause.
+      // Instanciate with the empty clause or introduce an additional step in case of a flex-flex clause
+      val emptyClause = NewLpDatastructures.lpClauseInst(Seq(),Seq()).asMl//lpClause(Seq(), Seq(lpOlBot))
+      val lastStep: LpTerm[Level.Meta] = proofSteps.last match {
+        //case lpHave(name, `emptyClause`, _, _) => lpConstantTerm(name)
+        case LpProofScript.Have(name,`emptyClause`,_) => LpTerm.Const(SymRef.LP(QName.local(name.value)))
+        case LpProofScript.Have(name, flexFlex0, _) =>
+          //throw new Exception(s"flex flex clause!")
+          // transformation of flex-flex to bot necessary todo
+          Out.lp_debug_info(s"Transformation of flex-flex literal to bot necessary...")
+          val proofFun = LpType.Arrow(flexFlex0,LpType.Prf(LogicConst.Bot))//lpMlFunctionType(Seq(flexFlex0, lpOlBot.prf))
+          val flexFlexStepName = "flexflex_to_bot"
+          throw new Exception(s"flex flex clause!, ${flexFlex0}")
+          LpTerm.Const(SymRef.LP(QName.local(name.value)))
+          /*
+          val (appliedflexFlexStepName, appliedStepName) = flexFlex0 match {
+            case LpType.Pi(binders, body) =>
+              val appliedVars = binders.map(bind => bind.ty match {
+                case Some(LpType.El(olT)) => ND.Inst.lpWitness(olT)
+                case _ => throw new Exception(s"encountered clause bindings with illegal format")
+              }
+            case lpClause(vars, lits) =>
+              val appliedVars = vars.map(var0 => lpWitness(isTermVar(var0).ty))
+              (lpFunctionApp(lpConstantTerm(flexFlexStepName), appliedVars), (lpFunctionApp(lpConstantTerm(name), appliedVars)))
+            case _ => (lpConstantTerm(flexFlexStepName), lpConstantTerm(name))
+          }
+          //throw new Exception(s"vars are ${variablesToApply.map(_.pretty)}")
+          val proofHave = lpHave(flexFlexStepName, proofFun, lpProofScript(Seq(lpProofScriptAdmit())))
+          proofSteps = proofSteps :+ proofHave
+          lpFunctionApp(appliedflexFlexStepName, Seq(appliedStepName))
 
 
          */
 
 
 
-      case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last}")
-    }
-    //proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
-    proofSteps = proofSteps :+ LpProofScript.Refine(lastStep)
-    //val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
-    val prettyTy = Renderer.ty(LpType.Prf(conjecture),RenderOptions(),sig)
-    Out.lp_debug_info(s"can encode conjecture: $prettyTy")
-    /*
-    proofSteps foreach{st =>
-      val encSt = Renderer.proof(st,RenderOptions(true,true,true),sig)
-      Out.lp_debug_info(s"can encode: \n$encSt")
-    }
-     */
-    val gdvParams = gdvProofParam.toSeq.map { proofParamName =>
-      Name(proofParamName) -> LpType.Prf(LpTerm.Const[Level.Obj](SymRef.LP(QName.in(Prefix.Formula, gdvNegatedConjectureName))))
-    }
-    val completeProof = Stmt.Definition(Name("encodedProof"),gdvParams,Some(LpType.Prf(conjecture)),Stmt.DefBody.ProofBody(proofSteps),Seq(),Seq(Opaque))
-    proofFileSB.append(Renderer.stmt(completeProof,sig,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
+        case _ => throw new Exception(s"in the encoding, the last step had an unexptected tactic: ${proofSteps.last}")
+      }
+      //proofSteps = proofSteps :+ lpRefine(lpFunctionApp(lastStep, Seq.empty))
+      proofSteps = proofSteps :+ LpProofScript.Refine(lastStep)
+      //val completeProof = lpDefinition(lpConstantTerm("encodedProof"), Seq.empty, Some(conjecture.prf), lpProofScript(proofSteps), Seq(), Seq(lpOpaque))
+      val prettyTy = Renderer.ty(LpType.Prf(conjecture),RenderOptions(),sig)
+      Out.lp_debug_info(s"can encode conjecture: $prettyTy")
+      /*
+      proofSteps foreach{st =>
+        val encSt = Renderer.proof(st,RenderOptions(true,true,true),sig)
+        Out.lp_debug_info(s"can encode: \n$encSt")
+      }
+       */
+      val gdvParams = gdvProofParam.toSeq.map { proofParamName =>
+        Name(proofParamName) -> LpType.Prf(LpTerm.Const[Level.Obj](SymRef.LP(QName.in(Prefix.Formula, gdvNegatedConjectureName))))
+      }
+      val completeProof = Stmt.Definition(Name("encodedProof"),gdvParams,Some(LpType.Prf(conjecture)),Stmt.DefBody.ProofBody(proofSteps.map(Left(_))),Seq(),Seq(Opaque))
+      proofFileSB.append(Renderer.stmt(completeProof,sig,RenderOptions(!outputSingleFile,!outputSingleFile,monomorphic)))
+    } else {
+      val ro = RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)
+      val nc = LpTerm.Const[Level.Obj](SymRef.LP(QName.local(ncName.value)))
+      val assumptionType = LpType.Prf(nc)
 
-    (proofFileSB,signatureFileSB,formulaeFileSB)
+      // Introduce a notation for the negated conjecture in Lambdapi proofs
+      packageRoot.foreach { _ =>
+        val abbreviation = Stmt.Definition(ncName, Seq.empty, Some(El(HolBaseTypes.O)),
+          Stmt.DefBody.LpTermBody(Obj(LogicConst.Not(conjecture))))
+        proofFileSB.append(Renderer.stmt(abbreviation, sig, ro)).append("\n")
+      }
+
+      packageSteps.foreach { result =>
+        val stepRo = ro.copy(explicitTypes = useLargeContextEncoding(result.variableCount, gdvMode = false))
+        // Auxiliary proofs carry their own parameters and are in scope for this step.
+        result.auxiliaryLemmas.foreach { lemma =>
+          auxiliaryDeclarations.append(Renderer.stmt(lemma, sig, stepRo)).append("\n")
+        }
+        val parents = result.source.annotation.parents.map(parent => s"step${parent.id}").mkString(", ")
+        val source = LpProofScript.Comment(s"parents: [$parents]")
+        proofFileSB.append(Renderer.proof(result.comment, ro, sig)).append("\n")
+        proofFileSB.append(Renderer.proof(source, ro, sig)).append("\n")
+
+        // Let derived steps depend on negated conjecture
+        // retain the clause's own quantification inside thae outer product.
+        val ty = if (packageRoot.isDefined)
+          LpType.Pi(Seq(LpTerm.Var[Level.Meta](hypothesisName, Some(assumptionType))), result.ty)
+        else result.ty
+        val body = if (packageRoot.isDefined)
+          Left(LpProofScript.Assume(Seq(hypothesisName))) +: result.body
+        else result.body
+        val lemma = Stmt.Definition(result.name, Seq.empty, Some(ty),
+          Stmt.DefBody.ProofBody(body), modifiers = Seq(Opaque))
+        proofFileSB.append(Renderer.stmt(lemma, sig, stepRo)).append("\n")
+      }
+
+      // construct the proof by contradiction relying on dne
+      val terminal = proof.lastOption.getOrElse(
+        throw new Exception("no source proof steps in the Lambdapi encoding"))
+      val terminalType = ClauseEncoding.clause2LP(terminal.cl).asMl
+      // the last emitted step must be bot, representing the conjecture
+      val emptyClause = NewLpDatastructures.lpClauseInst(Seq.empty, Seq.empty).asMl
+      if (terminalType != emptyClause)
+        throw new Exception(s"flex flex clause!, $terminalType")
+      val contradiction = LpProofScript.Refine(Obj(packageReferences.resolve(terminal.id, identicalSteps.toMap)))
+      // if the negated conjecture was used, use dne to construct the final proof
+      val conclusion: LpProofScript.Body = if (packageRoot.isDefined) {
+        val dne = LpProofScript.Refine(LpTerm.App[Level.Meta](Obj(Terms.lpDne),
+          Seq(Arg.Explicit(Obj(conjecture)), Arg.Explicit(Wildcard[Level.Meta]()))))
+        Seq(Left(dne), Left(LpProofScript.Assume(Seq(hypothesisName))), Left(contradiction))
+      // otherwise proof bot directly from the axioms
+      } else Seq(Left(contradiction))
+      val completeProof = Stmt.Definition(Name(nameProofFile), Seq.empty,
+        Some(LpType.Prf(conjecture)), Stmt.DefBody.ProofBody(conclusion), modifiers = Seq(Opaque))
+      proofFileSB.append(Renderer.stmt(completeProof, sig, ro))
+    }
+
+    val stepCounts = ProofStepCounts(packageSteps.size, packageSteps.count(_.admittedWholesale))
+    (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts)
   }
 
-  def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String):Unit={
+  def outputLPFiles(state: LocalState, lpOutputPath0: String, nameLpOutputFolder: String,
+                    problemFileName: String, runtimeMs: Long): Unit = {
 
     val lpOutputPath = if (outputSingleFile) Paths.get(lpOutputPath0) else Paths.get(lpOutputPath0).resolve(nameLpOutputFolder)
-    val (proofFileSB,signatureFileSB,formulaeFileSB) = extractNecessaryFormulas(state, false)
+    val generationStartNanos = System.nanoTime()
+    val (proofFileSB, signatureFileSB, formulaeFileSB, auxiliaryFileSB, stepCounts) =
+      extractNecessaryFormulas(state, false, splitAuxiliaryLemmas = !outputSingleFile)
+    val generationMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - generationStartNanos)
+    val problemName = problemFileName.replace("\\", "\\\\").replace("\r", "\\r").replace("\n", "\\n")
+    val proofHeader = Seq(
+      s"// problem: $problemName",
+      s"// leo_version: ${Configuration.VERSION}",
+      s"// runtime_ms: $runtimeMs",
+      s"// lp_generation_ms: $generationMs",
+      s"// proof_steps: ${stepCounts.total}",
+      s"// admitted_steps: ${stepCounts.admitted}"
+    ).mkString("", "\n", "\n\n")
 
     val tempLibStr: String = if (customUserTacFile) s"${nameLpOutputFolder}.${nameTempFile}" else s"${nameLeoIIILPlib}.${leoSimpTacticFile}"
 
@@ -857,13 +1063,28 @@ object LPoutput {
       singleProof.append(formulaeFileSB)
     }
 
+    val commonProofImports = reqString + additions + cnfReflectionImport
+    var proofImports = commonProofImports
+    if (!outputSingleFile) {
+      val auxiliaryPath = lpOutputPath.resolve(s"$nameAuxiliaryFile.lp")
+      if (auxiliaryFileSB.nonEmpty) {
+        auxiliaryFileSB.insert(0, commonProofImports + "\n\n")
+        Files.write(auxiliaryPath, auxiliaryFileSB.toString.getBytes(StandardCharsets.UTF_8))
+        proofImports += s"require open $nameLpOutputFolder.$nameAuxiliaryFile;\n"
+      } else {
+        // Re-exporting into an existing package can leave an unused generated module.
+        Files.deleteIfExists(auxiliaryPath)
+        Files.deleteIfExists(lpOutputPath.resolve(s"$nameAuxiliaryFile.lpo"))
+      }
+    }
     val proofFilePath = if (!outputSingleFile) lpOutputPath.resolve(s"$nameProofFile.lp") else lpOutputPath.resolve(s"$nameLpOutputFolder.lp")
+    val proofPreamble = proofHeader + proofImports + "\n\n"
     if (!outputSingleFile){
-      proofFileSB.insert(0, reqString + additions + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      proofFileSB.insert(0, proofPreamble)
       Files.write(proofFilePath, proofFileSB.toString.getBytes(StandardCharsets.UTF_8))
     } else {
       val wholeProof = singleProof.append(proofFileSB)
-      wholeProof.insert(0, reqString + additions + "\n\n") // maybe it may be necessary in some cases to add "\nnotation ∨ infix right 6;"
+      wholeProof.insert(0, proofPreamble)
       Files.write(proofFilePath, wholeProof.toString.getBytes(StandardCharsets.UTF_8))
     }
 
@@ -877,8 +1098,8 @@ object LPoutput {
   def proof2LP(state: LocalState):String = {
     val lpContextPlaceholder = "LAMBDAPI_CONTEXT"
     val reqString = s"require open Stdlib.Set Stdlib.Prop Stdlib.Classic Stdlib.FOL Stdlib.HOL Stdlib.Eq Stdlib.Impred Stdlib.FunExt Stdlib.PropExt Stdlib.Nat Stdlib.Bool Stdlib.List Stdlib.String Stdlib.Epsilon $calcRuleLibStr $simpTacLibStr $permLibStr $tptpArithmeticLibStr;\nrequire $lpContextPlaceholder.Signature as S;\nrequire $lpContextPlaceholder.Formulae as F \n\n;"
-    val (proofFileSB,_,_) = extractNecessaryFormulas(state, true)
-    proofFileSB.insert(0, reqString)
+    val (proofFileSB, _, _, _, _) = extractNecessaryFormulas(state, true)
+    proofFileSB.insert(0, cnfReflectionImport + reqString)
     val conjName = s"${state.conjecture.annotation.pretty.dropRight(1).split(",", 2)(1)}"
     val finalRule = lpRule(lpConstantTerm(s"$abbreviationFormulaeFile" + conjName), Seq.empty,lpConstantTerm(nameProofFile))
     proofFileSB.append("\n")
@@ -887,8 +1108,8 @@ object LPoutput {
   }
   def proof2GDVLP(state: LocalState): String = {
     val targetFormulaName = gdvTargetNameFromState(state)
-    val (proofFileSB,_,_) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
-    proofFileSB.insert(0, s"$gdvRequireOpenLine\n")
+    val (proofFileSB, _, _, _, _) = extractNecessaryFormulas(state, true, Some(gdvNegatedConjectureProofName))
+    proofFileSB.insert(0, s"$gdvRequireOpenLine\n$cnfReflectionImport")
 
     val sig = LpSig.fromLeo(state.signature)
     val proofParam = LpTerm.Var[Level.Meta](Name(gdvNegatedConjectureProofName), None)
