@@ -79,11 +79,8 @@ object lpInferenceRuleEncoding {
   ////////////////////////////////////////////////////////////////
 
   case object polaritySwitchEqLit extends lpNameRef {
-    // in non eq case, we use simp 17, for equational case this is encoded
-    // todo: update to standard library
-    // a b : π ((a = b) = ((¬ a) = (¬ b)))
-
-    override def name: lpConstantTerm = lpConstantTerm(s"polaritySwitchEqLit")
+    // a b : π (((¬ a) = (¬ b)) = (a = b))
+    override def name: lpConstantTerm = lpConstantTerm("Stdlib.PropExt.polarity_switch")
 
     def instanciate(a: lpOlTerm, b: lpOlTerm): lpFunctionApp = {
       lpFunctionApp(name, Seq(a,b))

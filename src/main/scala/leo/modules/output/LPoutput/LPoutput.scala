@@ -4,7 +4,6 @@ import leo.{Configuration, Out, modules}
 import leo.datastructures.Term.{Integer, Rational, Real}
 import leo.datastructures.{ClauseAnnotation, ClauseProxy, Kind, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Subst, Term, isPropSet}
 import leo.modules.HOLSignature.TyForall
-import leo.modules.calculus.CalculusRule
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
 import leo.modules.prover.LocalState
@@ -42,8 +41,15 @@ object LPoutput {
   private val explicitTypesVariableThreshold = 50
   private val defaultStandaloneSubproofThreshold = 15
 
-  // Add a rule here once its encoder handles polymorphic occurrences.
-  private val polymorphicReplayRules: Set[CalculusRule] = Set.empty
+  private final case class ReplaySupport(
+    typeSubstitution: Boolean = false,
+    implicitTypeVariables: Boolean = false,
+    explicitTypeQuantification: Boolean = false,
+    polymorphicSymbols: Boolean = false
+  )
+
+  private val monomorphicReplay = ReplaySupport()
+  private val carryTypes = ReplaySupport(implicitTypeVariables = true, polymorphicSymbols = true)
 
   private def useLargeContextEncoding(variableCount: Int, gdvMode: Boolean): Boolean =
     !gdvMode && variableCount >= explicitTypesVariableThreshold
@@ -297,7 +303,7 @@ object LPoutput {
     }
   }
 
-  private def polymorphicReplayReason(step: ClauseProxy, sig: Signature): Option[String] = {
+  private def polymorphicReplayReason(step: ClauseProxy, sig: Signature, support: ReplaySupport): Option[String] = {
     val info = step.furtherInfo
     val hasTypeSubstitution =
       info.para.exists(_.typeSubstNeeded) || info.addInfoEqFac._5 ||
@@ -307,10 +313,12 @@ object LPoutput {
       info.addInfoRw.exists(_.origTypeSubst != Subst.id)
 
     val clauses = step.cl +: step.annotation.parents.map(_.cl)
-    if (hasTypeSubstitution) Some("type substitution")
-    else if (clauses.exists(_.typeVars.nonEmpty)) Some("implicit type variables in a premise or conclusion")
-    else if (clauses.exists(_.symbols.contains(TyForall.key))) Some("explicit type quantification in a premise or conclusion")
-    else if (clauses.exists(_.symbols.distinct.exists { key =>
+    if (!support.typeSubstitution && hasTypeSubstitution) Some("type substitution")
+    else if (!support.implicitTypeVariables && clauses.exists(_.typeVars.nonEmpty))
+      Some("implicit type variables in a premise or conclusion")
+    else if (!support.explicitTypeQuantification && clauses.exists(_.symbols.contains(TyForall.key)))
+      Some("explicit type quantification in a premise or conclusion")
+    else if (!support.polymorphicSymbols && clauses.exists(_.symbols.distinct.exists { key =>
       val symbol = sig(key)
       !symbol.isFixedSymbol && symbol.hasType && symbol._ty.isPolyType
     })) Some("polymorphic user symbol in a premise or conclusion")
@@ -359,155 +367,166 @@ object LPoutput {
 
     val (encStep0) = ClauseEncoding.clause2LP(cl.cl)
     val encStep = encStep0.asMl
-    val polymorphicReason = polymorphicReplayReason(cl, sig.orig)
     val (needsEnc, newIdenticalSteps) = identifySteps_new(cl, stepInfo.identicalSteps, encStep0,
       parent => skolemDefinitionName(parent, sig.orig).isEmpty)
 
     if ((cl.role != Role_Conjecture) && needsEnc && (rule != null)) {
+      val outputInfo = new lpProofStepInfo(newIdenticalSteps)
+
+      def replayWith(support: ReplaySupport = monomorphicReplay)
+                    (encode: => (Option[EncodedProofStep], lpProofStepInfo)): (Option[EncodedProofStep], lpProofStepInfo) =
+        polymorphicReplayReason(cl, sig.orig, support) match {
+          case Some(reason) =>
+            val pending = Some(s"polymorphic replay pending ($reason)")
+            (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), pending), outputInfo)
+          case None => encode
+        }
+
       rule match {
+        case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF => replayWith() {
+          encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold,
+            namesInScope) match {
+            case Right(encoding) =>
+              val result = toProofStepOld(cl, encStep, rule.name, Left(encoding.scripts), None)
+              (result.map(_.copy(auxiliaryLemmas = encoding.auxiliaryLemmas)), outputInfo)
+            case Left(reason) =>
+              (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+          }
+        }
 
-        case _ =>
-          val outputInfo = new lpProofStepInfo(newIdenticalSteps)
+        case leo.modules.calculus.CnfSkolem => replayWith() {
+          val encoding = encSkolem(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
+          encoding match {
+            case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
+            case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+          }
+        }
 
-          val replay: PartialFunction[CalculusRule, (Option[EncodedProofStep], lpProofStepInfo)] = {
-            case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
-              encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold,
-                namesInScope) match {
-                case Right(encoding) =>
-                  val result = toProofStepOld(cl, encStep, rule.name, Left(encoding.scripts), None)
-                  (result.map(_.copy(auxiliaryLemmas = encoding.auxiliaryLemmas)), outputInfo)
-                case Left(reason) =>
-                  (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
-              }
+        case leo.modules.calculus.CnfConj => replayWith() {
+          val encoding = encCnfConj(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
+          encoding match {
+            case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
+            case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+          }
+        }
 
-            case leo.modules.calculus.CnfSkolem =>
-              val encoding = encSkolem(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
-              encoding match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
-              }
+        case leo.modules.calculus.PolaritySwitch => replayWith(carryTypes) {
+          val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig.orig) //¿polarity switch always only has one parent, right?
+          (toProofStepOld(cl, encStep, "PolaritySwitch", encoding, None),outputInfo)
+        }
 
-            case leo.modules.calculus.CnfConj =>
-              val encoding = encCnfConj(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
-              encoding match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
-              }
+        case leo.modules.calculus.FuncExt => replayWith() {
+          val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig.orig)
+          (toProofStepOld(cl, encStep, "FuncExt", encoding._1, encoding._2),outputInfo)
+        }
 
-            case leo.modules.calculus.PolaritySwitch =>
-              val encoding = encPolaritySwitch(cl, cl.annotation.parents.head, parentInLpEncID.head, sig.orig) //¿polarity switch always only has one parent, right?
-              (toProofStepOld(cl, encStep, "PolaritySwitch", encoding, None),outputInfo)
+        case leo.modules.calculus.BoolExt => replayWith() {
+          val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig.orig)
+          (toProofStepOld(cl, encStep, "BoolExt", encoding._1, encoding._2),outputInfo)
+        }
 
-            case leo.modules.calculus.FuncExt =>
-              val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig.orig)
-              (toProofStepOld(cl, encStep, "FuncExt", encoding._1, encoding._2),outputInfo)
+        case leo.modules.calculus.OrderedEqFac => replayWith() {
+          val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig.orig)
+          (toProofStepOld(cl, encStep, "OrderedEqFac", encodings._1, encodings._2),outputInfo)
+        }
 
-            case leo.modules.calculus.BoolExt =>
-              val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig.orig)
-              (toProofStepOld(cl, encStep, "BoolExt", encoding._1, encoding._2),outputInfo)
+        ////////////////////////////////////////
+        // Paramodulation encoding
+        case leo.modules.calculus.OrderedParamod => replayWith() {
+          val (parentWithClause, parentIntoClause) = extractParentInfo2_new(cl, stepInfo.identicalSteps.toMap, proofReferences) match {
+            case Left(error) => throw new Exception(error)
+            case Right(value) => value
+          }
+          val addInfoPara = cl.furtherInfo.para match {
+            case Some(value) => value
+            case None => throw new Exception("Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
+          }
+          val (encProof, cantencode) = encPara(cl.cl, parentWithClause, parentIntoClause, addInfoPara, sig.orig)
+          (toProofStepOld(cl, encStep, "OrderedPara", encProof, cantencode),outputInfo)
+        }
 
-            case leo.modules.calculus.OrderedEqFac =>
-              val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig.orig)
-              (toProofStepOld(cl, encStep, "OrderedEqFac", encodings._1, encodings._2),outputInfo)
+        case leo.modules.calculus.DefExpSimp => replayWith() {
+          //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
+          // todo: eta expansion
+          val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, st.defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName0, parentInLpEncID.head, sig.orig)
+          if (!cantENcode.isDefined) st.etaExpFlag = true
+          (toProofStepOld(cl, encStep, "DefExpand", lpProofScript(proofSteps), cantENcode),outputInfo)
+        }
 
-            ////////////////////////////////////////
-            // Paramodulation encoding
-            case leo.modules.calculus.OrderedParamod =>
-              val (parentWithClause, parentIntoClause) = extractParentInfo2_new(cl, stepInfo.identicalSteps.toMap, proofReferences) match {
-                case Left(error) => throw new Exception(error)
-                case Right(value) => value
-              }
-              val addInfoPara = cl.furtherInfo.para match {
-                case Some(value) => value
-                case None => throw new Exception("Error in Lmabdapi encoding: No additional information for the Lambdapi encoding was supplied")
-              }
-              val (encProof, cantencode) = encPara(cl.cl, parentWithClause, parentIntoClause, addInfoPara, sig.orig)
-              (toProofStepOld(cl, encStep, "OrderedPara", encProof, cantencode),outputInfo)
-
-            case leo.modules.calculus.DefExpSimp =>
-              //throw new Exception(s"expanded defs: ${cl.furtherInfo.addInfoDefExp}")
-              // todo: eta expansion
-              val (proofSteps, cantENcode) = EncDefExSimp(cl, cl.annotation.parents.head, st.defRuleDefined, cl.furtherInfo.rwUnderBinder, cl.furtherInfo.addInfoDefExp, applyAllDefsTacName0, parentInLpEncID.head, sig.orig)
-              if (!cantENcode.isDefined) st.etaExpFlag = true
-              (toProofStepOld(cl, encStep, "DefExpand", lpProofScript(proofSteps), cantENcode),outputInfo)
-
-            case leo.modules.calculus.Simp =>
-              if (cl.furtherInfo.addInfoSimpRule.isDefined) {
-                if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp") {
+        case leo.modules.calculus.Simp => replayWith() {
+          if (cl.furtherInfo.addInfoSimpRule.isDefined) {
+            if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp") {
 //                  if (cl.furtherInfo.rwUnderBinder) {
 //                    (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")),outputInfo)
 //                  }
 //                  else {
-                    val (allSteps, notEncoded) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, cl.furtherInfo.simpUsedLambdaDistinctness)
-                    (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded),outputInfo)
+                val (allSteps, notEncoded) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, cl.furtherInfo.simpUsedLambdaDistinctness)
+                (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded),outputInfo)
 //                  }
-                } else if (cl.furtherInfo.addInfoSimpRule.get == "paraSimp") {
+            } else if (cl.furtherInfo.addInfoSimpRule.get == "paraSimp") {
 //                  if (cl.furtherInfo.rwUnderBinder) {
 //                    (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some("Simp: This instance can not be encoded yet as it requires RW under Binder")), outputInfo)
 //                  }
 //                  else {
-                    val (allSteps, notEncoded) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, cl.furtherInfo.simpUsedLambdaDistinctness, Seq(cl.annotation.parents.head.cl.lits.length - 1))
-                    (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded), outputInfo)
+                val (allSteps, notEncoded) = newSimpEncoding(cl.cl, cl.annotation.parents.head.cl, parentInLpEncID.head, sig.orig, cl.furtherInfo.simpUsedLambdaDistinctness, Seq(cl.annotation.parents.head.cl.lits.length - 1))
+                (toProofStepOld(cl, encStep, s"FormulaSimp", lpProofScript(allSteps), notEncoded), outputInfo)
 //                  }
-                }else if (cl.furtherInfo.addInfoSimpRule.get == "detUniInferences") {
-                  val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
-                  encProof match {
-                    case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "DetUniSimp", Left(scripts), None), outputInfo)
-                    case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some(reason)), outputInfo)
-                  }
-                } else {
-                  val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
-                  (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
-                }
-              } else {
-                val annotation = Some("Simp: Unidentified formula simplification unencoded")
-                (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
-              }
-
-            case leo.modules.calculus.PreUni =>
-              val encProof = encodePreUni(cl.annotation.parents.head, cl, parentProofs.head, sig, useTypedIntroduction = useTypedIntroduction)
+            }else if (cl.furtherInfo.addInfoSimpRule.get == "detUniInferences") {
+              val encProof = encodeDetUniSimp(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
               encProof match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "PreUni", Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", Left(Seq.empty), Some(reason)), outputInfo)
+                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "DetUniSimp", Left(scripts), None), outputInfo)
+                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), Some(reason)), outputInfo)
               }
-
-            case leo.modules.calculus.RewriteSimp =>
-              val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
-              encodingRewrite match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(Seq.empty), Some(reason)), outputInfo)
-              }
-
-            case leo.modules.calculus.Miniscope =>
-              val encoding = MiniscopeEncoding.encMiniscope(cl, parentProofs, sig)
-              encoding match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "Miniscope", Left(scripts), None), outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, "Miniscope", Left(Seq.empty), Some(reason)), outputInfo)
-              }
-
-            case leo.modules.calculus.LiftEq =>
-              val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig.orig)
-              (toProofStepOld(cl, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
-
-            case leo.modules.calculus.PatternUni =>
-              val encProof = encodePatternUni(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
-              encProof match {
-                case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None),outputInfo)
-                case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)),outputInfo)
-              }
-
+            } else {
+              val annotation = Some(s"Simp: ${cl.furtherInfo.addInfoSimpRule.get} currently not encoded")
+              (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
+            }
+          } else {
+            val annotation = Some("Simp: Unidentified formula simplification unencoded")
+            (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", lpProofScript(Seq.empty), annotation),outputInfo)
           }
+        }
 
-          polymorphicReason match {
-            case Some(reason) if !polymorphicReplayRules.contains(rule) && replay.isDefinedAt(rule) =>
-              val pending = Some(s"polymorphic replay pending ($reason)")
-              (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), pending), outputInfo)
-            case _ =>
-              replay.applyOrElse(rule, (_: CalculusRule) => {
-                val parentIDs = parentInLpEncID_new.map(name => Renderer.qname(name, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
-                (toProofStepOld(cl, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")), outputInfo)
-              })
+        case leo.modules.calculus.PreUni => replayWith() {
+          val encProof = encodePreUni(cl.annotation.parents.head, cl, parentProofs.head, sig, useTypedIntroduction = useTypedIntroduction)
+          encProof match {
+            case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "PreUni", Left(scripts), None), outputInfo)
+            case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, s"Rule ${rule.name} not encoded yet", Left(Seq.empty), Some(reason)), outputInfo)
           }
+        }
+
+        case leo.modules.calculus.RewriteSimp => replayWith() {
+          val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
+          encodingRewrite match {
+            case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(scripts), None), outputInfo)
+            case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(Seq.empty), Some(reason)), outputInfo)
+          }
+        }
+
+        case leo.modules.calculus.Miniscope => replayWith() {
+          val encoding = MiniscopeEncoding.encMiniscope(cl, parentProofs, sig)
+          encoding match {
+            case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "Miniscope", Left(scripts), None), outputInfo)
+            case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, "Miniscope", Left(Seq.empty), Some(reason)), outputInfo)
+          }
+        }
+
+        case leo.modules.calculus.LiftEq => replayWith() {
+          val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig.orig)
+          (toProofStepOld(cl, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
+        }
+
+        case leo.modules.calculus.PatternUni => replayWith() {
+          val encProof = encodePatternUni(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
+          encProof match {
+            case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None),outputInfo)
+            case EncodeResult.NotEncodable(reason) => (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)),outputInfo)
+          }
+        }
+
+        case _ =>
+          val parentIDs = parentInLpEncID_new.map(name => Renderer.qname(name, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+          (toProofStepOld(cl, encStep, rule.name, lpProofScript(Seq.empty), Option(s"unencoded rule applied to ${parentIDs.mkString(", ")}")), outputInfo)
       }
     }else{
       val outputInfo = new lpProofStepInfo(newIdenticalSteps)
@@ -682,6 +701,7 @@ object LPoutput {
     val defSB: mutable.StringBuilder = new StringBuilder()
 
     // if necessary, add declarations of numbers
+    val signatureOptions = RenderOptions(false, false, monomorphic)
     if (numbers.nonEmpty) {
       typeDecSB.append("// Numeric literals\n")
       numbers.foreach { number =>

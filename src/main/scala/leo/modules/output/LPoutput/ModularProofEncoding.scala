@@ -44,7 +44,13 @@ object ModularProofEncoding {
 
   def encPolaritySwitch(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpTerm, sig: Signature): (lpProofScript) = {
 
-    val bVarMap = clauseVars2LP(parent.cl.implicitlyBound, sig, Set.empty)._2
+    val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
+    // Match the type binder names and order used by ClauseEncoding for the declaration.
+    val childTypeVars = child.cl.typeVars.reverse.map { scope =>
+      val name = NewLpDatastructures.TypeEncoding.tyVar2LP(scope)
+      scope -> lpConstantTerm(name.value)
+    }
+    val typeVarMap = childTypeVars.toMap
 
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     var allRewriteSteps: Seq[lpProofScriptStep] = Seq.empty
@@ -60,9 +66,10 @@ object ModularProofEncoding {
     //        iI) Rewrite the literal
     // 3. Apply the variables we abstracted over to the parent clause and refine with it
 
-    // 1. Abstract over free variables
-    val freeVarsChild = child.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
-    if (freeVarsChild.nonEmpty) allSteps = allSteps :+ lpAssume(freeVarsChild)
+    // 1. Introduce type variables before dependent term variables.
+    val childTermVars = child.cl.implicitlyBound.map { case (scope, _) => lpConstantTerm(bVarMap(scope)) }
+    val childBinders = childTypeVars.map(_._2) ++ childTermVars
+    if (childBinders.nonEmpty) allSteps = allSteps :+ lpAssume(childBinders)
 
     // 2. Apply polarity switch to the literals of the parent if applicable
     var litCount = 0
@@ -76,8 +83,12 @@ object ModularProofEncoding {
             val transfLit = Literal.apply(l,r,origLit.polarity)
 
             // i)  Define an equality term to rewrite (¬ a) = (¬ b) to a = b using the have tactic
-            val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,lpOlTypedBinaryConnectiveTerm(lpEq,lpOtype,encLeft,encRight),term2LP(asTerm(origLit),bVarMap,sig)._1)
-            val polaritySwitchStep = lpRefine(polaritySwitchEqLit.instanciate(encLeft,encRight))
+            val childEquality = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, encLeft, encRight)
+            val parentEquality = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype,
+              lpOlUnaryConnectiveTerm(lpNot, encLeft), lpOlUnaryConnectiveTerm(lpNot, encRight))
+            val equalityToProve = lpOlTypedBinaryConnectiveTerm(lpEq, lpOtype, childEquality, parentEquality)
+            val polaritySwitchStep = lpRefine(lpFunctionApp(lpStd_eq_sym.name,
+              Seq(polaritySwitchEqLit.instanciate(encLeft, encRight))))
             val polaritySwitchName = s"PolaritySwitch_lit$litCount"
             val havePolaritySwitchStep = lpHave(polaritySwitchName,equalityToProve.prf,lpProofScript(Seq(polaritySwitchStep)))
             allSteps = allSteps :+ havePolaritySwitchStep
@@ -86,7 +97,8 @@ object ModularProofEncoding {
             val posInClause = findLitInClause(transfLit,child.cl)
             val patternVar = lpOlUntypedVar(lpOlConstantTerm("x"))
             assert(posInClause.length == 1, "application to more than once literals not encoded yet, should already work though, remove Seq in position argument and test")
-            val rewritePattern = generateClausePatternTerm(Seq(posInClause.head),child.cl.lits.length,None,patternVar)
+            val rewritePattern = generateClausePatternTerm(Seq(posInClause.head), child.cl.lits.length,
+              patternVar = patternVar, polarity = origLit.polarity)
             val rewriteStep = lpRewrite(rewritePattern,lpConstantTerm(polaritySwitchName))
             allRewriteSteps = allRewriteSteps :+ rewriteStep
 
@@ -120,8 +132,10 @@ object ModularProofEncoding {
     }
     allSteps = allSteps ++ allRewriteSteps
 
-    // 3. Apply the variables we abstracted over to the parent clause and refine with it
-    allSteps = allSteps :+ lpRefine(lpFunctionApp(parentNameLpEnc, freeVarsChild))
+    // 3. Negation removal preserves the clause variables. Pass them in the parent's binder order.
+    val parentTypeArgs = parent.cl.typeVars.reverse.map(typeVarMap)
+    val parentTermArgs = parent.cl.implicitlyBound.map { case (scope, _) => lpConstantTerm(bVarMap(scope)) }
+    allSteps = allSteps :+ lpRefine(lpFunctionApp(parentNameLpEnc, parentTypeArgs ++ parentTermArgs))
 
     (lpProofScript(allSteps))
     }
