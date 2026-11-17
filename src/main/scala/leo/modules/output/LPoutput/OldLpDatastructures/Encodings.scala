@@ -101,21 +101,12 @@ object Encodings {
         }
         else if (tptpDefinedTypeMap.keySet.contains(baseType)){
           tptpDefinedTypeMap(baseType)
-        }else{
-          //val lpSafeName = lpEscapeName(sig(id).name, sig, false)
-          //val prefixedSafeName = if (prefix) s"${abbreviationSignatureFile}$lpSafeName" else lpSafeName
-          //(lpOlUserDefinedType(prefixedSafeName))
-          val lpSafeName = lpEscapeName(sig(id).name,sig,prefix)
-          (lpOlUserDefinedType(lpSafeName))
+        } else {
+          lpOlNamedType(id, lpEscapeName(baseType, sig, prefix), prefix)
         }
       case ComposedType(id, args) =>
-        var encArgs: Seq[lpType] = Seq.empty
-        args foreach{arg =>
-          val encArg = type2LP(arg,sig, prefix)
-          encArgs = encArgs :+ encArg
-        }
-        throw new Exception(s"attempting to encode composed Type, this was never tested! \ninput was ${ty.pretty}\noutput would be ${lpOlMonoComposedType(lpConstantTerm(lpEscapeName(sig(id).name,sig)),encArgs).pretty}")
-        (lpOlMonoComposedType(lpConstantTerm(sig(id).name),encArgs))
+        val constructor = lpOlNamedType(id, sig(id).name, prefix)
+        lpOlMonoComposedType(constructor, args.map(type2LP(_, sig, prefix)))
       case BoundType(scope) =>
         val tyName = "T" + intToName(scope-1)
         lpOlUserDefinedType(tyName)

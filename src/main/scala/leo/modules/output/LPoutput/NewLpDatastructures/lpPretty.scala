@@ -68,7 +68,9 @@ object Renderer {
     case (Left(step), _) => proof(step, ro, sig)
     case (Right(script), index) =>
       // Reuse the legacy printer for nested proofs and the caller's symbol prefixes.
-      val rendered = script.pretty(PrettyConfig(ro.sigPrefix, ro.formulaPrefix))
+      val config = PrettyConfig(ro.sigPrefix, ro.formulaPrefix, Some((key, qualify) =>
+        qname(sig.typeNames(key), ro.copy(sigPrefix = ro.sigPrefix && qualify))))
+      val rendered = script.pretty(config)
       // Legacy fragments omit their final separator inside a local have.
       // Fragments need separators before subsequent fragments or top-level `end`.
       val needsSeparator = terminateLegacy || index < body.size - 1

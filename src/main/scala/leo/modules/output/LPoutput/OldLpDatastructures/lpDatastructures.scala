@@ -1,6 +1,6 @@
 package leo.modules.output.LPoutput.OldLpDatastructures
 
-import leo.datastructures.Int0
+import leo.datastructures.{Int0, Signature}
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
 
 /**
@@ -16,7 +16,8 @@ object lpDatastructures {
 
   val monomorphic = true
 
-  final case class PrettyConfig(sigPrefix: Boolean = true, formulaPrefix: Boolean = true)
+  final case class PrettyConfig(sigPrefix: Boolean = true, formulaPrefix: Boolean = true,
+                                renderTypeName: Option[(Signature.Key, Boolean) => String] = None)
 
   abstract class lpStatement {
     def pretty (implicit prefix : PrettyConfig = PrettyConfig(false,false)): String
@@ -326,6 +327,13 @@ object lpDatastructures {
     override def lift2Poly: lpOlPolyType = lpliftedMonoType(lpOlUserDefinedType(t))
   }
 
+  case class lpOlNamedType(key: Signature.Key, fallbackName: String, qualify: Boolean) extends lpOlSimpleType {
+    override def pretty(implicit config: PrettyConfig): String =
+      config.renderTypeName.fold(fallbackName)(_(key, qualify))
+    override def lift2Meta: lpMlType = lpliftedObjectType(this)
+    override def lift2Poly: lpOlPolyType = lpliftedMonoType(this)
+  }
+
   case class lpOlUserDefinedPolyType(t: String) extends lpOlPolyType {
     override def pretty (implicit prefix : PrettyConfig): String = t
 
@@ -371,7 +379,7 @@ object lpDatastructures {
     override def lift2Poly: lpOlPolyType = (lpliftedMonoType(lpOlFunctionType(args)))
   }
 
-  case class lpOlMonoComposedType(name: lpConstantTerm, args: Seq[lpType]) extends lpOlMonoType { //todo ?
+  case class lpOlMonoComposedType(name: lpOlNamedType, args: Seq[lpOlType]) extends lpOlMonoType {
     override def pretty (implicit prefix : PrettyConfig): String = s"(${name.pretty} ${args.map(arg => arg.pretty).mkString(" ")})"
     override def lift2Meta: lpMlType = lpliftedObjectType(lpOlMonoComposedType(name, args))
 
