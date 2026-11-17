@@ -1,7 +1,7 @@
 package leo.modules.output.LPoutput
 
 import leo.{Configuration, Out, modules}
-import leo.datastructures.Term.Integer
+import leo.datastructures.Term.{Integer, Rational, Real}
 import leo.datastructures.{ClauseAnnotation, ClauseProxy, Kind, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Subst, Term, isPropSet}
 import leo.modules.HOLSignature.TyForall
 import leo.modules.calculus.CalculusRule
@@ -18,7 +18,7 @@ import leo.modules.output.LPoutput.ModularProofEncoding._
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Obj, Wildcard}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{El, LpSet}
 import leo.modules.output.LPoutput.NewLpDatastructures.Stmt.Opaque
-import leo.modules.output.LPoutput.NewLpDatastructures.nameGeneration.nameInt
+import leo.modules.output.LPoutput.NewLpDatastructures.nameGeneration.{nameInt, nameRational, nameReal}
 
 import java.nio.file.{Files, Path, Paths, StandardOpenOption}
 import java.nio.charset.StandardCharsets
@@ -683,28 +683,21 @@ object LPoutput {
 
     // if necessary, add declarations of numbers
     if (numbers.nonEmpty) {
-      val intsSB: mutable.StringBuilder = new StringBuilder()
-
-      numbers foreach (num =>
-        num match {
-          case Integer(n) =>
-            Out.lp_debug_info(s"int $n")
-            val newDec = Stmt.Declaration(Name(nameInt(n)), Seq(), El(HolBaseTypes.Int))
-            intsSB.append(NewLpDatastructures.Renderer.stmt(newDec, sig, RenderOptions(false, !outputSingleFile, monomorphic)))
-          case _ => throw new Exception(s"Error in LP encoding: Trying to declare Numbers other than Ints") //todo
+      typeDecSB.append("// Numeric literals\n")
+      numbers.foreach { number =>
+        val (name, ty) = number match {
+          case Integer(n) => (nameInt(n), HolBaseTypes.Int)
+          case Rational(n, d) => (nameRational(n, d), HolBaseTypes.Rat)
+          case Real(w, d, e) => (nameReal(w, d, e), HolBaseTypes.Real)
+          case _ => throw new IllegalArgumentException(s"Unexpected numeric literal in LP signature: ${number.pretty}")
         }
-        )
-
-      if (intsSB.length() != 0){
-        typeDecSB.append("// Integers\n")
-        typeDecSB.append(intsSB)
-        typeDecSB.append("\n")
+        val declaration = Stmt.Declaration(Name(name), Seq.empty, El(ty))
+        typeDecSB.append(Renderer.stmt(declaration, sig, signatureOptions))
       }
-
+      typeDecSB.append("\n")
     }
 
     val (typeSymbols, termSymbols) = signatureSymbols.partition(key => sig.orig(key).hasKind)
-    val signatureOptions = RenderOptions(false, false, monomorphic)
     typeSymbols.foreach { key =>
       val name = sig.typeNames(key).local
       val declaration = Stmt.Declaration(name, Seq.empty, kindToLpType(sig.orig(key)._kind))

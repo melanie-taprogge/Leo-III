@@ -413,6 +413,14 @@ object lpDatastructures {
     override def prf: lpMlType = throw new Exception(s"trying to provide proof of an integer in LP encoding")
   }
 
+  case class lpNumericLiteral(name: String) extends lpOlTerm {
+    override def pretty(implicit config: PrettyConfig): String =
+      if (config.sigPrefix) s"$abbreviationSignatureFile$name" else name
+
+    override def prf: lpMlType =
+      throw new IllegalArgumentException(s"Trying to use numeric literal $name as a proof")
+  }
+
   case object lpIntType extends lpOlMonoType {
     val baseName = "tptp_int"
     override def pretty (implicit prefix : PrettyConfig): String = if (prefix.sigPrefix) s"${abbreviationSignatureFile}$baseName" else baseName

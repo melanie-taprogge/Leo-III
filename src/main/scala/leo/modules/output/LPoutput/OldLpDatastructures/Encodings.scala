@@ -5,6 +5,7 @@ import leo.datastructures.Type._
 import leo.datastructures._
 import leo.modules.HOLSignature._
 import leo.modules.output.LPoutput.LPoutput.abbreviationSignatureFile
+import leo.modules.output.LPoutput.NewLpDatastructures.nameGeneration.{nameRational, nameReal}
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
 import leo.modules.output.LPoutput.{applyPartiallyAppliedConnective, lpEscapeName, lpEscapeTerm}
 import leo.modules.output.ToTHF.{collectChoice, collectForallTys}
@@ -247,8 +248,12 @@ object Encodings {
       case Integer(n) =>
         val encodedInt = lpInt(n)
         (encodedInt,usedSymbols+encodedInt)
-      case Rational(n, d) => throw new Error(s"rationals are not encoded yet ${t.pretty}") //s"$n/$d"
-      case Real(w, d, e) => throw new Error(s"reals are not encoded yet ${t.pretty}") //if (e == 0) s"$w.$d" else s"$w.${d}E$e"
+      case Rational(n, d) =>
+        val literal = lpNumericLiteral(nameRational(n, d))
+        (literal, usedSymbols + literal)
+      case Real(w, d, e) =>
+        val literal = lpNumericLiteral(nameReal(w, d, e))
+        (literal, usedSymbols + literal)
       // Give Bound variables names
       case Bound(_, scope) =>
         (var2Lp(scope,t.ty,bVars,sig,prefix),usedSymbols)
