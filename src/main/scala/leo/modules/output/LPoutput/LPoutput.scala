@@ -415,10 +415,14 @@ object LPoutput {
           (toProofStepOld(cl, encStep, "PolaritySwitch", encoding, None),outputInfo)
         }
 
-        case leo.modules.calculus.FuncExt => replayWith() {
-          val encoding = encFuncExtPos(cl, cl.annotation.parents.head, cl.furtherInfo.edLitBeforeAfter, parentInLpEncID.head, sig.orig)
-          (toProofStepOld(cl, encStep, "FuncExt", encoding._1, encoding._2),outputInfo)
-        }
+        case leo.modules.calculus.FuncExt =>
+          val editedLiterals = cl.furtherInfo.edLitBeforeAfter
+          val positiveReplay = editedLiterals.nonEmpty && editedLiterals.forall(_._1.polarity)
+          val support = if (positiveReplay) carryTypes else monomorphicReplay
+          replayWith(support) {
+            val encoding = encFuncExtPos(cl, cl.annotation.parents.head, editedLiterals, parentInLpEncID.head, sig.orig)
+            (toProofStepOld(cl, encStep, "FuncExt", encoding._1, encoding._2),outputInfo)
+          }
 
         case leo.modules.calculus.BoolExt => replayWith(carryTypes) {
           val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig.orig)

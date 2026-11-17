@@ -264,8 +264,7 @@ object ModularProofEncoding {
 
     val allFreeVars = editedLiterals.flatMap(pair => pair._2.fv) ++ child.cl.implicitlyBound
     val bVarMap = clauseVars2LP(allFreeVars, sig, Set.empty)._2
-    val encParent = clause2LP(parent.cl, Set(), sig)._1
-    val impBoundParent = encParent.impBoundVars
+    val parentLits = clause2LP0(parent.cl, bVarMap, sig, Set.empty)._1.args
     Out.lp_debug_info(s"Amount of edited Literals detected: ${editedLiterals.length}")
 
     // Check if we will need to do a permutation
@@ -287,15 +286,27 @@ object ModularProofEncoding {
     /////////////////////////////////////////////////////
     //// 1. Abstract over free variables
 
-    val freeVarsChild = child.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
-    val initialStep = if (freeVarsChild.nonEmpty) Seq(lpAssume(freeVarsChild)) else Seq()
+    def typeVarName(scope: Int): String = NewLpDatastructures.TypeEncoding.tyVar2LP(scope).value
 
-    // Instantiate the initial state
+    val childTypeScopes = child.cl.typeVars.reverse
+    val parentTypeScopes = parent.cl.typeVars.reverse
+    val childTypeBinders = childTypeScopes.map(scope => lpConstantTerm(typeVarName(scope)))
+    val childTermBinders = child.cl.implicitlyBound.map { case (scope, _) => lpConstantTerm(bVarMap(scope)) }
+    val childBinders = childTypeBinders ++ childTermBinders
+    val introduction = if (childBinders.nonEmpty) Seq(lpAssume(childBinders)) else Seq.empty
+
+    // A type can disappear when both sides ignore the argument introduced by PFE.
+    val missingTypeDefinitions = parentTypeScopes.diff(childTypeScopes).map { scope =>
+      lpSetTac(typeVarName(scope), lpItype)
+    }
+    val parentTypeArgs = parentTypeScopes.map(scope => lpConstantTerm(typeVarName(scope)))
+    val parentTermArgs = parent.cl.implicitlyBound.map { case (scope, _) => lpConstantTerm(bVarMap(scope)) }
+
     val initialState = funcExtState(
-      currParentLits = encParent.lits,
+      currParentLits = parentLits,
       currentUnencParent = parent.cl.lits,
-      lastStepName = lpFunctionApp(parentNameLpEnc, liftVarsToMeta(impBoundParent)),
-      allSteps = initialStep,
+      lastStepName = lpFunctionApp(parentNameLpEnc, parentTypeArgs ++ parentTermArgs),
+      allSteps = introduction ++ missingTypeDefinitions,
       literalsToEqRW = Seq(),
       cantEncode = None
     )
