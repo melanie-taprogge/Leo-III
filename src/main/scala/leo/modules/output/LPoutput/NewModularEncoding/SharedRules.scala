@@ -33,11 +33,8 @@ object AssumeStep {
     */
   def encClauseVariableIntroduction(encChild: lpClauseInst,
                                     useLetBasedIntroduction: Boolean,
-                                    sig: LpSig): Seq[LpProofScript] = {
-    val names = extractVarNames(encChild)
-    if (!useLetBasedIntroduction || names.isEmpty) encAssumeStep(names)
-    else encClauseVariableIntroduction(encChild.metaVars, encChild.term, useLetBasedIntroduction, sig)
-  }
+                                    sig: LpSig): Seq[LpProofScript] =
+    encClauseVariableIntroduction(encChild.metaVars, encChild.term, useLetBasedIntroduction, sig)
 
   /** Introduce only the supplied prefix, leaving remainingGoal (including any
     * pending object-level quantifiers) as the explicitly typed proof obligation.

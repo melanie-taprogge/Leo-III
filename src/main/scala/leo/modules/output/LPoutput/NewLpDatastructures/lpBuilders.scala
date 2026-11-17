@@ -254,12 +254,6 @@ object lpClauseInst {
     lpClauseInst(disjunction,lits,vars,mlTerm)
   }
 
-  private def apply_to_single(cl: Clause, fullBvarsMap: Map[Int, String], suppressReduction: Boolean = false) = {
-    val encCls = ClauseEncoding.lits2Lp(cl.lits, fullBvarsMap, suppressReduction = suppressReduction)
-    val encVars = TermEncoding.vars2Lp(cl.implicitlyBound, fullBvarsMap).map(Left(_))
-    lpClauseInst(encCls,encVars)
-  }
-
   /**
     * Encode a sequence of clauses into Lambdapi, producing both their translated
     * clause instances and a map of all implicitly bound variables.
@@ -279,7 +273,7 @@ object lpClauseInst {
     val allImpBoundVars = (cls.flatMap(_.implicitlyBound) ++ additionalImplicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
     val encCls = cls.zipWithIndex.map { case (cl, index) =>
-      apply_to_single(cl, fullBvarsMap, suppressReductionAt.contains(index))
+      ClauseEncoding.clause2LP(cl, fullBvarsMap, suppressReductionAt.contains(index))
     }
     (fullBvarsMap, encCls)
   }
@@ -287,8 +281,8 @@ object lpClauseInst {
   def apply_to_pair(cl0: Clause, cl1: Clause): (Map[Int, String], lpClauseInst, lpClauseInst) = {
     val allImpBoundVars = Seq(cl0,cl1).flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
-    val encCls0 = apply_to_single(cl0, fullBvarsMap)
-    val encCls1 = apply_to_single(cl1, fullBvarsMap)
+    val encCls0 = ClauseEncoding.clause2LP(cl0, fullBvarsMap)
+    val encCls1 = ClauseEncoding.clause2LP(cl1, fullBvarsMap)
     (fullBvarsMap, encCls0, encCls1)
   }
 }

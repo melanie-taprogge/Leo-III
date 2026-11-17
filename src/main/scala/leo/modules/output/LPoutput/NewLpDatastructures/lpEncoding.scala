@@ -443,22 +443,17 @@ object ClauseEncoding {
     * @return The encoded clause as a lambdapi clause object (lpClauseInst)
     * */
   final def clause2LP(cl: Clause): lpClauseInst = {
-    val freeVarsExist = cl.implicitlyBound.nonEmpty || cl.typeVars.nonEmpty
-    if (freeVarsExist) {
-      var quantifiedVars: Seq[Either[Var[Level.Obj], TyVar]] = Seq.empty
-      // Add clause-type-variables
-      quantifiedVars = quantifiedVars ++ cl.typeVars.reverse.map(i => Right(TyVar(tyVar2LP(i))))
-      // Add clause-term-variables
-      val (namedFVEnumerationLP, bVarMap) = clauseVars2LP(cl.implicitlyBound)
-      quantifiedVars = quantifiedVars ++ namedFVEnumerationLP.map(Left(_))
-      // Encode the individual literals with the generated bVarMap
-      val encClauseLits = lits2Lp(cl.lits, bVarMap)
-      lpClauseInst(encClauseLits, quantifiedVars)
-    } else {
-      // Encode the individual literals
-      val encClauseLits = lits2Lp(cl.lits, Map.empty)
-      lpClauseInst(encClauseLits, Seq.empty)
-    }
+    val (_, bVarMap) = clauseVars2LP(cl.implicitlyBound)
+    clause2LP(cl, bVarMap)
+  }
+
+  /** Translate a clause using a term-variable map shared with related clauses. */
+  final def clause2LP(cl: Clause, bVarMap: Map[Int, String],
+                      suppressReduction: Boolean = false): lpClauseInst = {
+    val typeBinders = cl.typeVars.reverse.map(scope => Right(TyVar(tyVar2LP(scope))))
+    val termBinders = TermEncoding.vars2Lp(cl.implicitlyBound, bVarMap).map(Left(_))
+    val literals = lits2Lp(cl.lits, bVarMap, suppressReduction = suppressReduction)
+    lpClauseInst(literals, typeBinders ++ termBinders)
   }
 
 }

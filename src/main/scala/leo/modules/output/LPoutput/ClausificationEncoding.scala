@@ -49,8 +49,8 @@ object ClausificationEncoding {
                                       pattern: RewritePattern)
 
   /** Validated conjunction selection and the variable context needed by its proof. */
-  private final case class CnfConjContext(parentVars: Seq[(Int, Type)],
-                                          childVars: Seq[(Int, Type)],
+  private final case class CnfConjContext(parent: Clause,
+                                          child: Clause,
                                           parentProof: LpTerm[Level.Obj],
                                           encChild: lpClauseInst,
                                           variableMap: Map[Int, String],
@@ -1139,8 +1139,6 @@ object ClausificationEncoding {
     if (info.numOfClauses < 2 || info.idxInConj < 0 || info.idxInConj >= info.numOfClauses)
       return Left(s"CNF conjunction step ${step.id}: invalid index ${info.idxInConj} for ${info.numOfClauses} conjuncts")
     val parent = parents.head.cl
-    if (parent.typeVars.nonEmpty || step.cl.typeVars.nonEmpty)
-      return Left(s"CNF conjunction step ${step.id}: polymorphic conjunction selection is not encoded")
     parent.lits match {
       case Seq(literal) if literal.polarity && !literal.equational => ()
       case _ => return Left(s"CNF conjunction step ${step.id}: expected one positive non-equational parent literal")
@@ -1172,7 +1170,7 @@ object ClausificationEncoding {
 
     val variableIntroduction = encClauseVariableIntroduction(
       encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
-    Right(CnfConjContext(parent.implicitlyBound, step.cl.implicitlyBound, parentProofs.head,
+    Right(CnfConjContext(parent, step.cl, parentProofs.head,
       encChild, variableMap, info.idxInConj, info.numOfClauses, variableIntroduction))
   }
 
@@ -1180,7 +1178,7 @@ object ClausificationEncoding {
   private def encConjunctSelection(ctx: CnfConjContext): LpProofScript = {
     // Instantiate disappearing parent variables with witnesses; infer sibling conjuncts from the parent proof.
     val parentProof = SubstitutionEncoding.instantiateProofTerm(
-      ctx.parentVars, ctx.childVars, Seq.empty, ctx.variableMap, ctx.parentProof)
+      ctx.parent, ctx.child, ctx.variableMap, ctx.parentProof)
     val conjuncts = Seq.fill[LpTerm[Level.Obj]](ctx.clauseCount)(LpTerm.Wildcard[Level.Obj]())
       .updated(ctx.clauseIndex, ctx.encChild.term)
     val selection = MetaTheorems.Inst.selectConjunct(conjuncts, ctx.clauseIndex, parentProof)

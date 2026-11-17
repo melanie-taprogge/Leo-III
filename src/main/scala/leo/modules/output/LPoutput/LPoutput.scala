@@ -402,7 +402,7 @@ object LPoutput {
           }
         }
 
-        case leo.modules.calculus.CnfConj => replayWith() {
+        case leo.modules.calculus.CnfConj => replayWith(carryTypes) {
           val encoding = encCnfConj(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
           encoding match {
             case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)

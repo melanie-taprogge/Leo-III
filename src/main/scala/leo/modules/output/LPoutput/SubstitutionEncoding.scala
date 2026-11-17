@@ -1,11 +1,12 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
+import leo.modules.HOLSignature
 import leo.datastructures._
 import leo.modules.output.LPoutput.LpLibs.ND.Terms.lpWitnessCon
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, var2Lp}
-import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
+import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.{tyVar2LP, type2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures._
 
 /** Shared encoding of proof-term instantiation by Leo substitutions. */
@@ -55,7 +56,34 @@ object SubstitutionEncoding {
                            currentVars: Seq[(Int, Type)],
                            termSubst: Seq[UniTermSubst],
                            sharedVarMap: Map[Int, String],
+                           parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    instantiateProofTerm(parentVars, currentVars, termSubst, sharedVarMap, parentProof, Map.empty)
+
+  /** Instantiate a parent in a child context with the same variable scopes.
+    * Type variables absent from the child are instantiated at the individual type.
+    */
+  def instantiateProofTerm(parent: Clause,
+                           child: Clause,
+                           sharedVarMap: Map[Int, String],
                            parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] = {
+    val childTypeScopes = child.typeVars.toSet
+    val typeInstances = parent.typeVars.reverse.map { scope =>
+      val name = tyVar2LP(scope)
+      val instance = if (childTypeScopes(scope)) OlMonoType.TyVar(name) else type2LP(HOLSignature.i)
+      name -> instance
+    }
+    val typeArgs = typeInstances.map { case (_, instance) => Arg.ExplicitTypeArg[Level.Obj](instance) }
+    val instantiatedParent = if (typeArgs.nonEmpty) LpTerm.App(parentProof, typeArgs) else parentProof
+    instantiateProofTerm(parent.implicitlyBound, child.implicitlyBound, Seq.empty, sharedVarMap,
+      instantiatedParent, typeInstances.toMap)
+  }
+
+  private def instantiateProofTerm(parentVars: Seq[(Int, Type)],
+                                   currentVars: Seq[(Int, Type)],
+                                   termSubst: Seq[UniTermSubst],
+                                   sharedVarMap: Map[Int, String],
+                                   parentProof: LpTerm[Level.Obj],
+                                   typeInstances: Map[Name, OlMonoType]): LpTerm[Level.Obj] = {
     val currentBoundIndices = currentVars.map(_._1)
     val parentVarTypes = parentVars.toMap
     val termToApply = termSubst.iterator.map { subst =>
@@ -67,7 +95,8 @@ object SubstitutionEncoding {
         if (currentVars.contains(parentVar)) {
           Arg.Explicit[Level.Obj](var2Lp(sourceIndex, sourceType, sharedVarMap))
         } else {
-          Arg.Explicit[Level.Obj](LpTerm.App[Level.Obj](lpWitnessCon, Seq(Arg.ExplicitTypeArg[Level.Obj](type2LP(sourceType)))))
+          val witnessType = Substitution.substMonoType(type2LP(sourceType), typeInstances)
+          Arg.Explicit[Level.Obj](LpTerm.App[Level.Obj](lpWitnessCon, Seq(Arg.ExplicitTypeArg[Level.Obj](witnessType))))
         }
       )
     }
