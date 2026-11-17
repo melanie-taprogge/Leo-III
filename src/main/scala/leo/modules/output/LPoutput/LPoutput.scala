@@ -515,7 +515,7 @@ object LPoutput {
           }
         }
 
-        case leo.modules.calculus.LiftEq => replayWith() {
+        case leo.modules.calculus.LiftEq => replayWith(carryTypes) {
           val encodingLiftEq = encLiftEq(cl, cl.annotation.parents, cl.furtherInfo.addInfoLiftEq, parentInLpEncID, sig.orig)
           (toProofStepOld(cl, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
         }

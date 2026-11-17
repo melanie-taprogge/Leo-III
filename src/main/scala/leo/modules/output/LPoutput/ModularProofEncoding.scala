@@ -1451,11 +1451,16 @@ object ModularProofEncoding {
       var liftedLits: Seq[lpOlTerm] = Seq.empty
       var canEncode: Option[String] = None
 
-      // 1. Abstract over free variables
-      val bVars = clauseVars2LP(parents.head.cl.implicitlyBound, sig, Set.empty)._2
-      val (clauseQuantification, applySymbolsToParent) = clauseRuleQuantification(parents.head.cl, bVars, sig)
-      if (clauseQuantification.nonEmpty) allSteps = allSteps :+ lpAssume(clauseQuantification.map(var0 => var0.untyped))
-      val lastStep: lpTerm = lpFunctionApp(parentNameLpEnc.head, applySymbolsToParent)
+      // 1. Introduce type binders before dependent term binders.
+      def typeArguments(clause: Clause): Seq[lpConstantTerm] =
+        clause.typeVars.reverse.map(scope => lpConstantTerm(NewLpDatastructures.TypeEncoding.tyVar2LP(scope).value))
+
+      val parentClause = parents.head.cl
+      val bVars = clauseVars2LP(parentClause.implicitlyBound, sig, Set.empty)._2
+      val (termBinders, parentTermArgs) = clauseRuleQuantification(parentClause, bVars, sig)
+      val childBinders = typeArguments(cl.cl) ++ termBinders.map(_.untyped)
+      if (childBinders.nonEmpty) allSteps = allSteps :+ lpAssume(childBinders)
+      val lastStep = lpFunctionApp(parentNameLpEnc.head, typeArguments(parentClause) ++ parentTermArgs)
 
       indices foreach { indx =>
         val lit = parents.head.cl.lits(indx)
