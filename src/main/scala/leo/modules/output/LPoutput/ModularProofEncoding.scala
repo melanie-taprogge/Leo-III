@@ -1273,15 +1273,6 @@ object ModularProofEncoding {
     (simpLits, doubleLiterals, implicitRwTransf)
   }
 
-  def lpEncodingPrelim(child: Clause, parents: Seq[Clause], allVariables: Seq[(Int, Type)], sig: Signature):(lpClauseInst, Seq[ lpClauseInst], Map[Int, String], Seq[lpAssume])={
-    val encParents = parents.map(parent => lpClauseInst(parent, sig))
-    val encChild = lpClauseInst(child, sig)
-    val bVarMap = clauseVars2LP(allVariables, sig, Set.empty)._2
-    // Instanciate the initial step abstracting over the free variables of the child
-    val initialStep = if (encChild.metaVars.nonEmpty) Seq(lpAssume(encChild.metaVars)) else Seq()
-    (encChild, encParents, bVarMap, initialStep)
-  }
-
   def lpImpHaveStepConstructor(stepName: String, quantifiedVars: Seq[lpTypedVar], termBefore: lpOlTerm, termAfter: lpOlTerm, proofScriptSteps: Seq[lpProofScriptStep]): lpHave = {
     // Function constructing subproofs for one clause implying another using the have-tactic with potential...
     // - Abstraction over variables
@@ -1321,18 +1312,32 @@ object ModularProofEncoding {
   }
 
   /** Carry out the construction of a proof script for applications of (SIMP)*/
-  def encSimpProofScript(pLits: Seq[Literal], cLits: Seq[Literal], encParent: lpClauseInst, encChild: lpClauseInst, childLen: Int, bVarMap: Map[Int, String], parentNameLpEnc: lpTerm, ignoreIndices: Seq[Int], sig:Signature):Seq[lpProofScriptStep]= {
+  def encSimpProofScript(parent: Clause, child: Clause, parentNameLpEnc: lpTerm, ignoreIndices: Seq[Int],
+                         sig: Signature): Seq[lpProofScriptStep] = {
+    // Keep the declaration's names for child variables and assign the remaining names to parent-only variables.
+    val childTermScopes = child.implicitlyBound.map(_._1).toSet
+    val parentOnlyTerms = parent.implicitlyBound.filterNot { case (scope, _) => childTermScopes(scope) }
+    val bVarMap = clauseVars2LP(parentOnlyTerms ++ child.implicitlyBound, sig, Set.empty)._2
+    val encParent = clause2LP0(parent, bVarMap, sig, Set.empty)._1
+    val encChild = clause2LP0(child, bVarMap, sig, Set.empty)._1
 
+    def typeVarName(scope: Int): String = NewLpDatastructures.TypeEncoding.tyVar2LP(scope).value
 
-    // Identify any implicit transformations that may need to be encoded
-    val (simpLits, doubleLiterals, implicitRwTransf) = inferImplicitTransformationsSimp(pLits, cLits, childLen, bVarMap, ignoreIndices, sig)
+    val childTypeScopes = child.typeVars.reverse
+    val parentTypeScopes = parent.typeVars.reverse
+    val childTypeBinders = childTypeScopes.map(scope => lpConstantTerm(typeVarName(scope)))
+    val childTermBinders = var2Lp(child.implicitlyBound, bVarMap, sig).map(_.asMlVar)
+    val childBinders = childTypeBinders ++ childTermBinders
+    val assumeStep = if (childBinders.nonEmpty) Seq(lpAssume(childBinders)) else Seq.empty
+    val missingTypeDefinitions = parentTypeScopes.diff(childTypeScopes).map { scope =>
+      lpSetTac(typeVarName(scope), lpItype)
+    }
+
+    // Identify any implicit transformations that may need to be encoded.
+    val (simpLits, doubleLiterals, implicitRwTransf) =
+      inferImplicitTransformationsSimp(parent.lits, child.lits, child.lits.length, bVarMap, ignoreIndices, sig)
     val encSimpLits = simpLits.map(simpLit => lpLiteral(simpLit, bVarMap, sig).term)
     Out.lp_debug_info(s"simplified literals: ${encSimpLits.map(_.pretty)}")
-
-    // Identify the variables remaining after simplification and assume them
-    val remainingVars = simpLits.flatMap(_.fv).distinct.sortBy(_._1).reverse
-    val encRemainingVars = var2Lp(remainingVars, bVarMap, sig).map(_.asMlVar)
-    val assumeStep : Seq[lpProofScriptStep] = if (encRemainingVars.nonEmpty) Seq(lpAssume(encRemainingVars)) else Seq()
 
     /////////////////////////////////////////////////////
     //// 2. Instantiate a subproof (SimpApp) using have to proof that the parent implies the child
@@ -1341,27 +1346,30 @@ object ModularProofEncoding {
     // If we need to account for the deletion of double literals, we include the duplicates in the implication we construct
     //    and remove them in an additional step
     val clauseToProve = lpOlUntypedBinaryConnectiveTerm_multi(lpOr, doubleLiterals.map(indx => encSimpLits(indx)))
-    // Identify any variables that were implicitly quantified in the parent but not in the child
-    val disappearingVars = encParent.metaVars.diff(encRemainingVars)
-    Out.lp_debug_info(s"Vars in parent: ${encParent.metaVars.map(_.pretty)}, Vars after Simp: ${encRemainingVars.map(_.pretty)} => Disappearing implicitly quantified variables: ${disappearingVars.map(_.pretty)}")
-
-    val needsArithmeticTactic = simplificationNeedsArithmeticTactic(pLits, cLits)
-    val (haveSimpAppStep, simpAppStepName) = encSimpProofSubstep(disappearingVars, encParent.term, clauseToProve, implicitRwTransf, needsArithmeticTactic)
+    val disappearingTerms = var2Lp(parentOnlyTerms, bVarMap, sig).map(_.asMlVar)
+    val needsArithmeticTactic = simplificationNeedsArithmeticTactic(parent.lits, child.lits)
+    val (haveSimpAppStep, simpAppStepName) =
+      encSimpProofSubstep(disappearingTerms, encParent, clauseToProve, implicitRwTransf, needsArithmeticTactic)
 
 
 
     /////////////////////////////////////////////////////
     //// 3. Apply Implicit transformations: Deletion of double literals, eqSym and permutation
 
-    val witnessTermsToApply = disappearingVars.map(var0 => lpWitness.fromAnyType(var0.ty))
-    val allTermsToApplyToParent = encParent.metaVars.map(var0 => if (disappearingVars.contains(var0)) lpWitness.fromAnyType(var0.ty) else var0)
-    val appliedSimpAppStepName = lpFunctionApp.toDefName(simpAppStepName, witnessTermsToApply)
-    val simpStepName = lpFunctionApp(appliedSimpAppStepName, Seq(lpFunctionApp(parentNameLpEnc, allTermsToApplyToParent)))
+    val witnesses = parentOnlyTerms.map(_._1).zip(disappearingTerms.map(v => lpWitness.fromAnyType(v.ty)))
+    val witnessByScope = witnesses.toMap
+    val parentTypeArgs = parentTypeScopes.map(scope => lpConstantTerm(typeVarName(scope)))
+    val parentTermArgs = parent.implicitlyBound.map { case (scope, _) =>
+      witnessByScope.get(scope).fold[lpTerm](lpConstantTerm(bVarMap(scope)))(identity)
+    }
+    val appliedSimpAppStepName = lpFunctionApp.toDefName(simpAppStepName, witnesses.map(_._2))
+    val parentProof = lpFunctionApp(parentNameLpEnc, parentTypeArgs ++ parentTermArgs)
+    val simpStepName = lpFunctionApp(appliedSimpAppStepName, Seq(parentProof))
     val maybePermStepName: lpFunctionApp = if (doubleLiterals != doubleLiterals.indices) {
       // Application of delete literal is necessary
       // todo: exclude cases where the rewrite rule applied by LP would also handle it. (should only happen if the relevant literals are at the two most left ones right?)
-      Out.lp_debug_info(s"need to prove ${doubleLiterals.map(indx => encChild.lits(indx).pretty)}")
-      val instMetaDelTheorem = metaDeletion.instanciate(encChild.lits, doubleLiterals, simpStepName)
+      Out.lp_debug_info(s"need to prove ${doubleLiterals.map(indx => encChild.args(indx).pretty)}")
+      val instMetaDelTheorem = metaDeletion.instanciate(encChild.args, doubleLiterals, simpStepName)
       instMetaDelTheorem
     } else simpStepName
 
@@ -1370,9 +1378,8 @@ object ModularProofEncoding {
     //// 4. Refine with the parent applied to SimpApp
 
     val refineStep = lpRefine(maybePermStepName)
-    val allSteps: Seq[lpProofScriptStep] = assumeStep ++ (Seq(haveSimpAppStep)) :+ refineStep
-
-    allSteps}
+    assumeStep ++ missingTypeDefinitions ++ Seq(haveSimpAppStep, refineStep)
+  }
 
   def newSimpEncoding(child: Clause, parent: Clause, parentNameLpEnc: lpTerm, sig: Signature, simpUsedLambdaDistinctness: Boolean, ignoreIndices: Seq[Int] = Seq()):(Seq[lpProofScriptStep], Option[String])={
 
@@ -1401,14 +1408,7 @@ object ModularProofEncoding {
 
     assert((ignoreIndices.isEmpty || ignoreIndices.max <= parent.lits.length),"Error in Lambdapi encoding: Indices to ignore in Simplification out of bounds")
 
-    val (encChild,encParent0,bVarMap,_) = lpEncodingPrelim(child,Seq(parent),parent.implicitlyBound,sig)
-    assert(encParent0.length == 1)
-    val encParent = encParent0.head
-    Out.lp_debug_info(s"Encoding simplification of ${encParent.term.pretty} to ${encChild.term.pretty}")
-
-    /////////////////////////////////////////////////////
-    //// 2 - 4
-    val allSteps0 = encSimpProofScript(parent.lits, child.lits, encParent, encChild, child.lits.length, bVarMap, parentNameLpEnc, ignoreIndices, sig)
+    val allSteps0 = encSimpProofScript(parent, child, parentNameLpEnc, ignoreIndices, sig)
 
     (allSteps0, None)
   }

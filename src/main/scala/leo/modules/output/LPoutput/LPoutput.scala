@@ -457,7 +457,9 @@ object LPoutput {
           (toProofStepOld(cl, encStep, "DefExpand", lpProofScript(proofSteps), cantENcode),outputInfo)
         }
 
-        case leo.modules.calculus.Simp => replayWith() {
+        case leo.modules.calculus.Simp => replayWith(
+          if (cl.furtherInfo.addInfoSimpRule.contains("eqSimp")) carryTypes else monomorphicReplay
+        ) {
           if (cl.furtherInfo.addInfoSimpRule.isDefined) {
             if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp") {
 //                  if (cl.furtherInfo.rwUnderBinder) {
