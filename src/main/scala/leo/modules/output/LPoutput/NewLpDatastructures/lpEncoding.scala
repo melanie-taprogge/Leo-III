@@ -237,8 +237,8 @@ object TermEncoding {
   def term2LP(t: Term, bVars: Map[Int, String], suppressReduction: Boolean = false, replaceUnknownVars: Boolean = false): LpTerm[Level.Obj] =
     encodeScopedTerm(t, bVars, suppressReduction, replaceUnknownVars, Nil)
 
-  private def encodeScopedTerm(t: Term, bVars: Map[Int, String], suppressReduction: Boolean,
-                               replaceUnknownVars: Boolean, typeBinders: List[Name]): LpTerm[Level.Obj] = {
+  private[NewLpDatastructures] def encodeScopedTerm(t: Term, bVars: Map[Int, String], suppressReduction: Boolean,
+                                                    replaceUnknownVars: Boolean, typeBinders: List[Name]): LpTerm[Level.Obj] = {
     // Explicit type binders are innermost first, followed by implicit clause type variables.
     def resolveTypeIndex(index: Int): Name =
       typeBinders.lift(index - 1).getOrElse(tyVar2LP(index - typeBinders.size))
@@ -492,44 +492,54 @@ object RawClauseEncoding {
   }
 }
 
-  // ** Encode definitions
-  object DefEncoding {
-    import TypeEncoding.type2LP
-    import TermEncoding.term2LP
+// ** Encode definitions
+object DefEncoding {
+  import TermEncoding.encodeScopedTerm
+  import TypeEncoding.{type2LP, tyVar2LP}
 
-    /** Helper constructing the actual equality making up the definition */
-    private def constDfn(dnfName: QName, ty: OlMonoType, hd: LpTerm[Level.Obj], defn: LpTerm[Level.Obj], freeVars: Seq[Var[Level.Obj]]): Stmt.Declaration = {
-      val defAsEq = LogicConst.Eq(ty, hd, defn)
-      val bindings: Seq[(Name, LpType)] = freeVars.map(v => (v.name, v.ty.get)) //todo: ensure all have type?
-      Stmt.Declaration(dnfName.local, bindings, Lifting.ProofTerm(defAsEq))
-    }
-
-    /** Encode definitions given in the TPTP problem or constructed throughout proof search (in case of skolem terms)
-      *
-      * @param key the key of the symbol to be defined in the Leo-III signature
-      * @param sig Leo-III signature extended with the mappings necessary for the Lambdapi encoding
-      * @param isSk Boolean indicating weather the definition to be encoded is a skolem definition
-      * @return Lambdapi Declaration of the encoded definition
-      * */
-    def encDfn(key: Key, sig: LpSig, isSk: Boolean): Stmt.Declaration = {
-      val symbol = sig.orig.apply(key)
-      val defTermType = type2LP(symbol._defn.ty)
-      val hd = Const[Level.Obj](SymRef.Leo(key))
-      if (isSk) {
-        val skolemDefName = nameSkDef(key, sig.orig)
-        val (bVarTys, strippedDef) = collectLambdasLP(symbol._defn)
-        val newBVars = makeBVarList(bVarTys, 0)
-        val encBvars = newBVars.map(v => LpTerm.Var[Level.Obj](Name(v._1), Some(El(type2LP(v._2)))))
-        val appliedSk = LpTerm.App[Level.Obj](hd, encBvars.map(Arg.Explicit(_)))
-        val definition = term2LP(strippedDef, fusebVarListwithMap(newBVars, Map()), false)
-        val encDef = constDfn(skolemDefName, defTermType, appliedSk, definition, encBvars)
-        encDef
-      } else {
-        val dnfName = nameDefn(key, sig)
-        val definition = term2LP(symbol._defn, Map(), false)
-        val encDef = constDfn(dnfName, defTermType, hd, definition, Seq.empty)
-        encDef
-      }
-    }
-
+  @annotation.tailrec
+  private def peelTypeLambdas(term: Term, count: Int = 0): (Int, Term) = term match {
+    case TypeLambda(body) => peelTypeLambdas(body, count + 1)
+    case _ => (count, term)
   }
+
+  /** Encode a stored definition as an equality at each instance of its type scheme.
+    * In case of poylmorphic symbols, the definition is given in a pointwise manner over the type variables.
+    * In case of Skolem defs, the defintion is likewise pointwise for the term variables.
+    * */
+  def encDfn(key: Key, sig: LpSig, isSk: Boolean): Stmt.Declaration = {
+    val symbol = sig.orig(key)
+    val (typeArity, _) = collectForallTys(0, symbol._ty)
+    val (typeLambdaCount, instantiatedDefinition) = peelTypeLambdas(symbol._defn)
+    require(typeLambdaCount == typeArity,
+      s"Definition of ${symbol.name} has $typeLambdaCount type abstractions, expected $typeArity")
+
+    val (termBinderTypes, body) =
+      if (isSk) collectLambdasLP(instantiatedDefinition) else (Seq.empty, instantiatedDefinition)
+    val termVars = makeBVarList(termBinderTypes, 0)
+    lazy val occupiedNames = sig.termNames.valuesIterator.map(_.local.value).toSet ++
+      sig.typeNames.valuesIterator.map(_.local.value)
+    val typeBinders = (1 to typeArity).map { index =>
+      Name(LpSig.freshIfNeeded(tyVar2LP(index).value, occupiedNames))
+    }
+    // Declaration parameters run outermost first, but de Bruijn index 1 is innermost.
+    val typeScope = typeBinders.reverse.toList
+    def encodeType(ty: Type): OlMonoType = type2LP(ty, index => typeScope(index - 1))
+
+    val typeParameters = typeBinders.map(name => (name, LpSet))
+    val termParameters = termVars.map { case (name, ty) => (Name(name), El(encodeType(ty))) }
+    val typeArguments = typeBinders.map(name => Arg.ExplicitTypeArg[Level.Obj](TyVar(name)))
+    val termArguments = termParameters.map { case (name, ty) =>
+      Arg.Explicit[Level.Obj](Var(name, Some(ty)))
+    }
+
+    val head = Const[Level.Obj](SymRef.Leo(key))
+    val arguments = typeArguments ++ termArguments
+    val lhs = if (arguments.isEmpty) head else App(head, arguments)
+    val rhs = encodeScopedTerm(body, fusebVarListwithMap(termVars, Map.empty),
+      suppressReduction = false, replaceUnknownVars = false, typeBinders = typeScope)
+    val equality = LogicConst.Eq(encodeType(body.ty), lhs, rhs)
+    val name = if (isSk) nameSkDef(key, sig.orig) else nameDefn(key, sig)
+    Stmt.Declaration(name.local, typeParameters ++ termParameters, Lifting.ProofTerm(equality))
+  }
+}

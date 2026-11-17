@@ -183,10 +183,11 @@ object LPoutput {
   }
 
   def identifySteps_new(cl: ClauseProxy, identicalSteps: mutable.HashMap[Long, QName],
-                        encStep: NewLpDatastructures.lpClauseInst): (Boolean, mutable.HashMap[Long, QName]) = {
+                        encStep: NewLpDatastructures.lpClauseInst,
+                        compareParent: ClauseProxy => Boolean = _ => true): (Boolean, mutable.HashMap[Long, QName]) = {
     val parents = cl.annotation.parents
     val matchingParent = parents.find { parent =>
-      NewLpDatastructures.ClauseEncoding.clause2LP(parent.cl).asMl == encStep.asMl
+      compareParent(parent) && ClauseEncoding.clause2LP(parent.cl).asMl == encStep.asMl
     }
     matchingParent match {
       case Some(parent) =>
@@ -316,11 +317,32 @@ object LPoutput {
     else None
   }
 
+  /** Synthetic Skolem definition nodes refer to the pointwise equality emitted from the signature. */
+  private def skolemDefinitionName(step: ClauseProxy, sig: Signature): Option[QName] =
+    (step.role, step.annotation, step.cl.lits) match {
+      case (Role_Definition, ClauseAnnotation.FromSystem("definition", _, _), Seq(literal))
+        if literal.equational && literal.polarity =>
+        literal.left match {
+          case Term.Symbol(key) if isPropSet(Signature.PropSkolemConstant, sig(key).flag) &&
+              sig(key).hasDefn && literal.right == sig(key)._defn =>
+            Some(nameSkDef(key, sig))
+          case _ => None
+        }
+      case _ => None
+    }
+
   def step2LP(cl: ClauseProxy, sig: LpSig, st: lpProofObject, stepInfo: lpProofStepInfo,
               proofReferences: ProofReferences = ProofReferences(),
               useTypedIntroduction: Boolean = false,
               standaloneSubproofThreshold: Option[Int] = None,
               enclosingNames: Set[String] = Set.empty): (Option[EncodedProofStep], lpProofStepInfo) = {
+
+    skolemDefinitionName(cl, sig.orig) match {
+      case Some(name) =>
+        stepInfo.identicalSteps.update(cl.id, name)
+        return (None, new lpProofStepInfo(stepInfo.identicalSteps))
+      case None =>
+    }
 
     val stepName = nameStep(cl.id).name
     val rule = cl.annotation.fromRule
@@ -338,7 +360,8 @@ object LPoutput {
     val (encStep0) = ClauseEncoding.clause2LP(cl.cl)
     val encStep = encStep0.asMl
     val polymorphicReason = polymorphicReplayReason(cl, sig.orig)
-    val (needsEnc, newIdenticalSteps) = identifySteps_new(cl, stepInfo.identicalSteps, encStep0)
+    val (needsEnc, newIdenticalSteps) = identifySteps_new(cl, stepInfo.identicalSteps, encStep0,
+      parent => skolemDefinitionName(parent, sig.orig).isEmpty)
 
     if ((cl.role != Role_Conjecture) && needsEnc && (rule != null)) {
       rule match {
@@ -489,26 +512,8 @@ object LPoutput {
     }else{
       val outputInfo = new lpProofStepInfo(newIdenticalSteps)
       if (rule == null && (cl.role != Role_Conjecture)) {
-        val skolemDefinition = (cl.role, cl.annotation, cl.cl.lits) match {
-          case (Role_Definition, ClauseAnnotation.FromSystem("definition", _, _), Seq(literal))
-            if literal.equational && literal.polarity =>
-            literal.left match {
-              case Term.Symbol(key) if isPropSet(Signature.PropSkolemConstant, sig.orig(key).flag) &&
-                  sig.orig(key).hasDefn && literal.right == sig.orig(key)._defn =>
-                Some(nameSkDef(key, sig.orig))
-              case _ => None
-            }
-          case _ => None
-        }
-        skolemDefinition match {
-          case Some(definitionName) =>
-            // Skolemization consumes the declared pointwise equality, instantiated with its recorded variables.
-            newIdenticalSteps.update(cl.id, definitionName)
-            (None, outputInfo)
-          case None =>
-            Out.lp_debug_info(s"role : ${cl.role}")
-            (toProofStepOld(cl, encStep, "Tautology", lpProofScript(Seq.empty), Some("Tautology generation not yet encoded")), outputInfo)
-        }
+        Out.lp_debug_info(s"role : ${cl.role}")
+        (toProofStepOld(cl, encStep, "Tautology", lpProofScript(Seq.empty), Some("Tautology generation not yet encoded")), outputInfo)
       }else{
         (None, outputInfo)
       }
@@ -778,7 +783,8 @@ object LPoutput {
     // the package's proposition abbreviation and common proof parameter.
     val occupiedNames = if (gdv_mode) Set.empty[String] else {
       sig.reserved ++ (sig.termNames.values ++ sig.typeNames.values).map(_.local.value) ++
-        proof.flatMap(step => ClauseEncoding.clause2LP(step.cl).metaVars.map(_.name.value)) ++
+        proof.iterator.filter(step => skolemDefinitionName(step, sig0).isEmpty)
+          .flatMap(step => ClauseEncoding.clause2LP(step.cl).metaVars.map(_.name.value)) ++
         proof.map(step => nameStep_new(step.id).local.value) ++
         // Legacy definition expansion and paramodulation introduce h/h1 in
         // helper proofs, we therefore exclude them here.
