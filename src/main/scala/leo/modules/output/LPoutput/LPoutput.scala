@@ -458,7 +458,7 @@ object LPoutput {
         }
 
         case leo.modules.calculus.Simp => replayWith(
-          if (cl.furtherInfo.addInfoSimpRule.contains("eqSimp")) carryTypes else monomorphicReplay
+          if (cl.furtherInfo.addInfoSimpRule.exists(Set("eqSimp", "paraSimp"))) carryTypes else monomorphicReplay
         ) {
           if (cl.furtherInfo.addInfoSimpRule.isDefined) {
             if (cl.furtherInfo.addInfoSimpRule.get == "eqSimp") {
