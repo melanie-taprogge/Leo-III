@@ -509,7 +509,7 @@ object LPoutput {
           }
         }
 
-        case leo.modules.calculus.Miniscope => replayWith() {
+        case leo.modules.calculus.Miniscope => replayWith(carryTypes) {
           val encoding = MiniscopeEncoding.encMiniscope(cl, parentProofs, sig)
           encoding match {
             case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "Miniscope", Left(scripts), None), outputInfo)

@@ -10,6 +10,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Refine, Re
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Wildcard}
 import leo.modules.output.LPoutput.NewLpDatastructures.{Level, LogicConst, LpSig, LpTerm, LpType, Name, QName, RenderOptions, Renderer, SymRef, TypeEncoding, lpClauseInst}
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.proofTermAsTacticArg
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
 
 /** Reconstruction of one recorded Miniscope inference. */
 object MiniscopeEncoding {
@@ -85,6 +86,7 @@ object MiniscopeEncoding {
                                    parentProof: LpTerm[Level.Obj],
                                    encParent: lpClauseInst,
                                    encChild: lpClauseInst,
+                                   variableMap: Map[Int, String],
                                    trace: MiniscopeTrace)
 
   private def initContext(child: ClauseProxy, parentProofs: Seq[LpTerm[Level.Obj]]): Either[String, Context] = {
@@ -104,8 +106,8 @@ object MiniscopeEncoding {
       case None => Left(s"Miniscope step ${child.id}: missing source-decision trace")
       case Some(trace) =>
         // Translate both clauses with one variable map, so later comparisons use the same Lambdapi names for shared free variables.
-        val (_, encoded) = lpClauseInst.apply_to_set(Seq(parent, result))
-        val ctx = Context(parent, result, parentProofs.head, encoded.head, encoded(1), trace)
+        val (variableMap, encoded) = lpClauseInst.apply_to_set(Seq(parent, result))
+        val ctx = Context(parent, result, parentProofs.head, encoded.head, encoded(1), variableMap, trace)
         Out.lp_debug_info(s"Miniscope step ${child.id}: parent ${parents.head.id} as ${ctx.parentProof}, ${ctx.trace.observations.size} source observations")
         Out.lp_debug_info(s"Miniscope source observations: ${ctx.trace.observations}")
         Out.lp_debug_info(s"Miniscope translated parent: ${ctx.encParent.term}")
@@ -389,8 +391,11 @@ object MiniscopeEncoding {
       if (index < reverseMoves.size - 1) Vector(rewrite, Try(Simplify(onlyBeta = true)))
       else Vector(rewrite)
     }
-    val refine = Refine(proofTermAsTacticArg(ctx.parentProof))
-    Encoded(rewrites :+ refine)
+    val introduction = encClauseVariableIntroduction(ctx.encChild, useLetBasedIntroduction = false, sig = sig)
+    val parentProof = SubstitutionEncoding.instantiateProofTerm(
+      ctx.parent, ctx.child, ctx.variableMap, ctx.parentProof)
+    val refine = Refine(proofTermAsTacticArg(parentProof))
+    Encoded(introduction ++ rewrites :+ refine)
   }
 
 }
