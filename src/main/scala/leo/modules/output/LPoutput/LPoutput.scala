@@ -420,7 +420,7 @@ object LPoutput {
           (toProofStepOld(cl, encStep, "FuncExt", encoding._1, encoding._2),outputInfo)
         }
 
-        case leo.modules.calculus.BoolExt => replayWith() {
+        case leo.modules.calculus.BoolExt => replayWith(carryTypes) {
           val encoding = encBoolExt(cl, cl.annotation.parents.head, parentInLpEncID.head, cl.furtherInfo.addInfoBoolExt, sig.orig)
           (toProofStepOld(cl, encStep, "BoolExt", encoding._1, encoding._2),outputInfo)
         }

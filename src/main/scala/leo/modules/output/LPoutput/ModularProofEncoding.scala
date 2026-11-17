@@ -465,6 +465,13 @@ object ModularProofEncoding {
 
   def encBoolExt(child: ClauseProxy, parent: ClauseProxy, parentNameLpEnc: lpTerm, addInfo: Set[(Literal,Seq[Literal])], sig: Signature): (lpProofScript, Option[String]) = {
 
+    if (parent.cl.lits.length > 1) {
+      return (lpProofScript(Seq.empty), Some("Encoding of boolExt in LP for clauses with more than one literal not encoded yet"))
+    }
+    if (addInfo.isEmpty) {
+      return (lpProofScript(Seq.empty), Some("Missing BoolExt literal transition metadata"))
+    }
+
     val bVarMap = clauseVars2LP(child.cl.implicitlyBound, sig, Set.empty)._2
 
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
@@ -478,9 +485,14 @@ object ModularProofEncoding {
     // 5. If the order of literals was changed, generate a transform rule and apply it to permute the literals
     // 6. Refine with the last proven step
 
-    // 1. Abstract over free variables
-    val freeVarsChild = child.cl.implicitlyBound.map(var0 => lpUntypedVar(lpConstantTerm(bVarMap(var0._1))))
-    if (freeVarsChild.nonEmpty) allSteps = allSteps :+ lpAssume(freeVarsChild)
+    // 1. Introduce type variables before dependent term variables.
+    val childTypeVars = child.cl.typeVars.reverse.map { scope =>
+      val name = NewLpDatastructures.TypeEncoding.tyVar2LP(scope)
+      scope -> lpConstantTerm(name.value)
+    }
+    val childTermVars = child.cl.implicitlyBound.map { case (scope, _) => lpConstantTerm(bVarMap(scope)) }
+    val childBinders = childTypeVars.map(_._2) ++ childTermVars
+    if (childBinders.nonEmpty) allSteps = allSteps :+ lpAssume(childBinders)
 
     // For each affected literal we need to choose the correct encoding ( PBE l , PBE r , NBE p or NBE n ) and instantiate it and use it to define a new hypothesis
     // Therefore we find out what literals of the parent were transformed to what literals in the child
@@ -515,16 +527,13 @@ object ModularProofEncoding {
     // 5. If the order of literals was changed, generate a transform rule and apply it to permute the literals
     // todo
 
-    if (parent.cl.lits.length > 1) {
-      (lpProofScript(Seq.empty),Some(s"Encoding of boolExt in LP for clauses with more than one literal not encoded yet"))
-    }
-    else {
-      allSteps = allSteps :+ lpRefine(lpFunctionApp(transitions.head, Seq(lpFunctionApp(parentNameLpEnc, freeVarsChild))))
-      val proof = lpProofScript(allSteps)
-
-      // 6. Refine with the last proven step
-      (proof, None)
-    }
+    // 6. Apply the parent proof in its binder order and refine with the selected lemma.
+    val typeVarMap = childTypeVars.toMap
+    val parentTypeArgs = parent.cl.typeVars.reverse.map(typeVarMap)
+    val parentTermArgs = parent.cl.implicitlyBound.map { case (scope, _) => lpConstantTerm(bVarMap(scope)) }
+    val parentProof = lpFunctionApp(parentNameLpEnc, parentTypeArgs ++ parentTermArgs)
+    allSteps = allSteps :+ lpRefine(lpFunctionApp(transitions.head, Seq(parentProof)))
+    (lpProofScript(allSteps), None)
   }
 
 
