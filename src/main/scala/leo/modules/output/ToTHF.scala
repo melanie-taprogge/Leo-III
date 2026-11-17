@@ -4,7 +4,7 @@ import leo.datastructures._
 import Term._
 import leo.datastructures.Type._
 import leo.modules.HOLSignature.{!===, &, <=, <=>, <~>, ===, Choice, Epsilon, Exists, Forall, HOLUnaryConnective, Impl, LitFalse, Not, TyForall, |||, ~&, ~|||}
-import leo.modules.SZSException
+import leo.modules.{SZSException, typeSymbolsInTerm, typeSymbolsInType}
 import leo.modules.calculus.CoreCNF
 
 import scala.annotation.tailrec
@@ -280,8 +280,18 @@ object ToTHF {
     }
     //(sb.toString(), addInfo)
 
+    val substitution = addInfo
     val toTPTPRes = new Output {
       override def apply(): String = sb.toString()
+      override lazy val referencedSymbols: Set[Signature.Key] = {
+        val termSymbols = substitution.termSubsts.iterator.collect {
+          case UniTermSubst(_, UniTermByTerm(term, _, _)) => term
+        }.flatMap(term => term.symbols.distinct ++ typeSymbolsInTerm(term))
+        val typeSymbols = substitution.typeSubsts.iterator.collect {
+          case UniTypeSubst(_, UniTypeByType(ty)) => ty
+        }.flatMap(typeSymbolsInType)
+        (termSymbols ++ typeSymbols).toSet
+      }
     }
 
     (toTPTPRes, addInfo)
@@ -292,6 +302,11 @@ object ToTHF {
     * Rendering is deferred until Output.apply().
     */
   final def skolem(data: CoreCNF.SkolemData, binderPath: ClausePosition)(implicit sig: Signature): Output = new Output {
+    override lazy val referencedSymbols: Set[Signature.Key] = data match {
+      case CoreCNF.TermSkolemData(term, _, _) => term.symbols.distinct ++ typeSymbolsInTerm(term)
+      case CoreCNF.TypeSkolemData(ty, _) => typeSymbolsInType(ty)
+    }
+
     override def apply(): String = {
       val parent = binderPath.cl
       require(binderPath.litIdx >= 0 && binderPath.litIdx < parent.lits.size, "Invalid Skolem binder literal index.")

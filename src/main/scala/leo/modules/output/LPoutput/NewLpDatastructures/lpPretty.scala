@@ -409,10 +409,16 @@ object Renderer {
     * @return The type as a string
     * */
   private def olTy(ol: OlMonoType, ro: RenderOptions, sig: LpSig): String = ol match {
-    case OlMonoType.Base(SymRef.LP(qn)) => qname(qn, ro)
-    case OlMonoType.Base(SymRef.Leo(id)) => qname(sig.typeNames(id), ro)
+    case OlMonoType.Base(ref) => typeName(ref, ro, sig)
     case OlMonoType.TyVar(n) => n.value
     case OlMonoType.Fun(args) => s"(${args.map(olTy(_, ro, sig)).mkString(s" $tyConStr ")})"
+    case OlMonoType.TyApp(head, args) =>
+      (typeName(head, ro, sig) +: args.map(olTy(_, ro, sig))).mkString("(", " ", ")")
+  }
+
+  private def typeName(ref: SymRef, ro: RenderOptions, sig: LpSig): String = ref match {
+    case SymRef.LP(name) => qname(name, ro)
+    case SymRef.Leo(id) => qname(sig.typeNames(id), ro)
   }
 }
 

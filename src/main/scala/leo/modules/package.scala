@@ -119,29 +119,27 @@ package object modules {
   }
 
   def saturatedUserSignature(symbolsInProof: Set[Signature.Key])(implicit sig: Signature): Set[Signature.Key] = {
-    // Recursively generate a list of all symbols that that occur in definitions
-    val relevantSymbols = sig.allUserConstants intersect (symbolsInProof union sig.typeSymbols)
+    val userSymbols = sig.allUserConstants
     var visited = Set.empty[Signature.Key]
 
     def saturate(sym: Signature.Key): Unit = {
-      if (!visited.contains(sym)) {
+      if (userSymbols.contains(sym) && !visited.contains(sym)) {
         visited += sym
         val info = sig(sym)
+        if (info.hasType) typeSymbolsInType(info._ty).foreach(saturate)
         if (info.hasDefn) {
-          val defnSymbols = info._defn.symbols.toSet intersect sig.allUserConstants
-          defnSymbols.foreach(saturate)
+          info._defn.symbols.distinct.foreach(saturate)
+          typeSymbolsInTerm(info._defn).foreach(saturate)
         }
       }
     }
 
-    // Recursively saturate all initially relevant symbols
-    relevantSymbols.foreach(saturate)
-    relevantSymbols ++ visited
+    symbolsInProof.foreach(saturate)
+    visited
   }
 
   def userSignatureToTPTP(symbolsInProof: Set[Signature.Key], definitionsInProof: Set[Signature.Key] = Set.empty)(implicit sig: Signature): String = {
     val sb: StringBuilder = new StringBuilder()
-    /* start with user symbols that occur in the proof, plus type symbols */
     val relevantSymbols: Set[Signature.Key] = saturatedUserSignature(symbolsInProof)
 
     val (userTypes, otherSymbols) = relevantSymbols.partition(key => sig(key).hasKind)
@@ -241,6 +239,46 @@ package object modules {
 
   final def symbolsInProof(p: Proof): Set[Signature.Key] = {
     p.flatMap(cl => cl.cl.lits.flatMap(l => l.left.symbols.distinct ++ l.right.symbols.distinct)).toSet
+  }
+
+  private[modules] def typeSymbolsInType(ty: Type): Set[Signature.Key] = ty match {
+    case Type.BaseType(key) => Set(key)
+    case Type.ComposedType(key, args) => args.iterator.flatMap(typeSymbolsInType).toSet + key
+    case Type.->(domain, codomain) => typeSymbolsInType(domain) ++ typeSymbolsInType(codomain)
+    case Type.ProductType(types) => types.iterator.flatMap(typeSymbolsInType).toSet
+    case Type.PolyType(body) => typeSymbolsInType(body)
+    case Type.BoundType(_) => Set.empty
+  }
+
+  private[modules] def typeSymbolsInTerm(term: Term): Set[Signature.Key] = term match {
+    case Term.Bound(ty, _) => typeSymbolsInType(ty)
+    case Term.:::>(ty, body) => typeSymbolsInType(ty) ++ typeSymbolsInTerm(body)
+    case Term.TypeLambda(body) => typeSymbolsInTerm(body)
+    case Term.∙(head, args) if args.nonEmpty =>
+      val argumentSymbols = args.iterator.flatMap {
+        case Left(arg) => typeSymbolsInTerm(arg)
+        case Right(ty) => typeSymbolsInType(ty)
+      }
+      typeSymbolsInTerm(head) ++ argumentSymbols
+    case _ => Set.empty
+  }
+
+  final def typeSymbolsInProof(proof: Proof): Set[Signature.Key] = {
+    proof.iterator.flatMap { step =>
+      val binders = step.cl.implicitlyBound.iterator.flatMap { case (_, ty) => typeSymbolsInType(ty) }
+      val literals = step.cl.lits.iterator.flatMap(lit => typeSymbolsInTerm(lit.left) ++ typeSymbolsInTerm(lit.right))
+      binders ++ literals
+    }.toSet
+  }
+
+  final def symbolsInProofAnnotations(proof: Proof): Set[Signature.Key] = {
+    def outputs(annotation: ClauseAnnotation): Iterator[Output] = annotation match {
+      case ClauseAnnotation.InferredFrom(_, parents, info) => parents.iterator.map(_._2) ++ info.iterator
+      case ClauseAnnotation.CompressedRule(rules, underlying) => rules.iterator.map(_._2) ++ outputs(underlying)
+      case ClauseAnnotation.FromSystem(_, _, info) => info.iterator
+      case _ => Iterator.empty
+    }
+    proof.iterator.flatMap(step => outputs(step.annotation)).filter(_ != null).flatMap(_.referencedSymbols).toSet
   }
 
   final def numbersInProof(p: Proof): Set[Term] = {

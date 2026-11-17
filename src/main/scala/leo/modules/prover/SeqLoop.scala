@@ -391,7 +391,7 @@ object SeqLoop {
     /////////////////////////////////////////
     // All finished, print result
     /////////////////////////////////////////
-    import leo.modules.{axiomsInProof, userSignatureToTPTP, symbolsInProof, compressedProofOf, proofToTPTP, userDefinedSignatureAsString}
+    import leo.modules.{axiomsInProof, userSignatureToTPTP, symbolsInProof, typeSymbolsInProof, symbolsInProofAnnotations, compressedProofOf, proofToTPTP, userDefinedSignatureAsString}
     import leo.modules.proof_object.CompressProof
 
     val time = System.currentTimeMillis() - startTime
@@ -484,7 +484,8 @@ object SeqLoop {
         val outputProof = if (Configuration.isSet("compressProof")) compressedProofOf(CompressProof.stdImportantInferences)(state.derivationClause.get)
         else proof
         val definitionsInProof = symbolsInProof(outputProof.filter(_.role == Role_Definition)).filter(key => sig(key).hasDefn)
-        val proofSignature = userSignatureToTPTP(symbolsInProof(outputProof), definitionsInProof)(sig)
+        val signatureRoots = symbolsInProof(outputProof) ++ typeSymbolsInProof(outputProof) ++ symbolsInProofAnnotations(outputProof)
+        val proofSignature = userSignatureToTPTP(signatureRoots, definitionsInProof)(sig)
         val proofString = proofToTPTP(outputProof)
         val proofOutput: String = if (proofSignature.isEmpty) proofString else proofSignature + "\n" + proofString
         Out.output(SZSOutput(SZS_Refutation, Configuration.PROBLEMFILE, proofOutput))
