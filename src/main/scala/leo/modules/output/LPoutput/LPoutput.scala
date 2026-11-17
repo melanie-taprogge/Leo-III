@@ -2,13 +2,13 @@ package leo.modules.output.LPoutput
 
 import leo.{Configuration, Out, modules}
 import leo.datastructures.Term.Integer
-import leo.datastructures.{ClauseAnnotation, ClauseProxy, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Subst, Term, isPropSet}
+import leo.datastructures.{ClauseAnnotation, ClauseProxy, Kind, Role_Axiom, Role_Conjecture, Role_Definition, Role_NegConjecture, Signature, Subst, Term, isPropSet}
 import leo.modules.HOLSignature.TyForall
 import leo.modules.calculus.CalculusRule
 import leo.modules.output.LPoutput.DetUniSimpEncoding.encodeDetUniSimp
 import leo.modules.output.LPoutput.LpLibs.ND.Terms
 import leo.modules.prover.LocalState
-import leo.modules.{numbersInProof, saturatedUserSignature, symbolsInProof}
+import leo.modules.{numbersInProof, saturatedUserSignature, symbolsInProof, typeSymbolsInProof}
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
 import leo.modules.output.LPoutput.OldLpDatastructures.LPSignature.{lpDne, tempLib, tempLibDeps}
 import leo.modules.output.LPoutput.ModularProofEncoding.ParamodEncoding.encPara
@@ -644,9 +644,15 @@ object LPoutput {
   private def gdvTargetNameFromState(state: LocalState): String =
     lpEscapeName(tptpFormulaNameFromAnnotation(state.conjecture.annotation), state.signature, false)
 
-  private def exportedSignatureSymbols(proofSymbols: Set[Signature.Key], sig: Signature): Set[Signature.Key] = {
+  private def exportedSignatureSymbols(proof: modules.Proof, proofSymbols: Set[Signature.Key], sig: Signature): Set[Signature.Key] = {
     val builtinSymbols = tptpConstMappings.leoBaseTy.keySet ++ tptpConstMappings.LeoConstants.keySet
-    saturatedUserSignature(proofSymbols)(sig).diff(builtinSymbols)
+    saturatedUserSignature(proofSymbols ++ typeSymbolsInProof(proof))(sig).diff(builtinSymbols)
+  }
+
+  private def kindToLpType(kind: Kind): LpType = kind match {
+    case Kind.TYPE => LpSet
+    case Kind.->(domain, codomain) => LpType.Arrow(kindToLpType(domain), kindToLpType(codomain))
+    case _ => throw new IllegalArgumentException(s"Unsupported type constructor kind for Lambdapi export: ${kind.pretty}")
   }
 
   private def needsPolymorphism(proofSymbols: Set[Signature.Key],
@@ -658,7 +664,7 @@ object LPoutput {
     }
 
   def generateObjectDeclaartions(proof: modules.Proof, sig: LpSig): (StringBuilder, StringBuilder, StringBuilder, StringBuilder) =
-    renderObjectDeclarations(proof, sig, exportedSignatureSymbols(symbolsInProof(proof), sig.orig))
+    renderObjectDeclarations(proof, sig, exportedSignatureSymbols(proof, symbolsInProof(proof), sig.orig))
 
   private def renderObjectDeclarations(proof: modules.Proof, sig: LpSig,
                                        signatureSymbols: Set[Signature.Key]): (StringBuilder, StringBuilder, StringBuilder, StringBuilder) = {
@@ -666,6 +672,7 @@ object LPoutput {
 
     val typeDecSB: mutable.StringBuilder = new StringBuilder()
     val skDecsSB: mutable.StringBuilder = new StringBuilder()
+    val skDefsSB: mutable.StringBuilder = new StringBuilder()
     val tacticSB: mutable.StringBuilder = new StringBuilder()
     val defSB: mutable.StringBuilder = new StringBuilder()
 
@@ -691,33 +698,37 @@ object LPoutput {
 
     }
 
+    val (typeSymbols, termSymbols) = signatureSymbols.partition(key => sig.orig(key).hasKind)
+    val signatureOptions = RenderOptions(false, false, monomorphic)
+    typeSymbols.foreach { key =>
+      val name = sig.typeNames(key).local
+      val declaration = Stmt.Declaration(name, Seq.empty, kindToLpType(sig.orig(key)._kind))
+      typeDecSB.append(Renderer.stmt(declaration, sig, signatureOptions))
+    }
+
     lazy val occupiedTypeNames = sig.typeNames.valuesIterator.map(_.local.value).toSet
-    signatureSymbols.foreach { key =>
+    termSymbols.foreach { key =>
       val symbol = sig.orig.apply(key)
+      val sName = sig.termNames(symbol.key)
+      val isSk = isPropSet(Signature.PropSkolemConstant, symbol.flag)
+      if (symbol.hasType) {
+        val declaredType =
+          if (symbol._ty.isPolyType) LpType.ElScheme(TypeEncoding.polyType2LP(symbol._ty, occupiedTypeNames))
+          else El(TypeEncoding.type2LP(symbol._ty))
+        val declaration = Stmt.Declaration(sName.local, Seq.empty, declaredType)
+        if (isSk) skDecsSB.append(Renderer.stmt(declaration, sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+        else typeDecSB.append(Renderer.stmt(declaration, sig, signatureOptions))
+      }
 
-      if (symbol.hasKind) {
-        val sName = sig.typeNames(symbol.key)
-        typeDecSB.append(NewLpDatastructures.Renderer.stmt(NewLpDatastructures.Stmt.Declaration((sName.local), Seq.empty, LpSet), sig, RenderOptions(false, false, monomorphic)))
-      } else {
-        val sName = sig.termNames(symbol.key)
-        val isSk = isPropSet(Signature.PropSkolemConstant, symbol.flag)
-        if (symbol.hasType) {
-          val declaredType =
-            if (symbol._ty.isPolyType) LpType.ElScheme(TypeEncoding.polyType2LP(symbol._ty, occupiedTypeNames))
-            else El(TypeEncoding.type2LP(symbol._ty))
-          val declaration = Stmt.Declaration(sName.local, Seq.empty, declaredType)
-          if (isSk) skDecsSB.append(Renderer.stmt(declaration, sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
-          else typeDecSB.append(Renderer.stmt(declaration, sig, RenderOptions(false, false, monomorphic)))
-        }
-
-        if (symbol.hasDefn) {
-          val defDec = DefEncoding.encDfn(key, sig, isSk)
-          if (isSk) skDecsSB.append(NewLpDatastructures.Renderer.stmt(defDec, sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
-          else defSB.append(NewLpDatastructures.Renderer.stmt(defDec, sig, RenderOptions(!outputSingleFile, false, monomorphic)))
-        }
+      if (symbol.hasDefn) {
+        val defDec = DefEncoding.encDfn(key, sig, isSk)
+        if (isSk) skDefsSB.append(Renderer.stmt(defDec, sig, RenderOptions(!outputSingleFile, !outputSingleFile, monomorphic)))
+        else defSB.append(Renderer.stmt(defDec, sig, RenderOptions(!outputSingleFile, false, monomorphic)))
       }
     }
 
+    // A Skolem defining equality can mention other Skolem symbols.
+    skDecsSB.append(skDefsSB)
     (typeDecSB, skDecsSB, defSB, tacticSB)
   }
 
@@ -843,7 +854,7 @@ object LPoutput {
       }
     }
 
-    val signatureSymbols = exportedSignatureSymbols(proofSymbols, sig.orig)
+    val signatureSymbols = exportedSignatureSymbols(proof, proofSymbols, sig.orig)
     val requiresPolymorphism = needsPolymorphism(proofSymbols, signatureSymbols, sig.orig)
     val (typeDecSB, skDecSB, defSB, tacticSB) = renderObjectDeclarations(proof, sig, signatureSymbols)
 
