@@ -8,11 +8,11 @@ import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpLibs.{Clausification, EqRules, LeoTactics, MetaTheorems, ND}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Reflexivity, Repeat, Rewrite, RewritePattern, SetType, Side, Simplify, Try}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Reflexivity, Repeat, Rewrite, RewritePattern, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, vars2Lp}
-import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.{tyVar2LP, type2LP}
+import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, Lifting, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, Stmt, SymRef, lpClauseInst, lpTermBuilder, nAry}
-import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encClauseVariableIntroduction, introduceClauseContext}
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.{applyProofToVars, proofTermAsTacticArg}
 
 /** Reconstruction entry points for standalone clausification steps.
@@ -339,12 +339,8 @@ object ClausificationEncoding {
                                    useTypedIntroduction: Boolean): Either[String, CnfStage] = {
     if (ctx.generalizations.isEmpty) {
       val parent = ctx.step.annotation.parents.head.cl
-      val missingTypeDefinitions = parent.typeVars.reverse.diff(ctx.step.cl.typeVars).map { scope =>
-        SetType(tyVar2LP(scope), HolBaseTypes.I)
-      }
-      val introductions = encClauseVariableIntroduction(
-        ctx.encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
-      val scripts = introductions ++ missingTypeDefinitions
+      val scripts = introduceClauseContext(
+        parent, ctx.step.cl, ctx.encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
       return Right(CnfStage(ctx.encChild, ctx.step.cl.implicitlyBound, Seq.empty,
         scripts.iterator.map(CnfTactic).toVector))
     }
@@ -970,13 +966,8 @@ object ClausificationEncoding {
 
     val (variableMap, encoded) = lpClauseInst.apply_to_set(
       Seq(parent, step.cl), skolemInfo.fVs, suppressReductionAt = Set(0))
-    // A vacuous quantifier can lose its type in the child while the inverse
-    // Skolem equality still mentions it. Match the parent instantiation at ι.
-    val missingTypeDefinitions = parent.typeVars.reverse.diff(step.cl.typeVars).map { scope =>
-      SetType(tyVar2LP(scope), HolBaseTypes.I)
-    }
-    val variableIntroduction = encClauseVariableIntroduction(
-      encoded(1), useLetBasedIntroduction = useTypedIntroduction, sig = sig) ++ missingTypeDefinitions
+    val variableIntroduction = introduceClauseContext(
+      parent, step.cl, encoded(1), useLetBasedIntroduction = useTypedIntroduction, sig = sig)
     val ctx = SkolemContext(step, parent, parentProofs.head, parentProofs(1),
       encoded.head, encoded(1), variableMap, skolemInfo, position, variableIntroduction)
     Out.lp_debug_info(s"Skolemization step ${step.id}: formula parent ${parents.head.id}, definition parent ${definition.id}, position ${position.pretty}")
