@@ -383,16 +383,18 @@ object LPoutput {
         }
 
       rule match {
-        case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF => replayWith() {
-          encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold,
-            namesInScope) match {
-            case Right(encoding) =>
-              val result = toProofStepOld(cl, encStep, rule.name, Left(encoding.scripts), None)
-              (result.map(_.copy(auxiliaryLemmas = encoding.auxiliaryLemmas)), outputInfo)
-            case Left(reason) =>
-              (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+        case leo.modules.calculus.FullCNF | leo.modules.calculus.RenameCNF =>
+          val support = if (cl.furtherInfo.cnfInfo.addInfoQuants.isEmpty) carryTypes else monomorphicReplay
+          replayWith(support) {
+            encCnf(cl, parentProofs, sig, useTypedIntroduction, standaloneSubproofThreshold,
+              namesInScope) match {
+              case Right(encoding) =>
+                val result = toProofStepOld(cl, encStep, rule.name, Left(encoding.scripts), None)
+                (result.map(_.copy(auxiliaryLemmas = encoding.auxiliaryLemmas)), outputInfo)
+              case Left(reason) =>
+                (toProofStepOld(cl, encStep, rule.name, Left(Seq.empty), Some(reason)), outputInfo)
+            }
           }
-        }
 
         case leo.modules.calculus.CnfSkolem => replayWith(carryTypes) {
           val encoding = encSkolem(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)

@@ -170,7 +170,7 @@ object ClausificationEncoding {
     val variables = moves.map(_.corrChildVar)
 
     // further checks
-    if (clauses.exists(_.typeVars.nonEmpty) || variables.exists(_._2.isPolyType))
+    if (moves.nonEmpty && (clauses.exists(_.typeVars.nonEmpty) || variables.exists(_._2.isPolyType)))
       return Left(s"CNF step ${step.id}: polymorphic clausification is not encoded")
     if (variables.exists(_._1 <= 0) || variables.map(_._1).distinct.size != variables.size)
       return Left(s"CNF step ${step.id}: expected distinct positive generalized-variable identifiers")
@@ -337,6 +337,18 @@ object ClausificationEncoding {
   private def encCnfVariablePrefix(ctx: CnfContext,
                                    sig: LpSig,
                                    useTypedIntroduction: Boolean): Either[String, CnfStage] = {
+    if (ctx.generalizations.isEmpty) {
+      val parent = ctx.step.annotation.parents.head.cl
+      val missingTypeDefinitions = parent.typeVars.reverse.diff(ctx.step.cl.typeVars).map { scope =>
+        SetType(tyVar2LP(scope), HolBaseTypes.I)
+      }
+      val introductions = encClauseVariableIntroduction(
+        ctx.encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
+      val scripts = introductions ++ missingTypeDefinitions
+      return Right(CnfStage(ctx.encChild, ctx.step.cl.implicitlyBound, Seq.empty,
+        scripts.iterator.map(CnfTactic).toVector))
+    }
+
     // Given order in the child
     val givenVars = ctx.step.cl.implicitlyBound
     // pending variables in order of generalisation (vacuous variables disappear in the child)
@@ -405,11 +417,19 @@ object ClausificationEncoding {
     (name, Name(LpSig.freshIfNeeded("h", taken + name.value)))
   }
 
-  /** Retain the endpoints' ordinary variables in their introduction order. */
+  /** Retain endpoint type parameters before the ordinary term parameters.
+    * Boolean-only bridges can also mention types locally specialized at ι.
+    */
   private def cnfBridgeParameters(ctx: CnfContext, stage: CnfStage,
                                   before: lpClauseInst, after: lpClauseInst): Seq[LpTerm.Var[Level.Meta]] = {
     val endpointBinders = (before.metaVars ++ after.metaVars).map(binder => binder.name -> binder).toMap
-    stage.introducedVars.flatMap { case (id, _) => endpointBinders.get(Name(ctx.variableMap(id))) }
+    val typeParameters = if (ctx.generalizations.isEmpty) {
+      (before.metaVars ++ after.metaVars).filter(_.ty.contains(LpType.LpSet)).distinctBy(_.name)
+    } else Seq.empty
+    val termParameters = stage.introducedVars.flatMap { case (id, _) =>
+      endpointBinders.get(Name(ctx.variableMap(id)))
+    }
+    typeParameters ++ termParameters
   }
 
   /** Apply the bridge backwards, leaving its antecedent as the next goal. */
@@ -889,9 +909,13 @@ object ClausificationEncoding {
 
     // Only ordinary variables have been introduced. Instantiate the resolved
     // parent in its declaration order, using the shared missing-variable fallback.
-    val parentVars = ctx.step.annotation.parents.head.cl.implicitlyBound
-    val parent = SubstitutionEncoding.instantiateProofTerm(
-      parentVars, stage.introducedVars, Seq.empty, ctx.variableMap, ctx.parentProof)
+    val parentClause = ctx.step.annotation.parents.head.cl
+    val parent = if (ctx.generalizations.isEmpty) {
+      SubstitutionEncoding.instantiateProofTerm(parentClause, ctx.step.cl, ctx.variableMap, ctx.parentProof)
+    } else {
+      SubstitutionEncoding.instantiateProofTerm(
+        parentClause.implicitlyBound, stage.introducedVars, Seq.empty, ctx.variableMap, ctx.parentProof)
+    }
     Out.lp_debug_info(s"CNF step ${ctx.step.id}: closing with parent ${ctx.parentProof}, available variables ${stage.introducedVars.map(_._1)}")
     Right(Seq(Refine(proofTermAsTacticArg(parent))))
   }
