@@ -57,7 +57,7 @@ object SubstitutionEncoding {
                            termSubst: Seq[UniTermSubst],
                            sharedVarMap: Map[Int, String],
                            parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
-    instantiateProofTerm(parentVars, currentVars, termSubst, sharedVarMap, parentProof, Map.empty)
+    instantiateProofTerm(parentVars, currentVars, termSubst, sharedVarMap, parentProof, Map.empty[Name, OlMonoType])
 
   /** Instantiate a parent in a child context with the same variable scopes.
     * Type variables absent from the child are instantiated at the individual type.
@@ -66,7 +66,18 @@ object SubstitutionEncoding {
                            child: Clause,
                            sharedVarMap: Map[Int, String],
                            parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
-    instantiateProofTerm(parent.implicitlyBound, parent.typeVars.reverse, child, sharedVarMap, parentProof)
+    instantiateProofTerm(parent, child, Seq.empty, sharedVarMap, parentProof)
+
+  /** Instantiate clause type parameters before applying a term substitution.
+    * This carries the existing type scopes; it does not replay type substitutions.
+    */
+  def instantiateProofTerm(parent: Clause,
+                           child: Clause,
+                           termSubst: Seq[UniTermSubst],
+                           sharedVarMap: Map[Int, String],
+                           parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    instantiateProofTerm(parent.implicitlyBound, parent.typeVars.reverse, child, sharedVarMap,
+      parentProof, termSubst)
 
   /** Instantiate a pointwise proof whose type and term parameters have explicit
     * declaration order. In particular, Skolem definitions follow the recorded
@@ -76,7 +87,15 @@ object SubstitutionEncoding {
                            parentTypeVars: Seq[Int],
                            child: Clause,
                            sharedVarMap: Map[Int, String],
-                           parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] = {
+                           parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    instantiateProofTerm(parentVars, parentTypeVars, child, sharedVarMap, parentProof, Seq.empty)
+
+  private def instantiateProofTerm(parentVars: Seq[(Int, Type)],
+                                   parentTypeVars: Seq[Int],
+                                   child: Clause,
+                                   sharedVarMap: Map[Int, String],
+                                   parentProof: LpTerm[Level.Obj],
+                                   termSubst: Seq[UniTermSubst]): LpTerm[Level.Obj] = {
     val childTypeScopes = child.typeVars.toSet
     val typeInstances = parentTypeVars.map { scope =>
       val name = tyVar2LP(scope)
@@ -85,7 +104,7 @@ object SubstitutionEncoding {
     }
     val typeArgs = typeInstances.map { case (_, instance) => Arg.ExplicitTypeArg[Level.Obj](instance) }
     val instantiatedParent = if (typeArgs.nonEmpty) LpTerm.App(parentProof, typeArgs) else parentProof
-    instantiateProofTerm(parentVars, child.implicitlyBound, Seq.empty, sharedVarMap,
+    instantiateProofTerm(parentVars, child.implicitlyBound, termSubst, sharedVarMap,
       instantiatedParent, typeInstances.toMap)
   }
 

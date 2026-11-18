@@ -20,7 +20,7 @@ import leo.modules.output.LPoutput.NewLpDatastructures.Substitution.removeLeadin
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{args2LP, term2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.{polyType2LP, safeEncTy, safeEncTypes, type2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures._
-import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, extractVarNames}
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, introduceClauseContext}
 import leo.modules.output.LPoutput.NewModularEncoding.InstMetaTheorems.{applyRemoveStep, constructRemoveStep}
 
 object Util {
@@ -42,7 +42,7 @@ object Util {
 
     // filter out only the vars relevant to the child
     val childVarMap = sharedVarMap.view.filterKeys(vars(childCl).distinct).toMap
-    val childVarNames = extractVarNames(encChild)
+    val childVarNames = encChild.vars.collect { case Left(variable) => variable.name }
 
     EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen)
   }
@@ -56,23 +56,24 @@ object Util {
     * @param termSubst Additional information about the substitution tracked during proof search
     * @param litTransf Additional information about the implicit literal transformation entailed by substitution tracked during proof search
     * @param encSubstParent A sequence of literals encoding the parent that is to result from the substitution step
-    * @param childImpBound A mapping of the implicitly bound variable indices of the child to its types
-    * @param parentImpB A mapping of the implicitly bound variable indices of the parent to its types
+    * @param childCl Child clause, including its implicit type and term parameters
+    * @param parentCl Parent clause in the substitution's source variable context
     * @param idxMap If the indices given in the additional information refer to indices in the original child clause, we need a mapping to associate
     *               them with the correct indices in the clause at hand.
     * @return if no substitution is needed, return the previous step and an empty sequence, else, return the LP term encoding the substet and a
     *         sequence containing the LP have tactic encoding the substep
     */
-  def encodeSubstitutionSubstep(nameStep: Name, ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, encSubstParent: Seq[lpLiteralInst], childImpBound: Seq[(Int, Type)], parentImpB: Seq[(Int, Type)], idxMap: Int => Int = identity): (LpTerm[Level.Obj], Seq[Have]) = {
+  def encodeSubstitutionSubstep(nameStep: Name, ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, encSubstParent: Seq[lpLiteralInst], childCl: Clause, parentCl: Clause, idxMap: Int => Int = identity): (LpTerm[Level.Obj], Seq[Have]) = {
 
     // construct the application
-    Out.lp_debug_info(s"vars of parent: ${parentImpB.map(_._1)}")
-    Out.lp_debug_info(s"vars of child: ${childImpBound.map(_._1)}")
+    Out.lp_debug_info(s"vars of parent: ${parentCl.implicitlyBound.map(_._1)}")
+    Out.lp_debug_info(s"vars of child: ${childCl.implicitlyBound.map(_._1)}")
+    val instantiatedParent = SubstitutionEncoding.instantiateProofTerm(
+      parentCl, childCl, termSubst, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
     if (termSubst.nonEmpty) {
       // detect potential flipping or normalisazion of literals that may be necessary in this step
       val maybeFlipAndNormalize: Seq[Rewrite] = verifySubstitutionLiteralNormalisazion(litTransf, encSubstParent.map(_.polarity), ctxt.substClauseLen, idxMap)
       // construct the refine step carrying out the substitution
-      val instantiatedParent = SubstitutionEncoding.instantiateProofTerm(parentImpB, childImpBound, termSubst, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
       val refineStep = Refine(Obj(instantiatedParent))
 
       // have substitution step
@@ -80,7 +81,7 @@ object Util {
 
       (Const[Level.Obj](SymRef.LP(QName.local(nameStep.value))), Seq(haveSubstStep))
 
-    } else (LpTerm.App(ctxt.parentNameLpEnc, ctxt.childVarNames.map(varName => Arg.Explicit(LpTerm.Var(varName, None)))), Seq.empty)
+    } else (instantiatedParent, Seq.empty)
   }
 
   /**
@@ -135,7 +136,8 @@ object UnificationEncoding {
     *   - litTransf: bookkeeping for literal normalization (e.g. flipping equalities).
     *
     * Steps:
-    * 0) Assume all free variables of the child clause.
+    * 0) Introduce the child's type and term parameters; specialize disappearing
+    *    parent types at ι for the intermediate constraint proofs.
     *
     * 1) Substitution subproof (optional):
     * If unification produced a non-empty term substitution:
@@ -145,7 +147,8 @@ object UnificationEncoding {
     *        (e.g. equality orientation differs), insert rewrite steps using eqsym
     *        to justify the normalization.
     *        Otherwise:
-    *      - Use the encoded parent instantiated with the child’s variables directly.
+    *      - Instantiate the parent type and term parameters without a substitution,
+    *        supplying witnesses for parameters absent from the child.
     *
     * 2) Constraint-elimination subproof:
     * The unification constraints are trivially false after substitution.
@@ -191,7 +194,8 @@ object UnificationEncoding {
 
     ////////////////////////////
     // 0) Assume free variables
-    val (assumeStep) = encAssumeStep(childVarNames)
+    val assumeStep = introduceClauseContext(
+      parent.cl, child.cl, encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
 
     // construct the actual proof
     if (typeSubst.nonEmpty) {
@@ -201,7 +205,7 @@ object UnificationEncoding {
       ////////////////////////////
       // 1) Substitution subproof (optional)
       val nameHaveSubstStep = Name("Subst")
-      val (maybeSubstStepName, maybeSubstStep) = encodeSubstitutionSubstep(nameHaveSubstStep,ctxt, termSubst, litTransf, encSubstParent, child.cl.implicitlyBound, parent.cl.implicitlyBound, old2NewIdx.withDefault(identity))
+      val (maybeSubstStepName, maybeSubstStep) = encodeSubstitutionSubstep(nameHaveSubstStep,ctxt, termSubst, litTransf, encSubstParent, child.cl, parent.cl, old2NewIdx.withDefault(identity))
 
       ////////////////////////////
       // 2) Constraint-elimination subproof
@@ -496,7 +500,7 @@ object DetUniSimpEncoding {
       }
 
       val nameHaveSubstStep = Name("Subst")
-      val (newStepName, substSubstep) = encodeSubstitutionSubstep(nameHaveSubstStep,ctxt,termSubst,litTransf,normalSubstParent,childCl.implicitlyBound,parentCl.implicitlyBound,previousStage.parent2currentIdx.withDefault(identity))
+      val (newStepName, substSubstep) = encodeSubstitutionSubstep(nameHaveSubstStep,ctxt,termSubst,litTransf,normalSubstParent,childCl,parentCl,previousStage.parent2currentIdx.withDefault(identity))
 
       StageResult.Ok(DetUniStage(newStepName,previousStage.scripts ++ substSubstep,normalSubstParent,previousStage.parent2currentIdx))
     } else {
@@ -1255,7 +1259,7 @@ object PreUniVerification {
     // Justify transformations on both surviving and deleted literals before using
     // the instantiated parent proof. Their positions are already parent positions.
     val (substStepName, substStep) =
-      encodeSubstitutionSubstep(nameHaveSubstStep, ctxt, termSubst, allLitTransf, normalizedSubstParent, child.cl.implicitlyBound, parent.cl.implicitlyBound)
+      encodeSubstitutionSubstep(nameHaveSubstStep, ctxt, termSubst, allLitTransf, normalizedSubstParent, child.cl, parent.cl)
 
     ////////////////////////////
     // 2) Constraint-elimination subproof

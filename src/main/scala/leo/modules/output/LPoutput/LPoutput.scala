@@ -524,7 +524,7 @@ object LPoutput {
           (toProofStepOld(cl, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
         }
 
-        case leo.modules.calculus.PatternUni => replayWith() {
+        case leo.modules.calculus.PatternUni => replayWith(carryTypes) {
           val encProof = encodePatternUni(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
           encProof match {
             case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None),outputInfo)
