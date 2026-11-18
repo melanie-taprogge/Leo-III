@@ -1153,8 +1153,9 @@ object PreUniVerification {
     *
     * Proof structure in the Lambdapi encoding:
     *
-    * 0) Assume free variables
-    *    Introduce all free variables of the child clause.
+    * 0) Introduce child parameters
+    *    Introduce child type and term parameters, and specialize disappearing
+    *    parent types at ι for the intermediate substitution/removal proofs.
     *
     * 1) Reconstruct the substituted parent
     *    Rebuild the parent clause with the shared reconstruction helper by
@@ -1213,7 +1214,7 @@ object PreUniVerification {
 //    }
 
     val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
-    val EncUniCtx(encChild, encParent, _, _, childVarNames, _, _) = ctxt
+    val EncUniCtx(encChild, encParent, _, _, _, _, _) = ctxt
     Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
     Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
 
@@ -1251,7 +1252,8 @@ object PreUniVerification {
 
     ////////////////////////////
     // 0) Assume free variables
-    val assumeStep = encAssumeStep(childVarNames)
+    val assumeStep = introduceClauseContext(
+      parent.cl, child.cl, encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
 
     ////////////////////////////
     // 1) Substitution subproof

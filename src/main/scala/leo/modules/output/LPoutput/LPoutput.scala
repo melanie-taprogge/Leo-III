@@ -495,7 +495,7 @@ object LPoutput {
           }
         }
 
-        case leo.modules.calculus.PreUni => replayWith() {
+        case leo.modules.calculus.PreUni => replayWith(carryTypes) {
           val encProof = encodePreUni(cl.annotation.parents.head, cl, parentProofs.head, sig, useTypedIntroduction = useTypedIntroduction)
           encProof match {
             case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "PreUni", Left(scripts), None), outputInfo)
