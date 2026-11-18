@@ -11,7 +11,8 @@ import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.Obj
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{Pi, Prf}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, var2Lp}
 import leo.modules.output.LPoutput.NewLpDatastructures._
-import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, extractVarNames}
+import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.tyVar2LP
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, introduceClauseContext}
 import leo.modules.output.LPoutput.NewModularEncoding.EqualityProofSteps
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.{applyProofToVars, proofName, proofTermAsTacticArg}
 
@@ -95,7 +96,7 @@ object RewritingBasedRuleEncoding {
     def instantiateRewriteRuleUse(use: AddInfoRewrite, rewrittenParent: Clause): Either[String, InstantiatedRewriteRuleUse] = {
       use.occurrence match {
         case None => Left("RW: Rewrite occurrence position not recorded")
-        case Some(_) if use.rewriteRule.typeVars.nonEmpty || use.origTypeSubst != Subst.id => Left("RW: Polymorphic rewrite-rule instantiation not encoded")
+        case Some(_) if use.origTypeSubst != Subst.id => Left("RW: Rewrite-rule type substitution not encoded")
         case Some(occurrence) =>
           val shiftedRule = shiftPast(Seq(use.rewriteRule), Seq(rewrittenParent)).head
           // Leo lifts the matching template once more for every enclosing object binder. We need to likewise lift our indices
@@ -289,8 +290,12 @@ object RewriteSimpEncoding {
     Out.lp_debug_info(s"Found ${rewriteUses.length} recorded rewrite rule use(s)")
 
     val initialReasons = mutable.LinkedHashSet.empty[String]
-    val childVarNames = extractVarNames(encChild)
-    val initialAssumeSteps = encAssumeStep(childVarNames).toVector
+    // Raw rewrite forms and rule proofs can retain type parameters that do not
+    // occur in the child. Give them one shared specialization throughout replay.
+    val requiredTypeScopes = parent.cl.typeVars ++ finalRawResult.typeVars ++
+      preparedRewriteUses.flatMap(use => use.shiftedRule.typeVars ++ use.instantiatedRule.typeVars)
+    val initialAssumeSteps = introduceClauseContext(requiredTypeScopes, cl.cl, encChild,
+      useLetBasedIntroduction = useTypedIntroduction, sig = _sig).toVector
     val disappearingParentVars = parent.cl.implicitlyBound.filterNot(cl.cl.implicitlyBound.contains)
     var state = RewriteState(Vector.empty, Vector.empty, Vector.empty, initialReasons, 0, 0)
 
@@ -324,7 +329,10 @@ object RewriteSimpEncoding {
     val rewriteApplication = Have(rewrittenParentProofName, Prf(LogicConst.Imp(encParent.term, encFinalResult.term)), rewriteApplicationSteps.map(Left(_)))
 
     // Instantiate the parent and apply the final refinement step
-    val instantiatedParent = instantiateProof(parentNameLpEnc0, parent.cl.implicitlyBound, parent.cl.implicitlyBound, sharedVarMap)
+    // Disappearing term parameters are still bound by RewriteWithParentVars here.
+    // Apply the complete parent context before that local proof supplies witnesses.
+    val instantiatedParent = SubstitutionEncoding.instantiateProofTerm(
+      parent.cl, parent.cl, sharedVarMap, parentNameLpEnc0)
     val rewrittenParentProof = LpTerm.App(proofName(rewrittenParentProofName), Seq(Arg.Explicit(instantiatedParent)))
     val applyRewrite = Refine(Obj(rewrittenParentProof))
 
@@ -454,18 +462,25 @@ object RewriteSimpEncoding {
                                                   currentVars: Seq[(Int, Type)],
                                                   sharedVarMap: Map[Int, String],
                                                   state0: RewriteState): (RewriteState, LpTerm[Level.Obj]) = {
-    // If no substitution was applied and the normally printed source rule already -> use its proof directly.
+    // Fix source type parameters before either reusing the rule or instantiating
+    // its term parameters. Missing types have aliases in the shared replay context.
+    val typeArgs = rewriteUse.shiftedRule.typeVars.reverse.map { scope =>
+      Arg.ExplicitTypeArg[Level.Obj](OlMonoType.TyVar(tyVar2LP(scope)))
+    }
+    val typedSource = if (typeArgs.isEmpty) sourceBeforeEq else LpTerm.App(sourceBeforeEq, typeArgs)
+
+    // Reuse the proof when its term binders and unreduced rule form already agree.
     val unchangedRule = rewriteUse.termSubst.isEmpty && // no substitution needs to be applied
       rewriteUse.shiftedRule.implicitlyBound.forall { case (index, _) => sharedVarMap.contains(index) } && // Condition under which we may encode the step with the sharedVarMap
       RawClauseEncoding.clause2Lp(RawClause(rewriteUse.shiftedRule), sharedVarMap).asMl == encRewriteRule.asMl // The encoded rules are the same (this is not the case if we need eta expansion)
-    if (unchangedRule) return (state0, sourceBeforeEq)
+    if (unchangedRule) return (state0, typedSource)
 
     // Otherwise, prove the required form
     val stepPrefix = if (rewriteUse.termSubst.nonEmpty) "RewriteInstantiation" else "RewriteRuleForm"
     val stepName = Name(s"${stepPrefix}_${state0.rewriteRuleProofCounter}")
     val availableVars = (currentVars ++ rewriteUse.residualRuleVars).distinct
     // Apply substitution if it exists
-    val instantiatedSource = SubstitutionEncoding.instantiateProofTerm(rewriteUse.shiftedRule.implicitlyBound, availableVars, rewriteUse.termSubst, sharedVarMap, sourceBeforeEq)
+    val instantiatedSource = SubstitutionEncoding.instantiateProofTerm(rewriteUse.shiftedRule.implicitlyBound, availableVars, rewriteUse.termSubst, sharedVarMap, typedSource)
     val residualBinders = rewriteUse.residualRuleVars.map { case (index, ty) =>
       var2Lp(index, ty, sharedVarMap)
     }

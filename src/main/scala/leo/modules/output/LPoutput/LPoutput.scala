@@ -503,7 +503,7 @@ object LPoutput {
           }
         }
 
-        case leo.modules.calculus.RewriteSimp => replayWith() {
+        case leo.modules.calculus.RewriteSimp => replayWith(carryTypes) {
           val encodingRewrite = RewriteSimpEncoding.encRewrite(cl, cl.annotation.parents, cl.furtherInfo.addInfoSimp, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
           encodingRewrite match {
             case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, "RewriteSimp", Left(scripts), None), outputInfo)

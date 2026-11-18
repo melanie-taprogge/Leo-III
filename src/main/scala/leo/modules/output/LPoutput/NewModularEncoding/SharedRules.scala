@@ -46,8 +46,19 @@ object AssumeStep {
                               child: Clause,
                               encChild: lpClauseInst,
                               useLetBasedIntroduction: Boolean,
+                              sig: LpSig): Seq[LpProofScript] =
+    introduceClauseContext(parent.typeVars, child, encChild, useLetBasedIntroduction, sig)
+
+  /** Introduce a child context for a replay with several source clauses or raw
+    * intermediate forms. Every required type scope must be supplied, including
+    * types occurring only in source proofs; absent child types are fixed at ι.
+    */
+  def introduceClauseContext(requiredTypeScopes: Seq[Int],
+                              child: Clause,
+                              encChild: lpClauseInst,
+                              useLetBasedIntroduction: Boolean,
                               sig: LpSig): Seq[LpProofScript] = {
-    val missingTypeDefinitions = parent.typeVars.reverse.diff(child.typeVars).map { scope =>
+    val missingTypeDefinitions = requiredTypeScopes.distinct.sorted.diff(child.typeVars).map { scope =>
       SetType(tyVar2LP(scope), HolBaseTypes.I)
     }
     encClauseVariableIntroduction(encChild, useLetBasedIntroduction, sig) ++ missingTypeDefinitions

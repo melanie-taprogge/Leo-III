@@ -460,7 +460,7 @@ object ClauseEncoding {
 
 /** Translation of raw clauses that must retain pre-normalization literal shape. */
 object RawClauseEncoding {
-  import TypeEncoding.type2LP
+  import TypeEncoding.{type2LP, tyVar2LP}
   import TermEncoding.{term2LP, vars2Lp}
 
   def lit2Lp(lit: RawLiteral, bVarMap: Map[Int, String], suppressReduction: Boolean = false): lpLiteralInst = lit match {
@@ -482,8 +482,9 @@ object RawClauseEncoding {
 
   def clause2Lp(clause: RawClause, bVarMap: Map[Int, String], suppressReduction: Boolean = false): lpClauseInst = {
     val encodedLits = clause.lits.map(lit2Lp(_, bVarMap, suppressReduction))
-    val encodedVars = vars2Lp(clause.implicitlyBound, bVarMap).map(Left(_))
-    lpClauseInst(encodedLits, encodedVars)
+    val typeBinders = clause.typeVars.reverse.map(scope => Right(TyVar(tyVar2LP(scope))))
+    val termBinders = vars2Lp(clause.implicitlyBound, bVarMap).map(Left(_))
+    lpClauseInst(encodedLits, typeBinders ++ termBinders)
   }
 }
 
