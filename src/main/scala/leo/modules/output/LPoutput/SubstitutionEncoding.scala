@@ -65,16 +65,27 @@ object SubstitutionEncoding {
   def instantiateProofTerm(parent: Clause,
                            child: Clause,
                            sharedVarMap: Map[Int, String],
+                           parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
+    instantiateProofTerm(parent.implicitlyBound, parent.typeVars.reverse, child, sharedVarMap, parentProof)
+
+  /** Instantiate a pointwise proof whose type and term parameters have explicit
+    * declaration order. In particular, Skolem definitions follow the recorded
+    * dependency order, which need not be the clause's type-binder order.
+    */
+  def instantiateProofTerm(parentVars: Seq[(Int, Type)],
+                           parentTypeVars: Seq[Int],
+                           child: Clause,
+                           sharedVarMap: Map[Int, String],
                            parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] = {
     val childTypeScopes = child.typeVars.toSet
-    val typeInstances = parent.typeVars.reverse.map { scope =>
+    val typeInstances = parentTypeVars.map { scope =>
       val name = tyVar2LP(scope)
       val instance = if (childTypeScopes(scope)) OlMonoType.TyVar(name) else type2LP(HOLSignature.i)
       name -> instance
     }
     val typeArgs = typeInstances.map { case (_, instance) => Arg.ExplicitTypeArg[Level.Obj](instance) }
     val instantiatedParent = if (typeArgs.nonEmpty) LpTerm.App(parentProof, typeArgs) else parentProof
-    instantiateProofTerm(parent.implicitlyBound, child.implicitlyBound, Seq.empty, sharedVarMap,
+    instantiateProofTerm(parentVars, child.implicitlyBound, Seq.empty, sharedVarMap,
       instantiatedParent, typeInstances.toMap)
   }
 

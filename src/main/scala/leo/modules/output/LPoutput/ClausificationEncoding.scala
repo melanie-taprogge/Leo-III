@@ -8,9 +8,9 @@ import leo.modules.calculus.{CnfConj, CnfSkolem, FullCNF, RenameCNF}
 import leo.modules.output.LPoutput.EncodeResult.{Encoded, NotEncodable}
 import leo.modules.output.LPoutput.LpLibs.{Clausification, EqRules, LeoTactics, MetaTheorems, ND}
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Reflexivity, Repeat, Rewrite, RewritePattern, Side, Simplify, Try}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Reflexivity, Repeat, Rewrite, RewritePattern, SetType, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, vars2Lp}
-import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
+import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.{tyVar2LP, type2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, Lifting, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, Stmt, SymRef, lpClauseInst, lpTermBuilder, nAry}
 import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.{applyProofToVars, proofTermAsTacticArg}
@@ -914,8 +914,6 @@ object ClausificationEncoding {
     }
     val parent = parents.head.cl
     val definition = parents(1)
-    if (skolemInfo.ftVs.nonEmpty || Seq(parent, step.cl, definition.cl).exists(_.typeVars.nonEmpty))
-      return Left(s"Skolemization step ${step.id}: polymorphic Skolemization is not encoded")
 
     val position = skolemInfo.position match {
       case Some(value) => value
@@ -930,8 +928,9 @@ object ClausificationEncoding {
     val symbol = sig.orig(skolemInfo.sko)
     if (!isPropSet(Signature.PropSkolemConstant, symbol.flag) || !symbol.hasDefn)
       return Left(s"Skolemization step ${step.id}: expected a Skolem symbol with a stored definition")
-    if (symbol._ty.isPolyType)
-      return Left(s"Skolemization step ${step.id}: polymorphic Skolemization is not encoded")
+    val (typeArity, _) = leo.modules.output.ToTHF.collectForallTys(0, symbol._ty)
+    if (skolemInfo.ftVs.size != typeArity || skolemInfo.ftVs.distinct.size != typeArity)
+      return Left(s"Skolemization step ${step.id}: recorded type parameters do not match the Skolem type scheme")
 
     val matchesDefinition = (definition.role, definition.annotation, definition.cl.lits) match {
       case (Role_Definition, ClauseAnnotation.FromSystem("definition", _, _), Seq(literal))
@@ -947,8 +946,13 @@ object ClausificationEncoding {
 
     val (variableMap, encoded) = lpClauseInst.apply_to_set(
       Seq(parent, step.cl), skolemInfo.fVs, suppressReductionAt = Set(0))
+    // A vacuous quantifier can lose its type in the child while the inverse
+    // Skolem equality still mentions it. Match the parent instantiation at ι.
+    val missingTypeDefinitions = parent.typeVars.reverse.diff(step.cl.typeVars).map { scope =>
+      SetType(tyVar2LP(scope), HolBaseTypes.I)
+    }
     val variableIntroduction = encClauseVariableIntroduction(
-      encoded(1), useLetBasedIntroduction = useTypedIntroduction, sig = sig)
+      encoded(1), useLetBasedIntroduction = useTypedIntroduction, sig = sig) ++ missingTypeDefinitions
     val ctx = SkolemContext(step, parent, parentProofs.head, parentProofs(1),
       encoded.head, encoded(1), variableMap, skolemInfo, position, variableIntroduction)
     Out.lp_debug_info(s"Skolemization step ${step.id}: formula parent ${parents.head.id}, definition parent ${definition.id}, position ${position.pretty}")
@@ -1001,7 +1005,7 @@ object ClausificationEncoding {
     } yield {
       // Apply the formula-parent proof to child variables, supplying witnesses where variables disappeared.
       val parent = SubstitutionEncoding.instantiateProofTerm(
-        ctx.parent.implicitlyBound, ctx.step.cl.implicitlyBound, Seq.empty, ctx.variableMap, ctx.parentProof)
+        ctx.parent, ctx.step.cl, ctx.variableMap, ctx.parentProof)
       // Introduce the child's variables, perform both rewrites, and close with the instantiated parent.
       ctx.variableIntroduction ++ unfolding ++ folding ++ Seq(Refine(proofTermAsTacticArg(parent)))
     }
@@ -1062,7 +1066,7 @@ object ClausificationEncoding {
     */
   private def encSkolemDefinitionRewrite(ctx: SkolemContext): Either[String, Seq[LpProofScript]] = {
     val definition = SubstitutionEncoding.instantiateProofTerm(
-      ctx.skolemInfo.fVs, ctx.step.cl.implicitlyBound, Seq.empty, ctx.variableMap, ctx.definitionProof)
+      ctx.skolemInfo.fVs, ctx.skolemInfo.ftVs, ctx.step.cl, ctx.variableMap, ctx.definitionProof)
     Right(Seq(Repeat(Rewrite(None, proofTermAsTacticArg(definition), Side.Right))))
   }
 

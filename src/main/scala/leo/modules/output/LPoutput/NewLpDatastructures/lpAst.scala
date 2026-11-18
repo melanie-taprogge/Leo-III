@@ -181,6 +181,8 @@ object LpProofScript {
   final case object Admit extends LpProofScript
   /** Instantiate the dependant types/ the arguments of function types of the current goals with variables */
   final case class Assume(MetaVars: Seq[Name]) extends LpProofScript
+  /** Define a local HOL type alias in the current proof context. */
+  final case class SetType(name: Name, value: OlMonoType) extends LpProofScript
 
   // ** Misc
   /** Add a comment in the proof-script */

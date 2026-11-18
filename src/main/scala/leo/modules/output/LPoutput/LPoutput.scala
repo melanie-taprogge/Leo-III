@@ -394,7 +394,7 @@ object LPoutput {
           }
         }
 
-        case leo.modules.calculus.CnfSkolem => replayWith() {
+        case leo.modules.calculus.CnfSkolem => replayWith(carryTypes) {
           val encoding = encSkolem(cl, parentProofs, sig, useTypedIntroduction = useTypedIntroduction)
           encoding match {
             case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None), outputInfo)

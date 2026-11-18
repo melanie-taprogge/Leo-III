@@ -115,6 +115,7 @@ object Renderer {
     case Comment(com) => s"// $com;"
     case Admit => s"admit;"
     case Assume(vars) => s"assume ${vars.map(_.value).mkString(" ")};"
+    case SetType(name, value) => s"set ${name.value} ≔ ${olTy(value, ro, sig)};"
   }
   }
 
