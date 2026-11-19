@@ -431,7 +431,7 @@ object LPoutput {
           (toProofStepOld(cl, encStep, "BoolExt", encoding._1, encoding._2),outputInfo)
         }
 
-        case leo.modules.calculus.OrderedEqFac => replayWith() {
+        case leo.modules.calculus.OrderedEqFac => replayWith(carryTypes) {
           val encodings = encEqFact_proofScript(cl, cl.annotation.parents.head, cl.furtherInfo.addInfoEqFac, parentInLpEncID.head, sig.orig)
           (toProofStepOld(cl, encStep, "OrderedEqFac", encodings._1, encodings._2),outputInfo)
         }

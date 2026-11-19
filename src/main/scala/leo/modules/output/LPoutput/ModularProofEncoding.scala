@@ -967,7 +967,7 @@ object ModularProofEncoding {
   }
 
 
-  def encEqFactLiterals(otherLit: Literal, maxLit: Literal, uc1Orig: Literal, uc2Orig: Literal, parent: Clause, child: Clause, bVarMap: Map[Int, String], sourceBefore: lpTerm, nameStep: lpOlTerm, sig: Signature): (lpProofScriptStep, Boolean) = {
+  def encEqFactLiterals(otherLit: Literal, maxLit: Literal, uc1Orig: Literal, uc2Orig: Literal, parent: Clause, child: Clause, parentEnc: lpClauseInst, bVarMap: Map[Int, String], sourceBefore: lpTerm, nameStep: lpOlTerm, sig: Signature): (lpProofScriptStep, Boolean) = {
     var allSteps: Seq[lpProofScriptStep] = Seq.empty
     val nameAssumption = lpOlConstantTerm("h1")
     var lastStepName: lpTerm = nameAssumption
@@ -1000,11 +1000,11 @@ object ModularProofEncoding {
     }
     //val maxLitEq = lpOlTypedBinaryConnectiveTerm(lpEq, encType, maxLit_l, maxLit_r)
     //val maxLitEnc = if (maxLit.polarity) otherLitEq else lpOlUnaryConnectiveTerm(lpNot, maxLitEq)
-    val parentEnc = clause2LP(parent, Set.empty, sig)._1
+    // The implication and its surrounding proof share names for all free terms.
     val parentLits = parentEnc.lits
     var currentLits = parentLits
     assert(otherLit.right.ty == maxLit.right.ty)
-    Out.lp_debug_info(s"Applying to parent ${parentEnc.pretty}")
+    Out.lp_debug_info(s"Applying to parent ${parentEnc.term.pretty}")
     Out.lp_debug_info(s"MaxLit is ${maxLitEnc.pretty}, OtherLit is ${otherLitEnc.pretty}")
 
     // infer the other lit and the unification constraint in the child
@@ -1196,19 +1196,29 @@ object ModularProofEncoding {
       // 5. If the order of literals was changed, change it back with the correct instance of permute
       // 6. Refine with the last proven step
 
-      // 1. Abstract over free variables
-      val (clauseQuantification, applySymbolsToParent) = clauseRuleQuantification(parent.cl, bVarMap, sig)
-      if (clauseQuantification.nonEmpty) allSteps = allSteps :+ lpAssume(clauseQuantification.map(var0 => var0.untyped))
-      var lastStep: lpTerm = lpFunctionApp(parentNameLpEnc, applySymbolsToParent)
+      // Type parameters precede dependent term parameters in both declarations.
+      // Use the child's names throughout the local implication and parent proof.
+      val (_, encodedClauses) = lpClauseInst.apply_to_set(Seq(child.cl, parent.cl), sig, bVarMap)
+      val encChild = encodedClauses.head
+      val encParent = encodedClauses(1)
+      allSteps = allSteps ++ assumeClauseVars(encChild)
+      // Intermediate transformations can retain premise types absent from the goal.
+      // Keep their specialization consistent with the parent proof application.
+      val missingTypeDefinitions = parent.cl.typeVars.reverse.diff(child.cl.typeVars).map { scope =>
+        lpSetTac(NewLpDatastructures.TypeEncoding.tyVar2LP(scope).value, lpItype)
+      }
+      allSteps = allSteps ++ missingTypeDefinitions
+      val parentProof = lpFunctionApp(parentNameLpEnc, encParent.metaVars)
+      var lastStep: lpTerm = parentProof
 
       // 2. Identify the two literals to be unified and compose a function proving the rule application including all necessary transformations:
       val factStepName = lpOlConstantTerm("WholeEqFactStep")
       if (parent.cl.lits.length == 2) {
-        val (encFactoring, canEncode) = encEqFactLiterals(otherLit, maxLit, ur1, ur2, parent.cl, child.cl, bVarMap, lastStep, factStepName, sig)
+        val (encFactoring, canEncode) = encEqFactLiterals(otherLit, maxLit, ur1, ur2, parent.cl, child.cl, encParent, bVarMap, lastStep, factStepName, sig)
         allSteps = allSteps :+ encFactoring
         lastStep = factStepName
         // 6. Refine with the last proven step
-        allSteps = allSteps :+ lpRefine(lpFunctionApp(lastStep, Seq(lpFunctionApp(parentNameLpEnc, applySymbolsToParent))))
+        allSteps = allSteps :+ lpRefine(lpFunctionApp(lastStep, Seq(parentProof)))
         val wholeProof = lpProofScript(allSteps)
 
         if (canEncode) (wholeProof, None)
