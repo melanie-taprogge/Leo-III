@@ -2,7 +2,7 @@ package leo.modules.output.LPoutput
 import leo.Out
 import leo.datastructures.Literal.asTerm
 import leo.modules.output.LPoutput.OldLpDatastructures.Encodings._
-import leo.datastructures.{AddInfoPara, AddInfoUni, Clause, ClauseProxy, Literal, Signature, Term, Type, UniTermByBoundVar, UniTermByTerm}
+import leo.datastructures.{AddInfoPara, AddInfoUni, Clause, ClauseProxy, Literal, Signature, Subst, Term, Type, UniTermByBoundVar, UniTermByTerm}
 import leo.modules.HOLSignature._
 import leo.modules.calculus.PolaritySwitch
 import leo.modules.output.LPoutput.OldLpDatastructures.lpDatastructures._
@@ -592,7 +592,8 @@ object ModularProofEncoding {
       *     in the child clause it appears as ¬(u = v).
       *
       * Steps:
-      * 0) Assume all free variables of the child.
+      * 0) Introduce child type and term parameters, then specialize premise-only
+      *    types at ι for the local transformations and parent applications.
       *
       * 1) Ensure the rewrite literal is equational:
       * If withLit is positive and non-equational, transform it into an equality in a separate sub-step.
@@ -628,6 +629,11 @@ object ModularProofEncoding {
       // Encodings and prelim
       // todo: prelim cheks: child has at least two literals, UC is equational, check the indices here too
 
+      validateReplayPremises(parentWithClause.clPr.cl, parentIntoClause.clPr.cl, info) match {
+        case Left(reason) => return (lpProofScript(Seq.empty), Some(reason))
+        case Right(_) => ()
+      }
+
       val ctxt = encParaClauses(child, parentWithClause, parentIntoClause, info, sig) match {
         case Left(error) => throw new Exception(error)
         case Right(value) => value
@@ -643,6 +649,12 @@ object ModularProofEncoding {
       ////////////////////////////
       // 0) Assume free variables
       val assumeVarsStep = assumeClauseVars(ctxt.childC.enc)
+      // Local transformations still mention premise types that can disappear
+      // from the conclusion. Use the same specialization in both parent proofs.
+      val replayTypeScopes = (parentWithClause.clPr.cl.typeVars ++ info.intoClause.typeVars).distinct.sorted
+      val missingTypeDefinitions = replayTypeScopes.diff(child.typeVars).map { scope =>
+        lpSetTac(NewLpDatastructures.TypeEncoding.tyVar2LP(scope).value, lpItype)
+      }
 
       ////////////////////////////
       // 1) Ensure the rewrite literal is equational
@@ -681,8 +693,48 @@ object ModularProofEncoding {
       val ufTrueOrFalse = lpFunctionApp(lpLorelim.name, Seq(lpFunctionApp(lpEm.name, Seq(newCtxt.childC.encPosUniLit)), lpWildcard, lpWildcard))
       val caseSplitUniLit = lpRefine(ufTrueOrFalse, Seq(caseUniLitTrue, caseUniLitFalse))
 
-      val proof = lpProofScript(assumeVarsStep ++ stepWithLit2Eq :+ caseSplitUniLit)
+      val proof = lpProofScript(assumeVarsStep ++ missingTypeDefinitions ++ stepWithLit2Eq :+ caseSplitUniLit)
       (proof, None)
+    }
+
+    /** Check that recorded premises differ from the proof parents only by the
+      * producer's variable shift. Initial type unification can specialize both
+      * premises before AddInfoPara is built without setting typeSubstNeeded.
+      */
+    private def validateReplayPremises(withParent: Clause, intoParent: Clause,
+                                       info: AddInfoPara): Either[String, Unit] = {
+      val termShift = Subst.shift(Clause.maxImplicitlyBound(withParent))
+      val typeShift = Subst.shift(Clause.maxTypeVar(withParent))
+      val shiftedIntoLits = intoParent.lits.map(_.applyRenamingSubstitution(termShift, typeShift))
+      // Literal equality ignores equality-side orientation; replay positions do not.
+      def sameLiterals(left: Seq[Literal], right: Seq[Literal]): Boolean =
+        left.length == right.length && left.zip(right).forall { case (l, r) =>
+          l.left == r.left && l.right == r.right && l.polarity == r.polarity &&
+            l.equational == r.equational && l.oriented == r.oriented
+        }
+
+      if (info.typeSubstNeeded || !sameLiterals(withParent.lits, info.withClause.lits) ||
+        !sameLiterals(shiftedIntoLits, info.intoClause.lits))
+        Left("PARA: Premise instantiation beyond variable renaming not encoded")
+      else Right(())
+    }
+
+    /** Apply a source proof in its declaration order, using the variable scopes
+      * of the replay context. The into parent is shifted past the with parent;
+      * type and term offsets are independent maxima, not numbers of binders.
+      */
+    private def instantiateParentProof(parent: ParentInfo,
+                                        termOffset: Int,
+                                        typeOffset: Int,
+                                        bVarsMap: Map[Int, String]): lpTerm = {
+      val source = parent.clPr.cl
+      val typeArgs = source.typeVars.reverse.map { scope =>
+        lpConstantTerm(NewLpDatastructures.TypeEncoding.tyVar2LP(scope + typeOffset).value)
+      }
+      val termArgs = source.implicitlyBound.map { case (scope, _) =>
+        lpConstantTerm(bVarsMap(scope + termOffset))
+      }
+      lpFunctionApp(parent.lpName, typeArgs ++ termArgs)
     }
 
     // helpers
@@ -718,12 +770,18 @@ object ModularProofEncoding {
       val uniLit = child.lits.last
 
       // encodings
-      val (bVarsMap, clauses) = lpClauseInst.apply_to_set(Seq(intoClause, withClause), sig)
+      // Allocate parent-only names before child names so the latter match the
+      // independently declared conclusion. All replay expressions share this map.
+      val childTermScopes = child.implicitlyBound.map(_._1).toSet
+      val parentOnlyTerms = (withClause.implicitlyBound ++ intoClause.implicitlyBound)
+        .filterNot { case (scope, _) => childTermScopes(scope) }.distinct.sortBy(_._1).reverse
+      val bVarsMap = clauseVars2LP(parentOnlyTerms ++ child.implicitlyBound, sig, Set.empty)._2
+      val (_, clauses) = lpClauseInst.apply_to_set(Seq(child, withClause, intoClause), sig, bVarsMap)
+      val encChildClause = clauses.head
       val encWithClause = clauses(1)
-      val encIntoClause = clauses(0)
+      val encIntoClause = clauses(2)
       val encWithLit = lpLiteral(encWithClause.lits(info.withIndex))
       val encOtherLitsWithClause = encWithClause.lits.patch(info.withIndex, Nil, 1)
-      val encChildClause = lpClauseInst(child, sig)
       val encUniLit = encChildClause.lits.last
       val encPosUniLit = encUniLit match {
         case lpOlUnaryConnectiveTerm(`lpNot`, nonNegLit) => nonNegLit
@@ -738,9 +796,9 @@ object ModularProofEncoding {
       val withClauseLen = withClause.lits.length
       val childLen = child.lits.length
 
-      // instanciation of RW clause
-      val instWithClause = lpFunctionApp(withClauseName, encWithClause.metaVars)
-      val instIntoClause = lpFunctionApp(intoClauseName, encIntoClause.metaVars)
+      val instWithClause = instantiateParentProof(parentWithClause, 0, 0, bVarsMap)
+      val instIntoClause = instantiateParentProof(parentIntoClause,
+        Clause.maxImplicitlyBound(withClause), Clause.maxTypeVar(withClause), bVarsMap)
 
       val withClauseObject = ParaWithClause(withLit, encOtherLitsWithClause, encWithClause, encWithLit, withClauseName, instWithClause, info.withIndex, withClauseLen)
       val intoClauseObject = ParaIntoClause(intoLit, encIntoClause, encIntoLitIntoClause, intoClauseName, instIntoClause)

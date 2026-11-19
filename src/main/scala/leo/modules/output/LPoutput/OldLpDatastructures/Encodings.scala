@@ -482,9 +482,22 @@ object Encodings {
     def apply_to_set(cls: Seq[Clause], sig: Signature): ( Map[Int, String],Seq[lpClauseInst]) = {
       val allImpBoundVars = cls.flatMap(_.implicitlyBound).distinct.sortBy(_._1).reverse
       val fullBvarsMap = clauseVars2LP(allImpBoundVars, sig, Set.empty)._2
-      val encCls = cls.map(cl => clause2LP0(cl,fullBvarsMap,sig,Set.empty)._1)
-      val encVars: Seq[Seq[Either[lpOlTypedVar, lpOlTyVar]]] = cls.map(cl => var2Lp(cl.implicitlyBound,fullBvarsMap,sig).map(Left(_)))
-      (fullBvarsMap, encCls.zip(encVars).map(ecnCl => lpClauseInst(ecnCl._1, ecnCl._1.args, ecnCl._2)))
+      apply_to_set(cls, sig, fullBvarsMap)
+    }
+
+    /** Encode related clauses using one term-variable map. The map must cover
+      * every clause; callers may supply it to preserve a goal's binder names.
+      */
+    def apply_to_set(cls: Seq[Clause], sig: Signature,
+                     bVarsMap: Map[Int, String]): (Map[Int, String], Seq[lpClauseInst]) = {
+      val encoded = cls.map { cl =>
+        val term = clause2LP0(cl, bVarsMap, sig, Set.empty)._1
+        // Type binders precede the term binders whose types may refer to them.
+        val typeBinders = cl.typeVars.reverse.map(scope => Right(lpOlTyVar(s"T${intToName(scope - 1)}")))
+        val termBinders = var2Lp(cl.implicitlyBound, bVarsMap, sig).map(Left(_))
+        lpClauseInst(term, term.args, typeBinders ++ termBinders)
+      }
+      (bVarsMap, encoded)
     }
   }
 }

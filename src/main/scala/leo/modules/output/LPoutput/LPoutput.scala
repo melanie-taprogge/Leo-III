@@ -438,7 +438,7 @@ object LPoutput {
 
         ////////////////////////////////////////
         // Paramodulation encoding
-        case leo.modules.calculus.OrderedParamod => replayWith() {
+        case leo.modules.calculus.OrderedParamod => replayWith(carryTypes) {
           val (parentWithClause, parentIntoClause) = extractParentInfo2_new(cl, stepInfo.identicalSteps.toMap, proofReferences) match {
             case Left(error) => throw new Exception(error)
             case Right(value) => value
