@@ -331,7 +331,7 @@ object RewriteSimpEncoding {
     // Instantiate the parent and apply the final refinement step
     // Disappearing term parameters are still bound by RewriteWithParentVars here.
     // Apply the complete parent context before that local proof supplies witnesses.
-    val instantiatedParent = SubstitutionEncoding.instantiateProofTerm(
+    val instantiatedParent = SubstitutionEncoding.instantiateClauseProof(
       parent.cl, parent.cl, sharedVarMap, parentNameLpEnc0)
     val rewrittenParentProof = LpTerm.App(proofName(rewrittenParentProofName), Seq(Arg.Explicit(instantiatedParent)))
     val applyRewrite = Refine(Obj(rewrittenParentProof))
@@ -479,8 +479,9 @@ object RewriteSimpEncoding {
     val stepPrefix = if (rewriteUse.termSubst.nonEmpty) "RewriteInstantiation" else "RewriteRuleForm"
     val stepName = Name(s"${stepPrefix}_${state0.rewriteRuleProofCounter}")
     val availableVars = (currentVars ++ rewriteUse.residualRuleVars).distinct
-    // Apply substitution if it exists
-    val instantiatedSource = SubstitutionEncoding.instantiateProofTerm(rewriteUse.shiftedRule.implicitlyBound, availableVars, rewriteUse.termSubst, sharedVarMap, typedSource)
+    // typedSource already has its type arguments. Apply only term arguments,
+    // using the shifted variable scopes recorded by the matcher.
+    val instantiatedSource = SubstitutionEncoding.instantiateTermParameters(rewriteUse.shiftedRule.implicitlyBound, availableVars, rewriteUse.termSubst, sharedVarMap, typedSource)
     val residualBinders = rewriteUse.residualRuleVars.map { case (index, ty) =>
       var2Lp(index, ty, sharedVarMap)
     }
@@ -559,7 +560,7 @@ object RewriteSimpEncoding {
                                quantifiedVars: Seq[(Int, Type)],
                                availableVars: Seq[(Int, Type)],
                                sharedVarMap: Map[Int, String]): LpTerm[Level.Obj] = {
-    SubstitutionEncoding.instantiateProofTerm(quantifiedVars, availableVars, Seq.empty, sharedVarMap, sourceProof
-    )
+    SubstitutionEncoding.instantiateTermParameters(
+      quantifiedVars, availableVars, Seq.empty, sharedVarMap, sourceProof)
   }
 }

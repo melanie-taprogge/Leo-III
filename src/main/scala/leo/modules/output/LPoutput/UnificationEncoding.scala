@@ -58,19 +58,21 @@ object Util {
     * @param encSubstParent A sequence of literals encoding the parent that is to result from the substitution step
     * @param childCl Child clause, including its implicit type and term parameters
     * @param parentCl Parent clause in the substitution's source variable context
+    * @param typeSubst Original type substitution; term RHSs already use its target context
     * @param idxMap If the indices given in the additional information refer to indices in the original child clause, we need a mapping to associate
     *               them with the correct indices in the clause at hand.
     * @return if no substitution is needed, return the previous step and an empty sequence, else, return the LP term encoding the substet and a
     *         sequence containing the LP have tactic encoding the substep
     */
-  def encodeSubstitutionSubstep(nameStep: Name, ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, encSubstParent: Seq[lpLiteralInst], childCl: Clause, parentCl: Clause, idxMap: Int => Int = identity): (LpTerm[Level.Obj], Seq[Have]) = {
+  def encodeSubstitutionSubstep(nameStep: Name, ctxt: EncUniCtx, termSubst: Seq[UniTermSubst], litTransf: LiteralTransformation, encSubstParent: Seq[lpLiteralInst], childCl: Clause, parentCl: Clause, idxMap: Int => Int = identity, typeSubst: Subst = Subst.id): (LpTerm[Level.Obj], Seq[Have]) = {
 
     // construct the application
     Out.lp_debug_info(s"vars of parent: ${parentCl.implicitlyBound.map(_._1)}")
     Out.lp_debug_info(s"vars of child: ${childCl.implicitlyBound.map(_._1)}")
-    val instantiatedParent = SubstitutionEncoding.instantiateProofTerm(
-      parentCl, childCl, termSubst, ctxt.sharedVarMap, ctxt.parentNameLpEnc)
-    if (termSubst.nonEmpty) {
+    val instantiatedParent = SubstitutionEncoding.instantiateClauseProof(
+      parentCl, childCl, ctxt.sharedVarMap, ctxt.parentNameLpEnc,
+      termSubst = termSubst, typeSubst = typeSubst)
+    if (termSubst.nonEmpty || typeSubst != Subst.id) {
       // detect potential flipping or normalisazion of literals that may be necessary in this step
       val maybeFlipAndNormalize: Seq[Rewrite] = verifySubstitutionLiteralNormalisazion(litTransf, encSubstParent.map(_.polarity), ctxt.substClauseLen, idxMap)
       // construct the refine step carrying out the substitution
@@ -186,7 +188,8 @@ object UnificationEncoding {
     Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
 
     // encoding of additional information regarding the unification rule application
-    val UniCtx(termSubst, typeSubst, deletedUniLits, litTransf) = initUniCtxt(child.furtherInfo.addInfoUni)
+    val info = child.furtherInfo.addInfoUni
+    val UniCtx(termSubst, _, deletedUniLits, litTransf) = initUniCtxt(info)
 
     // construct the parent post-substitution (but prior to the deletion of the literals) and a mapping of the child literal indices to the ones in this parent
     val (encSubstParent, old2NewIdx) = reconstructSubstUniParent(deletedUniLits, encChild.lits, childVarMap)
@@ -194,30 +197,37 @@ object UnificationEncoding {
 
     ////////////////////////////
     // 0) Assume free variables
-    val assumeStep = introduceClauseContext(
-      parent.cl, child.cl, encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
-
-    // construct the actual proof
-    if (typeSubst.nonEmpty) {
-      NotEncodable("Type unification not encoded yet")
-    } else {
-
-      ////////////////////////////
-      // 1) Substitution subproof (optional)
-      val nameHaveSubstStep = Name("Subst")
-      val (maybeSubstStepName, maybeSubstStep) = encodeSubstitutionSubstep(nameHaveSubstStep,ctxt, termSubst, litTransf, encSubstParent, child.cl, parent.cl, old2NewIdx.withDefault(identity))
-
-      ////////////////////////////
-      // 2) Constraint-elimination subproof
-      val nameHaveRemoveStep = Name("RemoveUniConst")
-      val haveRemoveStep = constructRemoveStep(nameHaveRemoveStep, encSubstParent, encChild.lits, deletedUniLits.map(_.position)) // , child.cl
-
-      ////////////////////////////
-      // 3) Composition in final refine step
-      val appliedHaveRemoveStep = applyRemoveStep(nameHaveRemoveStep, maybeSubstStepName)
-
-      Encoded(((assumeStep ++ maybeSubstStep) :+ haveRemoveStep) :+ Refine(Obj(appliedHaveRemoveStep)))
+    // Intermediate constraints and substitution arguments may retain target
+    // types that disappear from the child. Introduce those target scopes before
+    // either subproof; original source scopes need not survive instantiation.
+    val instantiatedTypes = SubstitutionEncoding.resolveTypeInstances(parent.cl.typeVars.reverse, info.origTypeSubst)
+    val parameterScopes = instantiatedTypes.flatMap(_._2.typeVars).collect { case Type.BoundType(scope) => scope }
+    val constraintScopes = deletedUniLits.flatMap(lit => lit.literal.left.tyFV ++ lit.literal.right.tyFV)
+    val argumentScopes = termSubst.flatMap {
+      case UniTermSubst(_, UniTermByTerm(term, _, _)) => term.tyFV
+      case _ => Set.empty[Int]
     }
+    val assumeStep = introduceClauseContext(
+      parameterScopes ++ constraintScopes ++ argumentScopes, child.cl, encChild,
+      useLetBasedIntroduction = useTypedIntroduction, sig = sig)
+
+    ////////////////////////////
+    // 1) Substitution subproof (optional)
+    val nameHaveSubstStep = Name("Subst")
+    val (maybeSubstStepName, maybeSubstStep) = encodeSubstitutionSubstep(
+      nameHaveSubstStep, ctxt, termSubst, litTransf, encSubstParent, child.cl, parent.cl,
+      old2NewIdx.withDefault(identity), typeSubst = info.origTypeSubst)
+
+    ////////////////////////////
+    // 2) Constraint-elimination subproof
+    val nameHaveRemoveStep = Name("RemoveUniConst")
+    val haveRemoveStep = constructRemoveStep(nameHaveRemoveStep, encSubstParent, encChild.lits, deletedUniLits.map(_.position))
+
+    ////////////////////////////
+    // 3) Composition in final refine step
+    val appliedHaveRemoveStep = applyRemoveStep(nameHaveRemoveStep, maybeSubstStepName)
+
+    Encoded(((assumeStep ++ maybeSubstStep) :+ haveRemoveStep) :+ Refine(Obj(appliedHaveRemoveStep)))
   }
 
   final case class UniCtx(termSubst: Seq[UniTermSubst], typeSubst: Seq[UniTypeSubst], deletedUniLits: Seq[UniLitInfo], litTransf: LiteralTransformation)

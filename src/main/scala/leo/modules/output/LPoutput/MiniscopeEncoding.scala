@@ -392,7 +392,7 @@ object MiniscopeEncoding {
       else Vector(rewrite)
     }
     val introduction = encClauseVariableIntroduction(ctx.encChild, useLetBasedIntroduction = false, sig = sig)
-    val parentProof = SubstitutionEncoding.instantiateProofTerm(
+    val parentProof = SubstitutionEncoding.instantiateClauseProof(
       ctx.parent, ctx.child, ctx.variableMap, ctx.parentProof)
     val refine = Refine(proofTermAsTacticArg(parentProof))
     Encoded(introduction ++ rewrites :+ refine)

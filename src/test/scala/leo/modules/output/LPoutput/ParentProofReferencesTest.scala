@@ -87,12 +87,12 @@ class ParentProofReferencesTest extends LeoTestSuite {
   test("substitution preserves the compound parent and completes disappearing variables") {
     implicit val sig: Signature = getFreshSignature
     val parent = references.proof(stepName)
-    val retained = SubstitutionEncoding.instantiateProofTerm(Seq(1 -> i), Seq(1 -> i), Seq.empty, Map(1 -> "A"), parent)
-    val missing = SubstitutionEncoding.instantiateProofTerm(Seq(1 -> i), Seq.empty, Seq.empty, Map.empty, parent)
+    val retained = SubstitutionEncoding.instantiateTermParameters(Seq(1 -> i), Seq(1 -> i), Seq.empty, Map(1 -> "A"), parent)
+    val missing = SubstitutionEncoding.instantiateTermParameters(Seq(1 -> i), Seq.empty, Seq.empty, Map.empty, parent)
     val lpSig = LpSig.fromLeo(sig)
     assert(Renderer.renderTerm(proofTermAsTacticArg(retained), RenderOptions(), lpSig).contains("step42 h A"))
     assert(Renderer.renderTerm(proofTermAsTacticArg(missing), RenderOptions(), lpSig).contains("step42 h (el"))
-    assert(SubstitutionEncoding.instantiateProofTerm(Seq.empty, Seq.empty, Seq.empty, Map.empty, parent) == parent)
+    assert(SubstitutionEncoding.instantiateTermParameters(Seq.empty, Seq.empty, Seq.empty, Map.empty, parent) == parent)
     val context = Util.initUniRuleCtxt(Clause(Vector.empty[Literal]), Clause(Vector.empty[Literal]), parent)
     assert(context.parentNameLpEnc == parent)
   }
@@ -154,7 +154,7 @@ object ParentProofReferenceWitness {
     output.append(lemma("directRoot", ClauseEncoding.clause2LP(second.cl).asMl,
       encodedConj(second, refs, Map(parent.id -> root))))
 
-    val instantiated = SubstitutionEncoding.instantiateProofTerm(parent.cl.implicitlyBound, Seq.empty, Seq.empty, Map.empty, refs.proof(QName.local("step42")))
+    val instantiated = SubstitutionEncoding.instantiateTermParameters(parent.cl.implicitlyBound, Seq.empty, Seq.empty, Map.empty, refs.proof(QName.local("step42")))
     val witness = LpTerm.App[Level.Obj](LpTerm.Const(SymRef.LP(QName.local("el"))), Seq(Arg.ExplicitTypeArg(TypeEncoding.type2LP(i))))
     val witnessPx = LpTerm.App[Level.Obj](LpTerm.Const(SymRef.Leo(sig("p").key)), Seq(Arg.Explicit(witness)))
     val instantiatedType = LpType.Prf(LogicConst.And(witnessPx, LpTerm.Const(SymRef.Leo(sig("q").key))))

@@ -50,6 +50,7 @@ object LPoutput {
 
   private val monomorphicReplay = ReplaySupport()
   private val carryTypes = ReplaySupport(implicitTypeVariables = true, polymorphicSymbols = true)
+  private val replayTypeSubstitution = carryTypes.copy(typeSubstitution = true)
 
   private def useLargeContextEncoding(variableCount: Int, gdvMode: Boolean): Boolean =
     !gdvMode && variableCount >= explicitTypesVariableThreshold
@@ -524,7 +525,7 @@ object LPoutput {
           (toProofStepOld(cl, encStep, "LiftEq", encodingLiftEq._1, encodingLiftEq._2),outputInfo)
         }
 
-        case leo.modules.calculus.PatternUni => replayWith(carryTypes) {
+        case leo.modules.calculus.PatternUni => replayWith(replayTypeSubstitution) {
           val encProof = encodePatternUni(cl.annotation.parents.head,cl,parentProofs.head,sig, useTypedIntroduction = useTypedIntroduction)
           encProof match {
             case EncodeResult.Encoded(scripts) => (toProofStepOld(cl, encStep, rule.name, Left(scripts), None),outputInfo)

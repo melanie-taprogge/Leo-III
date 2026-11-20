@@ -903,13 +903,14 @@ object ClausificationEncoding {
     if (stage.clause.term != ctx.encParent.term)
       return Left(s"CNF step ${ctx.step.id}: reconstruction has not reached the parent body")
 
-    // Only ordinary variables have been introduced. Instantiate the resolved
-    // parent in its declaration order, using the shared missing-variable fallback.
+    // Without generalization, instantiate the complete clause context. With
+    // generalization, the stage tracks the available term binders explicitly;
+    // use those binders rather than deriving availability from the final child.
     val parentClause = ctx.step.annotation.parents.head.cl
     val parent = if (ctx.generalizations.isEmpty) {
-      SubstitutionEncoding.instantiateProofTerm(parentClause, ctx.step.cl, ctx.variableMap, ctx.parentProof)
+      SubstitutionEncoding.instantiateClauseProof(parentClause, ctx.step.cl, ctx.variableMap, ctx.parentProof)
     } else {
-      SubstitutionEncoding.instantiateProofTerm(
+      SubstitutionEncoding.instantiateTermParameters(
         parentClause.implicitlyBound, stage.introducedVars, Seq.empty, ctx.variableMap, ctx.parentProof)
     }
     Out.lp_debug_info(s"CNF step ${ctx.step.id}: closing with parent ${ctx.parentProof}, available variables ${stage.introducedVars.map(_._1)}")
@@ -1019,7 +1020,7 @@ object ClausificationEncoding {
       folding <- encSkolemQuantifierRewrite(ctx, site)
     } yield {
       // Apply the formula-parent proof to child variables, supplying witnesses where variables disappeared.
-      val parent = SubstitutionEncoding.instantiateProofTerm(
+      val parent = SubstitutionEncoding.instantiateClauseProof(
         ctx.parent, ctx.step.cl, ctx.variableMap, ctx.parentProof)
       // Introduce the child's variables, perform both rewrites, and close with the instantiated parent.
       ctx.variableIntroduction ++ unfolding ++ folding ++ Seq(Refine(proofTermAsTacticArg(parent)))
@@ -1080,7 +1081,7 @@ object ClausificationEncoding {
     * Parameters absent from the child are instantiated with witnesses.
     */
   private def encSkolemDefinitionRewrite(ctx: SkolemContext): Either[String, Seq[LpProofScript]] = {
-    val definition = SubstitutionEncoding.instantiateProofTerm(
+    val definition = SubstitutionEncoding.instantiatePointwiseProof(
       ctx.skolemInfo.fVs, ctx.skolemInfo.ftVs, ctx.step.cl, ctx.variableMap, ctx.definitionProof)
     Right(Seq(Repeat(Rewrite(None, proofTermAsTacticArg(definition), Side.Right))))
   }
@@ -1196,7 +1197,7 @@ object ClausificationEncoding {
   /** Instantiate the parent and select the child using the central conjunction-elimination theorem. */
   private def encConjunctSelection(ctx: CnfConjContext): LpProofScript = {
     // Instantiate disappearing parent variables with witnesses; infer sibling conjuncts from the parent proof.
-    val parentProof = SubstitutionEncoding.instantiateProofTerm(
+    val parentProof = SubstitutionEncoding.instantiateClauseProof(
       ctx.parent, ctx.child, ctx.variableMap, ctx.parentProof)
     val conjuncts = Seq.fill[LpTerm[Level.Obj]](ctx.clauseCount)(LpTerm.Wildcard[Level.Obj]())
       .updated(ctx.clauseIndex, ctx.encChild.term)
