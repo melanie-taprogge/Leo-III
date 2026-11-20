@@ -11,8 +11,8 @@ import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Have, Refine, Reflexivity, Repeat, Rewrite, RewritePattern, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, vars2Lp}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
-import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, Lifting, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, RenderOptions, Renderer, Stmt, SymRef, lpClauseInst, lpTermBuilder, nAry}
-import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encClauseVariableIntroduction, introduceClauseContext}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, Lifting, LogicConst, LpProofScript, LpSig, LpTerm, LpType, Name, OlMonoType, QName, TypeVariableContext, RenderOptions, Renderer, Stmt, SymRef, lpClauseInst, lpTermBuilder, nAry}
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.encClauseVariableIntroduction
 import leo.modules.output.LPoutput.NewModularEncoding.ProofTermUtil.{applyProofToVars, proofTermAsTacticArg}
 
 /** Reconstruction entry points for standalone clausification steps.
@@ -38,7 +38,8 @@ object ClausificationEncoding {
                                          variableMap: Map[Int, String],
                                          skolemInfo: SkolemStep,
                                          position: ClausePosition,
-                                         variableIntroduction: Seq[LpProofScript])
+                                         variableIntroduction: Seq[LpProofScript],
+                                         typeVars: TypeVariableContext)
 
   /** Inputs to the inverse Skolemization lemma, recovered from the parent.
     * The pattern selects the surrounding subformula; for a negative universal
@@ -191,7 +192,8 @@ object ClausificationEncoding {
     // Actual encodings
     // Include recorded variables even when vacuous, so every retained identity
     // has one name. Translation does not turn them into outer proof binders.
-    val (variableMap, encoded) = lpClauseInst.apply_to_set(clauses, variables)
+    val (variableMap, encoded) = lpClauseInst.apply_to_set(clauses, variables,
+      typeVars = TypeVariableContext.forClause(step.cl))
     // split the encoded clauses into the original parent and child, and all the intermediate steps
     val (encParent, encChild) = (encoded.head, encoded(1))
     val encSteps = encoded.tail.tail
@@ -338,9 +340,8 @@ object ClausificationEncoding {
                                    sig: LpSig,
                                    useTypedIntroduction: Boolean): Either[String, CnfStage] = {
     if (ctx.generalizations.isEmpty) {
-      val parent = ctx.step.annotation.parents.head.cl
-      val scripts = introduceClauseContext(
-        parent, ctx.step.cl, ctx.encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
+      val scripts = encClauseVariableIntroduction(
+        ctx.encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
       return Right(CnfStage(ctx.encChild, ctx.step.cl.implicitlyBound, Seq.empty,
         scripts.iterator.map(CnfTactic).toVector))
     }
@@ -414,7 +415,8 @@ object ClausificationEncoding {
   }
 
   /** Retain endpoint type parameters before the ordinary term parameters.
-    * Boolean-only bridges can also mention types locally specialized at ι.
+    * Types already specialized at ι during translation need no parameter.
+    * Standalone bridges bind the remaining parameters in their own context.
     */
   private def cnfBridgeParameters(ctx: CnfContext, stage: CnfStage,
                                   before: lpClauseInst, after: lpClauseInst): Seq[LpTerm.Var[Level.Meta]] = {
@@ -965,12 +967,15 @@ object ClausificationEncoding {
     if (parentProofs(1) != definitionProof)
       return Left(s"Skolemization step ${step.id}: definition parent must resolve to its declared pointwise equality")
 
+    // The quantifier's type may disappear even when its predicate survives.
+    // Use the child's type map for the formula, Skolem equality and pattern.
+    val typeVars = TypeVariableContext.forClause(step.cl)
     val (variableMap, encoded) = lpClauseInst.apply_to_set(
-      Seq(parent, step.cl), skolemInfo.fVs, suppressReductionAt = Set(0))
-    val variableIntroduction = introduceClauseContext(
-      parent, step.cl, encoded(1), useLetBasedIntroduction = useTypedIntroduction, sig = sig)
+      Seq(parent, step.cl), skolemInfo.fVs, suppressReductionAt = Set(0), typeVars = typeVars)
+    val variableIntroduction = encClauseVariableIntroduction(
+      encoded(1), useLetBasedIntroduction = useTypedIntroduction, sig = sig)
     val ctx = SkolemContext(step, parent, parentProofs.head, parentProofs(1),
-      encoded.head, encoded(1), variableMap, skolemInfo, position, variableIntroduction)
+      encoded.head, encoded(1), variableMap, skolemInfo, position, variableIntroduction, typeVars)
     Out.lp_debug_info(s"Skolemization step ${step.id}: formula parent ${parents.head.id}, definition parent ${definition.id}, position ${position.pretty}")
     Out.lp_debug_info(s"Skolemization translated parent: ${ctx.encParent.term}")
     Out.lp_debug_info(s"Skolemization translated child: ${ctx.encChild.term}")
@@ -1054,7 +1059,7 @@ object ClausificationEncoding {
     }
 
     // Generate the pattern targeting the skolemized term
-    PatternBuilder.prepareClausePositionPattern(focus)
+    PatternBuilder.prepareClausePositionPattern(focus, ctx.typeVars)
       .left.map(reason => s"Skolemization step ${ctx.step.id}: $reason")
       .flatMap { context =>
         // Locate the quantifier before encoding its predicate.
@@ -1066,10 +1071,10 @@ object ClausificationEncoding {
         binder.flatMap { case (ty, quantifier) =>
           // Normal quantifier encoding preserves the predicate's outer lambda
           // while reducing its body to match the child and Skolem definition.
-          term2LP(quantifier, ctx.variableMap) match {
+          term2LP(quantifier, ctx.variableMap, typeVars = ctx.typeVars) match {
             case LpTerm.App(_, Seq(Arg.Explicit(predicate @ LpTerm.Lam(_, _)))) =>
               val hole = LpTerm.Const[Level.Obj](SymRef.LP(QName.local("x")))
-              Right(SkolemSite(type2LP(ty), predicate, context.plug(RewritePattern(hole, hole))))
+              Right(SkolemSite(type2LP(ty, ctx.typeVars), predicate, context.plug(RewritePattern(hole, hole))))
             case _ => Left(s"Skolemization step ${ctx.step.id}: expected an encoded quantifier with a predicate abstraction")
           }
         }
@@ -1165,7 +1170,8 @@ object ClausificationEncoding {
     }
 
     // Translate both clauses normally, retaining a shared name for each clause variable.
-    val (variableMap, encoded) = lpClauseInst.apply_to_set(Seq(parent, step.cl))
+    val (variableMap, encoded) = lpClauseInst.apply_to_set(Seq(parent, step.cl), Seq.empty,
+      typeVars = TypeVariableContext.forClause(step.cl))
     val encParent = encoded.head
     val encChild = encoded(1)
 

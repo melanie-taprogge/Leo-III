@@ -23,6 +23,31 @@ import leo.modules.output.LPoutput.{nameDefn, nameSkDef}
 // datastrucutres to the Lambdapi encoding
 //////////////////////////////////////////
 
+/** Type-variable counterpart of the term-variable map used during translation.
+  * Declarations preserve unspecified parameters. Replay instead supplies the
+  * available clause scopes and translates any missing free parameter as ι.
+  * Explicit type quantifiers are handled separately by TermEncoding's binder
+  * stack, before this context is consulted.
+  */
+final case class TypeVariableContext(instances: Map[Int, OlMonoType], replaceUnknown: Boolean) {
+  def resolve(scope: Int): OlMonoType = instances.getOrElse(scope,
+    if (replaceUnknown) HolBaseTypes.I else OlMonoType.TyVar(TypeEncoding.tyVar2LP(scope)))
+
+  /** Only retained variables need binders. A concrete instance is already a
+    * type expression, not another parameter of the translated replay clause.
+    */
+  def binders(scopes: Seq[Int]): Seq[OlMonoType.TyVar] =
+    scopes.map(resolve).collect { case variable: OlMonoType.TyVar => variable }.distinct
+}
+
+object TypeVariableContext {
+  val unrestricted: TypeVariableContext = TypeVariableContext(Map.empty, replaceUnknown = false)
+
+  def forClause(clause: Clause): TypeVariableContext =
+    TypeVariableContext(clause.typeVars.map(scope =>
+      scope -> OlMonoType.TyVar(TypeEncoding.tyVar2LP(scope))).toMap, replaceUnknown = true)
+}
+
 object TypeEncoding {
 
   // ** Encoding of types
@@ -50,9 +75,12 @@ object TypeEncoding {
   }
 
   /** Translate (Object-logical HOL) types to the Lambdapi Encoding */
-  def type2LP(ty: Type): OlMonoType = type2LP(ty, tyVar2LP)
+  def type2LP(ty: Type): OlMonoType = type2LP(ty, TypeVariableContext.unrestricted)
 
-  private[NewLpDatastructures] def type2LP(ty: Type, resolveTypeIndex: Int => Name): OlMonoType = {
+  def type2LP(ty: Type, typeVars: TypeVariableContext): OlMonoType =
+    type2LP(ty, typeVars.resolve _)
+
+  private[NewLpDatastructures] def type2LP(ty: Type, resolveTypeIndex: Int => OlMonoType): OlMonoType = {
     ty match {
       case BaseType(id) =>
         Base(SymRef.Leo(id))
@@ -61,7 +89,7 @@ object TypeEncoding {
         val encArgs = args.map(type2LP(_, resolveTypeIndex))
         TyApp(encHd,encArgs)
       case BoundType(scope) =>
-        TyVar(resolveTypeIndex(scope))
+        resolveTypeIndex(scope)
       case tl -> tr =>
         val encodeTl = type2LP(tl, resolveTypeIndex)
         val encodeTr = type2LP(tr, resolveTypeIndex)
@@ -196,13 +224,16 @@ object TermEncoding {
   // ** Encoding of terms
 
   /** Translate a sequence of variables to Lambdapi (assigns names and translated types) */
-  @inline def vars2Lp(boundVars: Seq[(Int, Type)], bVars: Map[Int, String]): Seq[Var[Level.Obj]] = boundVars.map(v => var2Lp(v._1, v._2, bVars))
+  @inline def vars2Lp(boundVars: Seq[(Int, Type)], bVars: Map[Int, String],
+                       typeVars: TypeVariableContext = TypeVariableContext.unrestricted): Seq[Var[Level.Obj]] =
+    boundVars.map(v => var2Lp(v._1, v._2, bVars, typeVars))
 
   //todo: already assign names here?
 
   /** Translate a single variable to Lambdapi (assigns names and translated types) */
-  def var2Lp(scope: Int, typ: Type, bVars: Map[Int, String]): Var[Level.Obj] =
-    var2Lp(scope, type2LP(typ), bVars)
+  def var2Lp(scope: Int, typ: Type, bVars: Map[Int, String],
+             typeVars: TypeVariableContext = TypeVariableContext.unrestricted): Var[Level.Obj] =
+    var2Lp(scope, type2LP(typ, typeVars), bVars)
 
   private def var2Lp(scope: Int, encodedType: OlMonoType, bVars: Map[Int, String]): Var[Level.Obj] = {
     assert(bVars.contains(scope), s"Error in Lambdapi encoding: Trying to encode var of scope $scope that is not in bVars Map ($bVars)")
@@ -218,8 +249,9 @@ object TermEncoding {
 
   /** Translate a sequence of arguments to Lambdapi and mark them as explicit. */
   @inline def args2LP(args: Seq[Either[Term, Type]], bVars: Map[Int, String], supressReduction: Boolean = false,
-                     replaceUnknownVars: Boolean = false): List[Arg[Level.Obj]] =
-    encodeArgs(args, term2LP(_, bVars, supressReduction, replaceUnknownVars), type2LP)
+                     replaceUnknownVars: Boolean = false,
+                     typeVars: TypeVariableContext = TypeVariableContext.unrestricted): List[Arg[Level.Obj]] =
+    encodeArgs(args, term2LP(_, bVars, supressReduction, replaceUnknownVars, typeVars), type2LP(_, typeVars))
 
   //todo: handle replacing unknown Vars differently... -> have a step that both does that and adjusts the numbers of the remaining variables -> check how this is done in Leo
   @inline def bVarGen(bVars: Map[Int, String], ty: Type, replaceUnknownVars: Boolean)={
@@ -234,19 +266,21 @@ object TermEncoding {
     * @param suppressReduction Boolean indicating weather reduction (for isntance of eta expanded terms) should be suppressed
     * @return The encoded Object-level term
     * */
-  def term2LP(t: Term, bVars: Map[Int, String], suppressReduction: Boolean = false, replaceUnknownVars: Boolean = false): LpTerm[Level.Obj] =
-    encodeScopedTerm(t, bVars, suppressReduction, replaceUnknownVars, Nil)
+  def term2LP(t: Term, bVars: Map[Int, String], suppressReduction: Boolean = false, replaceUnknownVars: Boolean = false,
+              typeVars: TypeVariableContext = TypeVariableContext.unrestricted): LpTerm[Level.Obj] =
+    encodeScopedTerm(t, bVars, suppressReduction, replaceUnknownVars, Nil, typeVars)
 
   private[NewLpDatastructures] def encodeScopedTerm(t: Term, bVars: Map[Int, String], suppressReduction: Boolean,
-                                                    replaceUnknownVars: Boolean, typeBinders: List[Name]): LpTerm[Level.Obj] = {
+                                                    replaceUnknownVars: Boolean, typeBinders: List[Name],
+                                                    typeVars: TypeVariableContext = TypeVariableContext.unrestricted): LpTerm[Level.Obj] = {
     // Explicit type binders are innermost first, followed by implicit clause type variables.
-    def resolveTypeIndex(index: Int): Name =
-      typeBinders.lift(index - 1).getOrElse(tyVar2LP(index - typeBinders.size))
+    def resolveTypeIndex(index: Int): OlMonoType =
+      typeBinders.lift(index - 1).map(TyVar).getOrElse(typeVars.resolve(index - typeBinders.size))
 
-    def encodeType(ty: Type): OlMonoType = type2LP(ty, resolveTypeIndex)
+    def encodeType(ty: Type): OlMonoType = type2LP(ty, resolveTypeIndex _)
 
     def encodeTerm(term: Term, termVars: Map[Int, String] = bVars): LpTerm[Level.Obj] =
-      encodeScopedTerm(term, termVars, suppressReduction, replaceUnknownVars, typeBinders)
+      encodeScopedTerm(term, termVars, suppressReduction, replaceUnknownVars, typeBinders, typeVars)
 
     t match {
       // Constant symbols
@@ -320,7 +354,7 @@ object TermEncoding {
       case TyForall(TypeLambda(body)) =>
         val occupiedNames = bVars.valuesIterator.toSet ++ typeBinders.map(_.value)
         val name = Name(LpSig.freshIfNeeded(s"T${typeBinders.size}", occupiedNames))
-        val encodedBody = encodeScopedTerm(body, bVars, suppressReduction, replaceUnknownVars, name :: typeBinders)
+        val encodedBody = encodeScopedTerm(body, bVars, suppressReduction, replaceUnknownVars, name :: typeBinders, typeVars)
         LogicConst.TypeForall(name, encodedBody)
 
       // special cases abstracted away in LP translation
@@ -408,12 +442,13 @@ object ClauseEncoding {
     * @note Built-in equality and the meta-equality of equational literals are not
     *       differentiated in the encoding
     * */
-  def lit2Lp(lit: Literal, bVarMap: Map[Int, String], surpressReduction: Boolean = false, replaceUnknownVars: Boolean = false): lpLiteralInst = {
+  def lit2Lp(lit: Literal, bVarMap: Map[Int, String], surpressReduction: Boolean = false, replaceUnknownVars: Boolean = false,
+             typeVars: TypeVariableContext = TypeVariableContext.unrestricted): lpLiteralInst = {
     if (lit.equational) {
       val (left, right) = (lit.left, lit.right)
-      val lefEnc = term2LP(left, bVarMap, surpressReduction,replaceUnknownVars)
-      val rigEnc = term2LP(right, bVarMap, surpressReduction,replaceUnknownVars)
-      val encTyTl = type2LP(left.ty)
+      val lefEnc = term2LP(left, bVarMap, surpressReduction, replaceUnknownVars, typeVars)
+      val rigEnc = term2LP(right, bVarMap, surpressReduction, replaceUnknownVars, typeVars)
+      val encTyTl = type2LP(left.ty, typeVars)
       val eqTerm = LogicConst.Eq(encTyTl, lefEnc, rigEnc)
       if (lit.polarity) {
         lpLiteralInst(eqTerm,true,true)
@@ -421,7 +456,7 @@ object ClauseEncoding {
         lpLiteralInst(LogicConst.Not(eqTerm),false,true)
       }
     } else {
-      val termEnc = term2LP(lit.left, bVarMap, surpressReduction,replaceUnknownVars)
+      val termEnc = term2LP(lit.left, bVarMap, surpressReduction, replaceUnknownVars, typeVars)
       if (lit.polarity) {
         lpLiteralInst(termEnc,true,false)
       } else {
@@ -432,8 +467,10 @@ object ClauseEncoding {
 
   /** Encode a sequence of Leo-III literals to Lambdapi */
   @inline def lits2Lp(lits: Seq[Literal], bVarMap: Map[Int, String], replaceUnknownVars: Boolean = false,
-                      suppressReduction: Boolean = false): Seq[lpLiteralInst] = {
-    lits.map(lit => lit2Lp(lit, bVarMap, surpressReduction = suppressReduction, replaceUnknownVars = replaceUnknownVars))
+                      suppressReduction: Boolean = false,
+                      typeVars: TypeVariableContext = TypeVariableContext.unrestricted): Seq[lpLiteralInst] = {
+    lits.map(lit => lit2Lp(lit, bVarMap, surpressReduction = suppressReduction,
+      replaceUnknownVars = replaceUnknownVars, typeVars = typeVars))
   }
 
   /**
@@ -449,10 +486,11 @@ object ClauseEncoding {
 
   /** Translate a clause using a term-variable map shared with related clauses. */
   final def clause2LP(cl: Clause, bVarMap: Map[Int, String],
-                      suppressReduction: Boolean = false): lpClauseInst = {
-    val typeBinders = cl.typeVars.reverse.map(scope => Right(TyVar(tyVar2LP(scope))))
-    val termBinders = TermEncoding.vars2Lp(cl.implicitlyBound, bVarMap).map(Left(_))
-    val literals = lits2Lp(cl.lits, bVarMap, suppressReduction = suppressReduction)
+                      suppressReduction: Boolean = false,
+                      typeVars: TypeVariableContext = TypeVariableContext.unrestricted): lpClauseInst = {
+    val typeBinders = typeVars.binders(cl.typeVars.reverse).map(Right(_))
+    val termBinders = TermEncoding.vars2Lp(cl.implicitlyBound, bVarMap, typeVars).map(Left(_))
+    val literals = lits2Lp(cl.lits, bVarMap, suppressReduction = suppressReduction, typeVars = typeVars)
     lpClauseInst(literals, typeBinders ++ termBinders)
   }
 
@@ -463,16 +501,17 @@ object RawClauseEncoding {
   import TypeEncoding.{type2LP, tyVar2LP}
   import TermEncoding.{term2LP, vars2Lp}
 
-  def lit2Lp(lit: RawLiteral, bVarMap: Map[Int, String], suppressReduction: Boolean = false): lpLiteralInst = lit match {
+  def lit2Lp(lit: RawLiteral, bVarMap: Map[Int, String], suppressReduction: Boolean = false,
+             typeVars: TypeVariableContext = TypeVariableContext.unrestricted): lpLiteralInst = lit match {
     case RawEqLiteral(left, right, polarity) =>
       lpLiteralInst.equality(
-        type2LP(left.ty),
-        term2LP(left, bVarMap, suppressReduction),
-        term2LP(right, bVarMap, suppressReduction),
+        type2LP(left.ty, typeVars),
+        term2LP(left, bVarMap, suppressReduction, typeVars = typeVars),
+        term2LP(right, bVarMap, suppressReduction, typeVars = typeVars),
         polarity
       )
     case RawNonEqLiteral(term, polarity) =>
-      val encodedTerm = term2LP(term, bVarMap, suppressReduction)
+      val encodedTerm = term2LP(term, bVarMap, suppressReduction, typeVars = typeVars)
       lpLiteralInst(
         if (polarity) encodedTerm else LogicConst.Not(encodedTerm),
         polarity,
@@ -480,10 +519,11 @@ object RawClauseEncoding {
       )
   }
 
-  def clause2Lp(clause: RawClause, bVarMap: Map[Int, String], suppressReduction: Boolean = false): lpClauseInst = {
-    val encodedLits = clause.lits.map(lit2Lp(_, bVarMap, suppressReduction))
-    val typeBinders = clause.typeVars.reverse.map(scope => Right(TyVar(tyVar2LP(scope))))
-    val termBinders = vars2Lp(clause.implicitlyBound, bVarMap).map(Left(_))
+  def clause2Lp(clause: RawClause, bVarMap: Map[Int, String], suppressReduction: Boolean = false,
+                 typeVars: TypeVariableContext = TypeVariableContext.unrestricted): lpClauseInst = {
+    val encodedLits = clause.lits.map(lit2Lp(_, bVarMap, suppressReduction, typeVars))
+    val typeBinders = typeVars.binders(clause.typeVars.reverse).map(Right(_))
+    val termBinders = vars2Lp(clause.implicitlyBound, bVarMap, typeVars).map(Left(_))
     lpClauseInst(encodedLits, typeBinders ++ termBinders)
   }
 }
@@ -520,7 +560,7 @@ object DefEncoding {
     }
     // Declaration parameters run outermost first, but de Bruijn index 1 is innermost.
     val typeScope = typeBinders.reverse.toList
-    def encodeType(ty: Type): OlMonoType = type2LP(ty, index => typeScope(index - 1))
+    def encodeType(ty: Type): OlMonoType = type2LP(ty, index => TyVar(typeScope(index - 1)))
 
     val typeParameters = typeBinders.map(name => (name, LpSet))
     val termParameters = termVars.map { case (name, ty) => (Name(name), El(encodeType(ty))) }

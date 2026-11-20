@@ -269,11 +269,12 @@ object lpClauseInst {
     */
   def apply_to_set(cls: Seq[Clause],
                    additionalImplicitlyBound: Seq[(Int, Type)],
-                   suppressReductionAt: Set[Int] = Set.empty): (Map[Int, String], Seq[lpClauseInst]) = {
+                   suppressReductionAt: Set[Int] = Set.empty,
+                   typeVars: TypeVariableContext = TypeVariableContext.unrestricted): (Map[Int, String], Seq[lpClauseInst]) = {
     val allImpBoundVars = (cls.flatMap(_.implicitlyBound) ++ additionalImplicitlyBound).distinct.sortBy(_._1).reverse
     val fullBvarsMap = ClauseEncoding.clauseVars2LP(allImpBoundVars)._2
     val encCls = cls.zipWithIndex.map { case (cl, index) =>
-      ClauseEncoding.clause2LP(cl, fullBvarsMap, suppressReductionAt.contains(index))
+      ClauseEncoding.clause2LP(cl, fullBvarsMap, suppressReductionAt.contains(index), typeVars)
     }
     (fullBvarsMap, encCls)
   }

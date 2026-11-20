@@ -1,19 +1,17 @@
 package leo.modules.output.LPoutput.NewModularEncoding
 
 import leo.Out
-import leo.datastructures.Clause
 import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.eqImp
 import leo.modules.output.LPoutput.LpLibs.EqRules.AsTerms.{lpSimp_eqBot, lpSimp_eqTop}
 import leo.modules.output.LPoutput.LpLibs.LeoTactics.EvalApp.removeBot
 import leo.modules.output.LPoutput.LpLibs.MetaTheorems.Inst.deleteBots
 import leo.modules.output.LPoutput.LpLibs.ND.Terms.eqSym
 import leo.modules.output.LPoutput.LpTacticUtil.PatternBuilder
-import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Eval, Have, Refine, Rewrite, SetType, Side, Simplify, Try}
+import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{Assume, Eval, Have, Refine, Rewrite, Side, Simplify, Try}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Obj}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpType.{Pi, Prf}
 import leo.modules.output.LPoutput.NewLpDatastructures._
 import leo.modules.output.LPoutput.NewLpDatastructures.lpEncSig.depTyConStr
-import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.tyVar2LP
 
 
 object AssumeStep {
@@ -37,32 +35,6 @@ object AssumeStep {
                                     useLetBasedIntroduction: Boolean,
                                     sig: LpSig): Seq[LpProofScript] =
     encClauseVariableIntroduction(encChild.metaVars, encChild.term, useLetBasedIntroduction, sig)
-
-  /** Introduce the complete child context, then specialize unconstrained parent
-    * types absent from the child at ι. Both clauses must share variable scopes;
-    * callers with pending generalization binders must use the prefix helper.
-    */
-  def introduceClauseContext(parent: Clause,
-                              child: Clause,
-                              encChild: lpClauseInst,
-                              useLetBasedIntroduction: Boolean,
-                              sig: LpSig): Seq[LpProofScript] =
-    introduceClauseContext(parent.typeVars, child, encChild, useLetBasedIntroduction, sig)
-
-  /** Introduce a child context for a replay with several source clauses or raw
-    * intermediate forms. Every required type scope must be supplied, including
-    * types occurring only in source proofs; absent child types are fixed at ι.
-    */
-  def introduceClauseContext(requiredTypeScopes: Seq[Int],
-                              child: Clause,
-                              encChild: lpClauseInst,
-                              useLetBasedIntroduction: Boolean,
-                              sig: LpSig): Seq[LpProofScript] = {
-    val missingTypeDefinitions = requiredTypeScopes.distinct.sorted.diff(child.typeVars).map { scope =>
-      SetType(tyVar2LP(scope), HolBaseTypes.I)
-    }
-    encClauseVariableIntroduction(encChild, useLetBasedIntroduction, sig) ++ missingTypeDefinitions
-  }
 
   /** Introduce only the supplied prefix, leaving remainingGoal (including any
     * pending object-level quantifiers) as the explicitly typed proof obligation.

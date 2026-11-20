@@ -20,14 +20,15 @@ import leo.modules.output.LPoutput.NewLpDatastructures.Substitution.removeLeadin
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{args2LP, term2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.{polyType2LP, safeEncTy, safeEncTypes, type2LP}
 import leo.modules.output.LPoutput.NewLpDatastructures._
-import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, introduceClauseContext}
+import leo.modules.output.LPoutput.NewModularEncoding.AssumeStep.{encAssumeStep, encClauseVariableIntroduction}
 import leo.modules.output.LPoutput.NewModularEncoding.InstMetaTheorems.{applyRemoveStep, constructRemoveStep}
 
 object Util {
 
   // Set up Context for encodings
 
-  final case class EncUniCtx(encChild: lpClauseInst, encParent: lpClauseInst, sharedVarMap: Map[Int, String], childVarMap: Map[Int, String], childVarNames: Seq[Name], parentNameLpEnc: LpTerm[Level.Obj], substClauseLen: Int)
+  final case class EncUniCtx(encChild: lpClauseInst, encParent: lpClauseInst, sharedVarMap: Map[Int, String], childVarMap: Map[Int, String], childVarNames: Seq[Name], parentNameLpEnc: LpTerm[Level.Obj], substClauseLen: Int,
+                             typeVars: TypeVariableContext)
 
   def initUniRuleCtxt(childCl: Clause, parentCl: Clause, parentNameLpEnc0: LpTerm[Level.Obj]): EncUniCtx = {
 
@@ -44,7 +45,7 @@ object Util {
     val childVarMap = sharedVarMap.view.filterKeys(vars(childCl).distinct).toMap
     val childVarNames = encChild.vars.collect { case Left(variable) => variable.name }
 
-    EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen)
+    EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen, TypeVariableContext.forClause(childCl))
   }
 
   // Encode the Substitution steps
@@ -111,7 +112,7 @@ object Util {
     */
   def reconstructSubstParent(origTermSubst: Subst, origTypeSubst: Subst, litTransf: LiteralTransformation, ctxt: EncUniCtx, parentCl: Clause): Option[Seq[lpLiteralInst]]= {
     val substParent = parentCl.substitute(origTermSubst, origTypeSubst)
-    val encSubstParent = lits2Lp(substParent.lits, ctxt.childVarMap, replaceUnknownVars = true)
+    val encSubstParent = lits2Lp(substParent.lits, ctxt.childVarMap, replaceUnknownVars = true, typeVars = ctxt.typeVars)
     applyLiteralTransformations(encSubstParent, litTransf)
   }
 
@@ -183,7 +184,7 @@ object UnificationEncoding {
 
     // encoding of parents, generation of var maps etc.
     val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
-    val EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen) = ctxt
+    val EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen, typeVars) = ctxt
     Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
     Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
 
@@ -192,24 +193,13 @@ object UnificationEncoding {
     val UniCtx(termSubst, _, deletedUniLits, litTransf) = initUniCtxt(info)
 
     // construct the parent post-substitution (but prior to the deletion of the literals) and a mapping of the child literal indices to the ones in this parent
-    val (encSubstParent, old2NewIdx) = reconstructSubstUniParent(deletedUniLits, encChild.lits, childVarMap)
+    val (encSubstParent, old2NewIdx) = reconstructSubstUniParent(deletedUniLits, encChild.lits, childVarMap, typeVars)
 
 
     ////////////////////////////
     // 0) Assume free variables
-    // Intermediate constraints and substitution arguments may retain target
-    // types that disappear from the child. Introduce those target scopes before
-    // either subproof; original source scopes need not survive instantiation.
-    val instantiatedTypes = SubstitutionEncoding.resolveTypeInstances(parent.cl.typeVars.reverse, info.origTypeSubst)
-    val parameterScopes = instantiatedTypes.flatMap(_._2.typeVars).collect { case Type.BoundType(scope) => scope }
-    val constraintScopes = deletedUniLits.flatMap(lit => lit.literal.left.tyFV ++ lit.literal.right.tyFV)
-    val argumentScopes = termSubst.flatMap {
-      case UniTermSubst(_, UniTermByTerm(term, _, _)) => term.tyFV
-      case _ => Set.empty[Int]
-    }
-    val assumeStep = introduceClauseContext(
-      parameterScopes ++ constraintScopes ++ argumentScopes, child.cl, encChild,
-      useLetBasedIntroduction = useTypedIntroduction, sig = sig)
+    val assumeStep = encClauseVariableIntroduction(
+      encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
 
     ////////////////////////////
     // 1) Substitution subproof (optional)
@@ -265,7 +255,8 @@ object UnificationEncoding {
     * @return A Seq of literals representing the last proven step with the deleted literals inserted, and mapping linking the
     *         original index of the literals in encLastStep to those in the new Seq.
     */
-  def reconstructSubstUniParent(deletedUniLits: Seq[UniLitInfo], encUniClause: Seq[lpLiteralInst], childVarMap: Map[Int, String]): (Seq[lpLiteralInst], Map[Int, Int]) = {
+  def reconstructSubstUniParent(deletedUniLits: Seq[UniLitInfo], encUniClause: Seq[lpLiteralInst], childVarMap: Map[Int, String],
+                                typeVars: TypeVariableContext = TypeVariableContext.unrestricted): (Seq[lpLiteralInst], Map[Int, Int]) = {
     assert(deletedUniLits.nonEmpty, "Trying to verify unification but no unification literals to delete were given")
     Out.lp_debug_info(s"found ${deletedUniLits.length} unification literal(s):")
     val sortedInsertLits = deletedUniLits.sortBy(_.position)
@@ -273,7 +264,7 @@ object UnificationEncoding {
     // first, encode the new literals
     val newLits = sortedInsertLits.foldLeft(encUniClause) {
       case (acc, newUniLit) =>
-        val encNewLit = lit2Lp(newUniLit.literal, childVarMap, surpressReduction = true, replaceUnknownVars = true)
+        val encNewLit = lit2Lp(newUniLit.literal, childVarMap, surpressReduction = true, replaceUnknownVars = true, typeVars = typeVars)
         Out.lp_debug_info(s"- at position ${newUniLit.position}: ($encNewLit)")
         // we assume that the sequence of literals passed here do not contain the
         acc.patch(newUniLit.position, Seq(encNewLit), 0)
@@ -397,7 +388,7 @@ object DetUniSimpEncoding {
     ////////////////////////////
     // Encodings and prelim
     val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
-    val EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen) = ctxt
+    val EncUniCtx(encChild, encParent, sharedVarMap, childVarMap, childVarNames, parentNameLpEnc, substClauseLen, typeVars) = ctxt
     Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
     Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
 
@@ -1224,7 +1215,7 @@ object PreUniVerification {
 //    }
 
     val ctxt = initUniRuleCtxt(child.cl, parent.cl, parentNameLpEnc0)
-    val EncUniCtx(encChild, encParent, _, _, _, _, _) = ctxt
+    val EncUniCtx(encChild, encParent, _, _, _, _, _, _) = ctxt
     Out.lp_debug_info(s"parent: ${Renderer.ty(encParent.asMl, ro, sig)}")
     Out.lp_debug_info(s"proving ${Renderer.ty(encChild.asMl, ro, sig)}")
 
@@ -1262,8 +1253,8 @@ object PreUniVerification {
 
     ////////////////////////////
     // 0) Assume free variables
-    val assumeStep = introduceClauseContext(
-      parent.cl, child.cl, encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
+    val assumeStep = encClauseVariableIntroduction(
+      encChild, useLetBasedIntroduction = useTypedIntroduction, sig = sig)
 
     ////////////////////////////
     // 1) Substitution subproof

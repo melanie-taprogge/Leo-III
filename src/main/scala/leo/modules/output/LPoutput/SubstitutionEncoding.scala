@@ -1,12 +1,11 @@
 package leo.modules.output.LPoutput
 
 import leo.Out
-import leo.modules.HOLSignature
 import leo.datastructures._
 import leo.modules.output.LPoutput.LpLibs.ND.Terms.lpWitnessCon
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm
 import leo.modules.output.LPoutput.NewLpDatastructures.TermEncoding.{term2LP, var2Lp}
-import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.{tyVar2LP, type2LP}
+import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
 import leo.modules.output.LPoutput.NewLpDatastructures._
 
 /** Build proof applications from quantified parameters and recorded substitutions.
@@ -59,8 +58,9 @@ object SubstitutionEncoding {
                                 currentVars: Seq[(Int, Type)],
                                 termSubst: Seq[UniTermSubst],
                                 sharedVarMap: Map[Int, String],
-                                parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
-    applyTermArguments(parentVars, currentVars, termSubst, sharedVarMap, parentProof, Map.empty[Name, OlMonoType])
+                                parentProof: LpTerm[Level.Obj],
+                                typeVars: TypeVariableContext = TypeVariableContext.unrestricted): LpTerm[Level.Obj] =
+    applyTermArguments(parentVars, currentVars, termSubst, sharedVarMap, parentProof, Map.empty, typeVars)
 
   /** Instantiate a clause proof in the child's context, applying type arguments
     * before term arguments. Clause type binders are outermost first in
@@ -69,6 +69,8 @@ object SubstitutionEncoding {
     * `typeSubst` maps source type scopes to target types. Recorded term RHSs
     * must already use those target types: applying the source substitution to
     * them again can change the meaning of their type-variable indices.
+    * `typeContext` lets replay retain extra term parameters while using the
+    * final child's available types (as in RewriteWithParentVars).
     * With identity substitutions, retained parameters pass through and missing
     * parameters use the individual-type and term-witness fallbacks below.
     */
@@ -77,9 +79,10 @@ object SubstitutionEncoding {
                              sharedVarMap: Map[Int, String],
                              parentProof: LpTerm[Level.Obj],
                              termSubst: Seq[UniTermSubst] = Seq.empty,
-                             typeSubst: Subst = Subst.id): LpTerm[Level.Obj] =
+                             typeSubst: Subst = Subst.id,
+                             typeContext: Option[TypeVariableContext] = None): LpTerm[Level.Obj] =
     instantiateQuantifiedProof(parent.implicitlyBound, parent.typeVars.reverse, child, sharedVarMap,
-      parentProof, termSubst, typeSubst)
+      parentProof, termSubst, typeSubst, typeContext.getOrElse(TypeVariableContext.forClause(child)))
 
   /** Instantiate a pointwise proof with explicitly ordered type and term binders.
     * Both parameter lists must match the proof's declaration order. In particular,
@@ -92,7 +95,7 @@ object SubstitutionEncoding {
                                 child: Clause,
                                 sharedVarMap: Map[Int, String],
                                 parentProof: LpTerm[Level.Obj]): LpTerm[Level.Obj] =
-    instantiateQuantifiedProof(parentVars, parentTypeVars, child, sharedVarMap, parentProof, Seq.empty, Subst.id)
+    instantiateQuantifiedProof(parentVars, parentTypeVars, child, sharedVarMap, parentProof, Seq.empty, Subst.id, TypeVariableContext.forClause(child))
 
   /** Resolve each source type scope to its target type, preserving the supplied
     * declaration order. Leo's raw substitution uses the same one-based scopes as
@@ -112,27 +115,24 @@ object SubstitutionEncoding {
                                          sharedVarMap: Map[Int, String],
                                          parentProof: LpTerm[Level.Obj],
                                          termSubst: Seq[UniTermSubst],
-                                         typeSubst: Subst): LpTerm[Level.Obj] = {
-    val childTypeScopes = child.typeVars.toSet
+                                         typeSubst: Subst,
+                                         typeVars: TypeVariableContext): LpTerm[Level.Obj] = {
     val resolvedTypes = resolveTypeInstances(parentTypeVars, typeSubst)
-    // Only free target parameters left after the recorded substitution are
-    // unconstrained. Specialize those absent from the child at the individual type.
-    val missingTargetTypes = resolvedTypes.flatMap(_._2.typeVars).collect {
-      case Type.BoundType(scope) if !childTypeScopes(scope) => tyVar2LP(scope) -> type2LP(HOLSignature.i)
-    }.toMap
+    // Resolve the recorded source substitution first. Only its remaining free
+    // target parameters are candidates for the replay context's ι fallback.
     val typeInstances = resolvedTypes.map { case (scope, instance) =>
-      tyVar2LP(scope) -> Substitution.substMonoType(type2LP(instance), missingTargetTypes)
+      scope -> type2LP(instance, typeVars)
     }
     // Preserve binder order in the application. The map is only for specializing
     // dependent term types; it must not determine the order of type arguments.
     val typeArgs = typeInstances.map { case (_, instance) => Arg.ExplicitTypeArg[Level.Obj](instance) }
     val instantiatedParent = if (typeArgs.nonEmpty) LpTerm.App(parentProof, typeArgs) else parentProof
     applyTermArguments(parentVars, child.implicitlyBound, termSubst, sharedVarMap,
-      instantiatedParent, typeInstances.toMap)
+      instantiatedParent, typeInstances.toMap, typeVars)
   }
 
   /** Apply the ordered term arguments after type instantiation. `typeInstances`
-    * maps source type names to complete target types; substitution is simultaneous,
+    * maps source type scopes to complete target types; substitution is simultaneous,
     * so names inside those target types must not be substituted a second time.
     */
   private def applyTermArguments(parentVars: Seq[(Int, Type)],
@@ -140,14 +140,19 @@ object SubstitutionEncoding {
                                  termSubst: Seq[UniTermSubst],
                                  sharedVarMap: Map[Int, String],
                                  parentProof: LpTerm[Level.Obj],
-                                 typeInstances: Map[Name, OlMonoType]): LpTerm[Level.Obj] = {
+                                 typeInstances: Map[Int, OlMonoType],
+                                 typeVars: TypeVariableContext): LpTerm[Level.Obj] = {
     val currentBoundIndices = currentVars.map(_._1)
+    // Parameter types use source scopes, whereas recorded RHSs and retained
+    // variables use target scopes. Resolve source indices to their complete
+    // instances here; do not feed those instances through the substitution again.
+    val sourceTypes = typeVars.copy(instances = typeVars.instances ++ typeInstances)
     val instantiatedVarTypes = parentVars.map { case (index, ty) =>
-      index -> Substitution.substMonoType(type2LP(ty), typeInstances)
+      index -> type2LP(ty, sourceTypes)
     }.toMap
     val termToApply = termSubst.iterator.map { subst =>
       subst.sourceIndex -> encodeSubstitutionRhs(subst.rhs, currentBoundIndices, sharedVarMap,
-        instantiatedVarTypes(subst.sourceIndex))
+        instantiatedVarTypes(subst.sourceIndex), typeVars)
     }.toMap
 
     val orderedTerms: Seq[Arg[Level.Obj]] = parentVars.map { case (sourceIndex, _) =>
@@ -155,8 +160,8 @@ object SubstitutionEncoding {
       termToApply.getOrElse(sourceIndex,
         // A retained variable must be compared at its instantiated type. Its
         // original type can differ even when its term scope is unchanged.
-        currentVars.find { case (index, ty) => index == sourceIndex && type2LP(ty) == expectedType } match {
-          case Some((index, ty)) => Arg.Explicit[Level.Obj](var2Lp(index, ty, sharedVarMap))
+        currentVars.find { case (index, ty) => index == sourceIndex && type2LP(ty, typeVars) == expectedType } match {
+          case Some((index, ty)) => Arg.Explicit[Level.Obj](var2Lp(index, ty, sharedVarMap, typeVars))
           case None =>
             Arg.Explicit[Level.Obj](LpTerm.App[Level.Obj](lpWitnessCon,
               Seq(Arg.ExplicitTypeArg[Level.Obj](expectedType))))
@@ -176,7 +181,8 @@ object SubstitutionEncoding {
   private def encodeSubstitutionRhs(termRhs: UniTermRhs,
                                     currentBoundIndices: Seq[Int],
                                     sharedVarMap: Map[Int, String],
-                                    expectedType: OlMonoType): Arg[Level.Obj] = {
+                                    expectedType: OlMonoType,
+                                    typeVars: TypeVariableContext): Arg[Level.Obj] = {
     termRhs match {
       case UniTermByBoundVar(targetIndex) =>
         if (currentBoundIndices.contains(targetIndex)) {
@@ -192,7 +198,7 @@ object SubstitutionEncoding {
 
       case UniTermByTerm(term, _, _) =>
         val currentVarMap = sharedVarMap.view.filterKeys(currentBoundIndices.contains).toMap
-        val encTargetTerm = term2LP(term, currentVarMap, suppressReduction = false, replaceUnknownVars = true)
+        val encTargetTerm = term2LP(term, currentVarMap, suppressReduction = false, replaceUnknownVars = true, typeVars = typeVars)
         Out.lp_debug_info(s"bind by term $encTargetTerm")
         Arg.Explicit[Level.Obj](encTargetTerm)
     }

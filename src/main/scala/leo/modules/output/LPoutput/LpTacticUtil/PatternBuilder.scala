@@ -6,7 +6,7 @@ import leo.modules.HOLSignature.{&, Choice, Exists, Forall, Impl, Not, TyForall,
 import leo.modules.output.LPoutput.NewLpDatastructures.LpProofScript.{RewritePattern, Side}
 import leo.modules.output.LPoutput.NewLpDatastructures.LpTerm.{Const, Wildcard}
 import leo.modules.output.LPoutput.NewLpDatastructures.TypeEncoding.type2LP
-import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpTerm, LpType, Name, OlMonoType, QName, SymRef, nAry}
+import leo.modules.output.LPoutput.NewLpDatastructures.{Arg, HolBaseTypes, Level, LogicConst, LpTerm, LpType, Name, OlMonoType, TypeVariableContext, QName, SymRef, nAry}
 
 object PatternBuilder {
 
@@ -47,14 +47,16 @@ object PatternBuilder {
     */
   def leoPosition2LpPattern(term: Term,
                             position: Position,
-                            targetPattern: LpTerm[Level.Obj] = DefaultPatternHole): Either[String, PositionPattern] =
-    leoPosition2LpPatternContext(term, position).map { context =>
+                            targetPattern: LpTerm[Level.Obj] = DefaultPatternHole,
+                            typeVars: TypeVariableContext = TypeVariableContext.unrestricted): Either[String, PositionPattern] =
+    leoPosition2LpPatternContext(term, position, typeVars = typeVars).map { context =>
       PositionPattern(context.plugTerm(targetPattern), context.subterm)
     }
 
   private def leoPosition2LpPatternContext(term: Term,
                                            position: Position,
-                                           binderDepth: Int = 0): Either[String, PositionPatternContext] = {
+                                           binderDepth: Int = 0,
+                                           typeVars: TypeVariableContext = TypeVariableContext.unrestricted): Either[String, PositionPatternContext] = {
     if (position == Position.root) {
       Right(PositionPatternContext(identity, term))
     } else {
@@ -64,7 +66,7 @@ object PatternBuilder {
       def descend(selected: Term,
                   wrap: LpTerm[Level.Obj] => LpTerm[Level.Obj],
                   nextBinderDepth: Int = binderDepth): Either[String, PositionPatternContext] =
-        leoPosition2LpPatternContext(selected, position.tail, nextBinderDepth).map { result =>
+        leoPosition2LpPatternContext(selected, position.tail, nextBinderDepth, typeVars).map { result =>
           PositionPatternContext(target => wrap(result.plugTerm(target)), result.subterm)
         }
 
@@ -78,7 +80,7 @@ object PatternBuilder {
           // retain it for bare predicates; explicit lambdas carry their domain.
           val typeArguments: Seq[Arg[Level.Obj]] = argument match {
             case _ :::> _ => Seq.empty
-            case _ => Seq(Arg.ExplicitTypeArg(type2LP(argument.ty._funDomainType)))
+            case _ => Seq(Arg.ExplicitTypeArg(type2LP(argument.ty._funDomainType, typeVars)))
           }
           descend(argument, pattern => LpTerm.App(head, typeArguments :+ Arg.Explicit(pattern)))
         } else invalidPosition("quantifier argument 2")
@@ -108,7 +110,7 @@ object PatternBuilder {
         // Equality has one explicit type argument before its two term
         // arguments, hence the Leo positions 2 and 3.
         case left === right =>
-          val encodedType = type2LP(left.ty)
+          val encodedType = type2LP(left.ty, typeVars)
           currentPosition match {
             case 2 => descend(left, LogicConst.Eq(encodedType, _, Wildcard[Level.Obj]()))
             case 3 => descend(right, LogicConst.Eq(encodedType, Wildcard[Level.Obj](), _))
@@ -116,7 +118,7 @@ object PatternBuilder {
           }
 
         case left !=== right =>
-          val encodedType = type2LP(left.ty)
+          val encodedType = type2LP(left.ty, typeVars)
           currentPosition match {
             case 2 => descend(left, pattern => LogicConst.Not(LogicConst.Eq(encodedType, pattern, Wildcard[Level.Obj]())))
             case 3 => descend(right, pattern => LogicConst.Not(LogicConst.Eq(encodedType, Wildcard[Level.Obj](), pattern)))
@@ -133,7 +135,7 @@ object PatternBuilder {
 
         case ty :::> body =>
           if (currentPosition == -1) {
-            val binder = (Name(s"rwBinder$binderDepth"), Some(LpType.El(type2LP(ty))))
+            val binder = (Name(s"rwBinder$binderDepth"), Some(LpType.El(type2LP(ty, typeVars))))
             descend(body, pattern => LpTerm.Lam[Level.Obj](binder, pattern), binderDepth + 1)
           } else invalidPosition("abstraction body -1")
 
@@ -143,7 +145,7 @@ object PatternBuilder {
         case head ∙ args =>
           val wildcardArguments: Seq[Arg[Level.Obj]] = args.map {
             case Left(_) => Arg.Explicit(Wildcard[Level.Obj]())
-            case Right(ty) => Arg.ExplicitTypeArg(type2LP(ty))
+            case Right(ty) => Arg.ExplicitTypeArg(type2LP(ty, typeVars))
           }
 
           if (currentPosition == 0) {
@@ -176,7 +178,8 @@ object PatternBuilder {
     * The clause matched by the resulting pattern must be encoded without eta
     * contraction or expansion of its term structure.
     */
-  def prepareClausePositionPattern(position: ClausePosition): Either[String, ClausePositionPatternContext] = {
+  def prepareClausePositionPattern(position: ClausePosition,
+                                   typeVars: TypeVariableContext = TypeVariableContext.unrestricted): Either[String, ClausePositionPatternContext] = {
     val clause = position.cl
     if (!clause.lits.isDefinedAt(position.litIdx)) {
       Left(s"RW: Recorded literal index ${position.litIdx} is out of bounds for clause of length ${clause.lits.length}")
@@ -186,9 +189,9 @@ object PatternBuilder {
         Left("RW: Recorded a right-side rewrite occurrence in a non-equational literal")
       } else {
         val selectedSide = Literal.selectSide(literal, position.side)
-        leoPosition2LpPatternContext(selectedSide, position.pos).map { positionContext =>
+        leoPosition2LpPatternContext(selectedSide, position.pos, typeVars = typeVars).map { positionContext =>
           val wrapSide: LpTerm[Level.Obj] => LpTerm[Level.Obj] = if (literal.equational) {
-            val encodedType = type2LP(literal.left.ty)
+            val encodedType = type2LP(literal.left.ty, typeVars)
             if (position.side == Literal.leftSide) {
               term => LogicConst.Eq(encodedType, term, Wildcard[Level.Obj]())
             } else {
